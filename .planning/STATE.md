@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 1 context gathered
-last_updated: "2026-08-26T01:59:33.996Z"
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-08-26T18:13:46.293Z"
 last_activity: 2026-08-26
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 ## Current Position
 
 Phase: 01 (core-format-contract-runtime-decode) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-08-26
 
-Progress: [███░░░░░░░] 33%
+Progress: [███████░░░] 67%
 
 ## Performance Metrics
 
@@ -53,6 +53,7 @@ Progress: [███░░░░░░░] 33%
 
 *Updated after each plan completion*
 | Phase 01-core-format-contract-runtime-decode P03 | 12min | 3 tasks | 11 files |
+| Phase 01-core-format-contract-runtime-decode P01 | 26min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -65,6 +66,10 @@ Recent decisions affecting current work:
 - [Phase 01]: Hand-authored the Unity project skeleton instead of -createProject and skipped the batchmode open — repo root is non-empty and a batchmode open would emit unignored Library/Temp artifacts (pre-existing .gitignore untouched)
 - [Phase 01]: Unity 6 Texture2D has no GraphicsFormat constructor (GraphicsFormat lives in UnityEngine.Experimental.Rendering) — smoke test uses TextureFormat.RGBA32 + linear=true + graphicsFormat assertion
 - [Phase 01]: .gitignore /packages/ (NuGet) ignores Unity Packages/ on case-insensitive macOS; force-added Packages files — downstream 01-01/01-02 additions under Packages/ also need git add -f until tracked
+- [Phase 01]: Corrected the round-trip test: map unit normal -> DirectX texel -> encode -> decode, asserting dot(decoded, normal) >= 1-1e-3 (the plan's texel-direction oracle was mathematically wrong per Pitfall 3)
+- [Phase 01]: Removed -quit from the batchmode test command; it quits before the async test run starts (test framework controls its own exit)
+- [Phase 01]: Modernized Tests/Editor asmdef from legacy optionalUnityReferences to explicit UnityEngine.TestRunner/UnityEditor.TestRunner references
+- [Phase 01]: Added com.unity.test-framework as a direct manifest dependency so UnityEditor.TestRunner loads and -runTests runs
 
 ### Pending Todos
 
@@ -87,6 +92,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-26T01:58:32.891Z
-Stopped at: Phase 1 context gathered
+Last session: 2026-08-26T18:13:38.882Z
+Stopped at: Completed 01-01-PLAN.md
 Resume file: None

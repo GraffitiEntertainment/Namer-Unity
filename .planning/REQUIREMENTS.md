@@ -16,11 +16,11 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### NAMER Encoding
 
-- [ ] **ENCD-01**: Source normals are converted to octahedral RG representation and round-trip within tolerance
-- [ ] **ENCD-02**: Processor packs the NAMER surface texture: R/G = octahedral normal, B = AO, A bit 7 = metallic, A bit 6 = emissive, A bits 0–5 = 6-bit roughness
-- [ ] **ENCD-03**: AO channel is preserved through the packing path
+- [x] **ENCD-01**: Source normals are converted to octahedral RG representation and round-trip within tolerance
+- [x] **ENCD-02**: Processor packs the NAMER surface texture: R/G = octahedral normal, B = AO, A bit 7 = metallic, A bit 6 = emissive, A bits 0–5 = 6-bit roughness
+- [x] **ENCD-03**: AO channel is preserved through the packing path
 - [ ] **ENCD-04**: Packed surface texture is written linear and uncompressed (no sRGB, no BC/ETC/ASTC corruption of packed bits)
-- [ ] **ENCD-05**: NAMER packed textures decode equivalently to the Blender NAMER reference implementation
+- [x] **ENCD-05**: NAMER packed textures decode equivalently to the Blender NAMER reference implementation
 - [ ] **ENCD-06**: Emissive color is stored as material metadata rather than a texture
 
 ### Runtime Shader
@@ -71,7 +71,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Testing
 
-- [ ] **TEST-01**: Automated tests cover octahedral encode/decode, metallic/emissive/roughness bit packing, and AO preservation
+- [x] **TEST-01**: Automated tests cover octahedral encode/decode, metallic/emissive/roughness bit packing, and AO preservation
 - [ ] **TEST-02**: Automated tests cover vertex color fitting, residual reconstruction, and UV seam behavior
 - [ ] **TEST-03**: Automated tests cover generated asset paths and source-asset immutability
 - [ ] **TEST-04**: GPU kernels are verified against the CPU reference implementation (Core assembly) via round-trip tests
@@ -117,11 +117,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INSP-02 | Phase 2 | Pending |
 | INSP-03 | Phase 2 | Pending |
 | INSP-04 | Phase 2 | Pending |
-| ENCD-01 | Phase 1 | Pending |
-| ENCD-02 | Phase 1 | Pending |
-| ENCD-03 | Phase 1 | Pending |
+| ENCD-01 | Phase 1 | Complete |
+| ENCD-02 | Phase 1 | Complete |
+| ENCD-03 | Phase 1 | Complete |
 | ENCD-04 | Phase 1 | Pending |
-| ENCD-05 | Phase 1 | Pending |
+| ENCD-05 | Phase 1 | Complete |
 | ENCD-06 | Phase 1 | Pending |
 | SHDR-01 | Phase 1 | Pending |
 | SHDR-02 | Phase 1 | Pending |
@@ -151,7 +151,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | UI-04 | Phase 3 | Pending |
 | UI-05 | Phase 3 | Pending |
 | UI-06 | Phase 3 | Pending |
-| TEST-01 | Phase 1 | Pending |
+| TEST-01 | Phase 1 | Complete |
 | TEST-02 | Phase 4 | Pending |
 | TEST-03 | Phase 3 | Pending |
 | TEST-04 | Phase 2 | Pending |

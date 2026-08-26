@@ -109,7 +109,7 @@ namespace GraffitiEntertainment.Namer.Editor
             Shader shader = Shader.Find("GraffitiEntertainment.Namer/NAMER");
             if (shader == null)
             {
-                throw new System.Exception("Shader 'GraffitiEntertainment.Namer/NAMER' was not found. Ensure the NAMER shader compiled and imported.");
+                throw new System.InvalidOperationException("Shader 'GraffitiEntertainment.Namer/NAMER' was not found. Ensure the NAMER shader compiled and imported.");
             }
 
             // Golden neutral packed surface texel: octahedral (0.625, 0.625),
@@ -165,7 +165,7 @@ namespace GraffitiEntertainment.Namer.Editor
             Shader urpLitShader = Shader.Find("Universal Render Pipeline/Lit");
             if (urpLitShader == null)
             {
-                throw new System.Exception("Shader 'Universal Render Pipeline/Lit' was not found. Ensure URP is installed.");
+                throw new System.InvalidOperationException("Shader 'Universal Render Pipeline/Lit' was not found. Ensure URP is installed.");
             }
 
             Material urpLitMaterial = new Material(urpLitShader);

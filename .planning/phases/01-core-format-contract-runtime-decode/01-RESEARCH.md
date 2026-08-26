@@ -466,22 +466,27 @@ Golden-vector fixture strategy (D-07): commit as a `[TestCase]`-driven constant 
 | A5 | "Headless" (D-06) means UTF EditMode tests (in-editor, no scene/render), not `dotnet test` outside Unity. | Architecture Patterns | Low — if truly-outside-Unity tests are wanted, Core needs `noEngineReferences:true` + no `Unity.Mathematics`; a larger change. |
 | A6 | Emissive "flag" bit corresponds to the reference's per-pixel `emissive_red > 0.1`; the emissive *color* is the reference's average (luminance `0.299R+0.587G+0.114B > 0.01` non-black average). Unity stores this as `_EmissionColor`. | ENCD-06 | Low — the exact emissive-color computation belongs to Phase 2/3 material inspection; Phase 1 only carries the metadata slot + flag gate. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Exact `_EmissionColor` value source in Unity**
+> All three questions below were open at research time and are now resolved by the phase plan and SKELETON.md. Each is annotated with its resolution.
+
+1. **Exact `_EmissionColor` value source in Unity** — RESOLVED
    - What we know: reference stores *average* emissive RGB (non-black pixels) as metadata; shader gates by flag bit.
    - What's unclear: whether Phase 1 shader should default `_EmissionColor` to a placeholder and defer the average computation to Phase 2/3.
    - Recommendation: Phase 1 exposes `_EmissionColor` (HDR) + `_EMISSION` keyword and gates on the bit; the average-emissive *calculation* is a Phase 2/3 concern.
+   - Resolution: plan 01-02 Task 1 exposes `_EmissionColor` (HDR) + `_EMISSION` keyword gated on the bit; the average-emissive computation is deferred to Phase 2/3.
 
-2. **Tangent-space handedness confirmation**
+2. **Tangent-space handedness confirmation** — RESOLVED
    - What we know: decode un-flips DirectX green to OpenGL-style; Unity `UnpackNormal` does not flip green; reference bakes DirectX.
    - What's unclear: whether the resulting tangent normal sign is byte-correct against URP Lit on all meshes (negative-scale/mirrored-UV edge cases).
    - Recommendation: implement per spec; validate via SHDR-03 with a normal-mapped mesh; one-line flip if inverted.
+   - Resolution: plan 01-02 Task 3 (human checkpoint) performs the SHDR-03 side-by-side visual comparison and documents the one-line `normalTS.y` flip if detail is inverted.
 
-3. **Golden-vector provenance for ENCD-05**
+3. **Golden-vector provenance for ENCD-05** — RESOLVED
    - What we know: hand-derived vectors match the reference formula (validated); ideal is real Blender plugin output.
    - What's unclear: whether the team wants to run the Blender plugin once to capture authoritative fixtures before Phase 1 sign-off.
    - Recommendation: ship hand-derived vectors now (they ARE the reference formula); optionally regenerate from Blender as a follow-up. Low urgency — the formula is exact.
+   - Resolution: SKELETON.md + plan 01-01 Task 2 ship the hand-derived golden vectors as `[TestCase]` constants in `BlenderGoldenVectorTests.cs` (they ARE the reference formula); regenerating from Blender is an optional follow-up.
 
 ## Environment Availability
 

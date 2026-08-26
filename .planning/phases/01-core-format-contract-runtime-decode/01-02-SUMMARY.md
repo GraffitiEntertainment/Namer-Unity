@@ -66,6 +66,7 @@ completed: 2026-08-26
 
 1. **Task 1: Write NamerSurface.hlsl + NAMER.shader** - `5855c70` (feat)
 2. **Task 2: URP smoke setup + PlayMode asmdef modernization** - `5248657` (feat)
+3. **Fix: add URP assembly refs to Editor asmdef** - `ac0f97f` (fix)
 
 **Task 3 (checkpoint:human-verify) NOT committed** — automated portion (smoke scene generation) is delivered via `NamerSmokeSetup.cs` (Task 2); the visual comparison awaits the human.
 
@@ -110,10 +111,18 @@ completed: 2026-08-26
 - **Files modified:** none (git-index only)
 - **Committed in:** `5855c70` (Task 1)
 
+**4. [Rule 3 - Blocking] Editor asmdef missing URP assembly references (CS0234)**
+
+- **Found during:** Task 3 checkpoint (user ran `Tools/NAMER/Create Smoke Scene` in the open editor)
+- **Issue:** `NamerSmokeSetup.cs` references `UnityEngine.Rendering.Universal` types (`UniversalRenderPipelineAsset`, `UniversalRendererData`), but `GraffitiEntertainment.Namer.Editor.asmdef` did not reference the URP assemblies, so the editor compiled it with `error CS0234: The type or namespace name 'Universal' does not exist in the namespace 'UnityEngine.Rendering'`.
+- **Fix:** Added `Unity.RenderPipelines.Universal.Runtime` and `Unity.RenderPipelines.Core.Runtime` (for the `ScriptableRendererData` parameter type of `UniversalRenderPipelineAsset.Create`) to the Editor asmdef `references`. The Runtime asmdef needs no change (no Runtime C# references URP types; the shader is HLSL).
+- **Files modified:** `Packages/com.graffitientertainment.namer/Editor/GraffitiEntertainment.Namer.Editor.asmdef`
+- **Committed in:** `ac0f97f` (fix)
+
 ---
 
-**Total deviations:** 3 (2 plan inaccuracy/refinement, 1 blocking git-index fix)
-**Impact on plan:** All necessary for correctness. The blend-state fix is the only functional change; it matches URP's own Lit implementation. No scope creep.
+**Total deviations:** 4 (2 plan inaccuracy/refinement, 2 blocking)
+**Impact on plan:** All necessary for correctness. The blend-state fix and the asmdef reference fix are functional; the git-index fix was process-only. No scope creep.
 
 ## Issues Encountered
 
@@ -147,7 +156,8 @@ None — no external service configuration. The one manual step is the Task 3 vi
 
 - Task 1 commit `5855c70` verified present (2 shader files, 683 insertions, no deletions).
 - Task 2 commit `5248657` verified present (NamerSmokeSetup.cs + Runtime asmdef, 162 insertions / 4 deletions).
-- Pre-existing staged files (`.gitignore`, `.idea/**`, `NAMER_UNITY_PLUGIN_PRD.md`, `Namer-Unity.sln`) remain staged and were NOT swept into either commit.
+- Fix commit `ac0f97f` verified present (Editor asmdef URP assembly refs, 6 insertions / 1 deletion).
+- Pre-existing staged files (`.gitignore`, `.idea/**`, `NAMER_UNITY_PLUGIN_PRD.md`, `Namer-Unity.sln`) remain staged and were NOT swept into any commit.
 - Shader grep assertions verified: `Shader "GraffitiEntertainment.Namer/NAMER"` (first line), `UniversalFragmentPBR`/`NamerOctahedralDecode`/`vertexColor`/`_SurfaceMap`/`_EmissionColor`, `1.0 - p.y * S`, `1.0 + sqrt(disc)`, `smoothness = 1.0 - roughness`, and all 5 `LightMode` tags present.
 - NOT verified (documented blocker): shader compile + headless PlayMode test, blocked by the open interactive Unity Editor.
 

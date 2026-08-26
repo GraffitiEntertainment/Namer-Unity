@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 01-02 Tasks 1-2; stopped at Task 3 checkpoint (human visual verify — SHDR-03 not self-approved)
-last_updated: "2026-08-26T18:41:14.003Z"
+last_updated: "2026-08-26T19:05:31.635Z"
 last_activity: 2026-08-26
 progress:
   total_phases: 5
@@ -72,6 +72,7 @@ Recent decisions affecting current work:
 - [Phase 01]: Added com.unity.test-framework as a direct manifest dependency so UnityEditor.TestRunner loads and -runTests runs
 - [Phase 01]: Used URP property-driven blend state (Blend[_SrcBlend][_DstBlend] + _Surface) instead of '#if _SURFACE_TYPE_TRANSPARENT' around Blend — ShaderLab render state cannot be keyword-gated
 - [Phase 01]: Modernized the PlayMode test asmdef (legacy optionalUnityReferences -> explicit UnityEngine.TestRunner reference) to match the 01-01 Editor test asmdef fix
+- [Phase 01]: Editor asmdef needs Unity.RenderPipelines.Universal.Runtime + Unity.RenderPipelines.Core.Runtime references when editor C# uses URP types (the shader HLSL does NOT need asmdef refs)
 
 ### Pending Todos
 

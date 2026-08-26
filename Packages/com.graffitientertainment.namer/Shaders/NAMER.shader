@@ -11,19 +11,25 @@ Shader "GraffitiEntertainment.Namer/NAMER"
 
         _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
 
-        [ToggleUI] _ALPHATEST_ON("Alpha Clipping", Float) = 0.0
-        [ToggleUI] _EMISSION("Emission", Float) = 0.0
-        [ToggleUI] _SURFACE_TYPE_TRANSPARENT("Transparent", Float) = 0.0
+        // Keyword-setting toggles: each checkbox writes its float AND sets the
+        // matching shader keyword, so the keyword-gated code paths (AlphaDiscard,
+        // emission, transparency) are reachable from the default inspector
+        // without a ShaderGUI. The Transparent Surface toggle drives _Surface
+        // (read by OutputAlpha via IsSurfaceTypeTransparent) and the keyword.
+        [Toggle(_ALPHATEST_ON)] _ALPHATEST_ON("Alpha Clipping", Float) = 0.0
+        [Toggle(_EMISSION)] _EMISSION("Emission", Float) = 0.0
+        [Toggle(_SURFACE_TYPE_TRANSPARENT)] _Surface("Transparent Surface", Float) = 0.0
 
-        // Blending state (driven by the material surface type, URP Lit conventions)
-        [HideInInspector] _Surface("__surface", Float) = 0.0
-        [HideInInspector] _Blend("__blend", Float) = 0.0
-        [HideInInspector] _Cull("__cull", Float) = 2.0
-        [HideInInspector] _SrcBlend("__src", Float) = 1.0
-        [HideInInspector] _DstBlend("__dst", Float) = 0.0
+        // Blending state, property-driven like URP Lit (Blend[_SrcBlend][_DstBlend]).
+        // Defaults render opaque (One/Zero, ZWrite On). For a transparent material
+        // enable Transparent Surface above, then set Src Blend = SrcAlpha,
+        // Dst Blend = OneMinusSrcAlpha and ZWrite = Off.
+        [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlend("Src Blend", Float) = 1.0
+        [Enum(UnityEngine.Rendering.BlendMode)] _DstBlend("Dst Blend", Float) = 0.0
         [HideInInspector] _SrcBlendAlpha("__srcA", Float) = 1.0
         [HideInInspector] _DstBlendAlpha("__dstA", Float) = 0.0
-        [HideInInspector] _ZWrite("__zw", Float) = 1.0
+        [Enum(Off,0,On,1)] _ZWrite("ZWrite", Float) = 1.0
+        [HideInInspector] _Cull("__cull", Float) = 2.0
         [HideInInspector] _AlphaToMask("__alphaToMask", Float) = 0.0
     }
 

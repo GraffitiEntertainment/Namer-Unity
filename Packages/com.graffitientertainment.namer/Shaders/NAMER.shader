@@ -2,7 +2,9 @@ Shader "GraffitiEntertainment.Namer/NAMER"
 {
     Properties
     {
-        [MainTexture] _SurfaceMap("Surface (Packed)", 2D) = "white" {}
+        // Tiling/offset comes from _BaseResidualMap's ST (all passes transform UVs
+        // with it); _SurfaceMap is sampled with the same UVs and shows no ST UI.
+        [NoScaleOffset] [MainTexture] _SurfaceMap("Surface (Packed)", 2D) = "white" {}
         [NoScaleOffset] _BaseResidualMap("Base/Residual", 2D) = "white" {}
 
         [MainColor] _BaseColor("Color", Color) = (1,1,1,1)

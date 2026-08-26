@@ -11,7 +11,7 @@ The journey moves from the format contract outward. First we lock the NAMER pack
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 1: Core Format Contract + Runtime Decode** - Define the packed format in pure-C# Core and decode it in the URP runtime shader
+- [x] **Phase 1: Core Format Contract + Runtime Decode** - Define the packed format in pure-C# Core and decode it in the URP runtime shader (completed 2026-08-26)
 - [ ] **Phase 2: Source Inspection + GPU Compute Pipeline** - Read source materials and produce normalized + packed textures in GPU compute
 - [ ] **Phase 3: Asset Generation + Editor Workflow + Preview** - Generate NAMER assets non-destructively from an editor window with preview
 - [ ] **Phase 4: Vertex-Color Decomposition + Residual** - Fit low-frequency color into vertex colors with an adaptive residual texture
@@ -46,7 +46,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 01-02: URP NAMER runtime decode shader with Blender-equivalence verification
+- [x] 01-02: URP NAMER runtime decode shader with Blender-equivalence verification
 
 ### Phase 2: Source Inspection + GPU Compute Pipeline
 
@@ -143,7 +143,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Core Format Contract + Runtime Decode | 2/3 | In Progress|  |
+| 1. Core Format Contract + Runtime Decode | 3/3 | Complete   | 2026-08-26 |
 | 2. Source Inspection + GPU Compute Pipeline | 0/3 | Not started | - |
 | 3. Asset Generation + Editor Workflow + Preview | 0/3 | Not started | - |
 | 4. Vertex-Color Decomposition + Residual | 0/3 | Not started | - |

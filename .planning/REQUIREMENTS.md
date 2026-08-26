@@ -19,16 +19,16 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **ENCD-01**: Source normals are converted to octahedral RG representation and round-trip within tolerance
 - [x] **ENCD-02**: Processor packs the NAMER surface texture: R/G = octahedral normal, B = AO, A bit 7 = metallic, A bit 6 = emissive, A bits 0–5 = 6-bit roughness
 - [x] **ENCD-03**: AO channel is preserved through the packing path
-- [ ] **ENCD-04**: Packed surface texture is written linear and uncompressed (no sRGB, no BC/ETC/ASTC corruption of packed bits)
+- [x] **ENCD-04**: Packed surface texture is written linear and uncompressed (no sRGB, no BC/ETC/ASTC corruption of packed bits)
 - [x] **ENCD-05**: NAMER packed textures decode equivalently to the Blender NAMER reference implementation
-- [ ] **ENCD-06**: Emissive color is stored as material metadata rather than a texture
+- [x] **ENCD-06**: Emissive color is stored as material metadata rather than a texture
 
 ### Runtime Shader
 
-- [ ] **SHDR-01**: URP NAMER runtime shader decodes octahedral normals, AO, metallic, emissive flag, and 6-bit roughness from the packed texture
-- [ ] **SHDR-02**: Shader supports base/residual texture with vertex-color reconstruction (`BaseColor ≈ VertexColorInterpolation × ResidualColor`)
-- [ ] **SHDR-03**: Shader renders comparably to URP Lit on the same source material (development comparison)
-- [ ] **SHDR-04**: Shader supports emissive color and transparency where supported by the source
+- [x] **SHDR-01**: URP NAMER runtime shader decodes octahedral normals, AO, metallic, emissive flag, and 6-bit roughness from the packed texture
+- [x] **SHDR-02**: Shader supports base/residual texture with vertex-color reconstruction (`BaseColor ≈ VertexColorInterpolation × ResidualColor`)
+- [x] **SHDR-03**: Shader renders comparably to URP Lit on the same source material (development comparison)
+- [x] **SHDR-04**: Shader supports emissive color and transparency where supported by the source
 
 ### Base Texture Normalization
 
@@ -120,13 +120,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ENCD-01 | Phase 1 | Complete |
 | ENCD-02 | Phase 1 | Complete |
 | ENCD-03 | Phase 1 | Complete |
-| ENCD-04 | Phase 1 | Pending |
+| ENCD-04 | Phase 1 | Complete |
 | ENCD-05 | Phase 1 | Complete |
-| ENCD-06 | Phase 1 | Pending |
-| SHDR-01 | Phase 1 | Pending |
-| SHDR-02 | Phase 1 | Pending |
-| SHDR-03 | Phase 1 | Pending |
-| SHDR-04 | Phase 1 | Pending |
+| ENCD-06 | Phase 1 | Complete |
+| SHDR-01 | Phase 1 | Complete |
+| SHDR-02 | Phase 1 | Complete |
+| SHDR-03 | Phase 1 | Complete |
+| SHDR-04 | Phase 1 | Complete |
 | NORM-01 | Phase 2 | Pending |
 | NORM-02 | Phase 2 | Pending |
 | NORM-03 | Phase 2 | Pending |

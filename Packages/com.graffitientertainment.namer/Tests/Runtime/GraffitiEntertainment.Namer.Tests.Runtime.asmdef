@@ -1,15 +1,19 @@
 {
   "name": "GraffitiEntertainment.Namer.Tests.Runtime",
   "rootNamespace": "GraffitiEntertainment.Namer.Tests",
-  "references": ["GraffitiEntertainment.Namer.Core", "GraffitiEntertainment.Namer.Runtime", "Unity.Mathematics"],
+  "references": [
+    "UnityEngine.TestRunner",
+    "GraffitiEntertainment.Namer.Core",
+    "GraffitiEntertainment.Namer.Runtime",
+    "Unity.Mathematics"
+  ],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
   "overrideReferences": true,
   "precompiledReferences": ["nunit.framework.dll"],
-  "autoReferenced": false,
+  "autoReferenced": true,
   "defineConstraints": ["UNITY_INCLUDE_TESTS"],
   "versionDefines": [],
-  "noEngineReferences": false,
-  "optionalUnityReferences": ["TestAssemblies"]
+  "noEngineReferences": false
 }

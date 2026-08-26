@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 1 context gathered
-last_updated: "2026-08-26T01:40:49.765Z"
-last_activity: 2026-08-26 -- Phase 1 planning complete
+last_updated: "2026-08-26T01:59:33.996Z"
+last_activity: 2026-08-26
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 3
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-25)
 
 **Core value:** A user can select a textured FBX in Unity, run `Process with NAMER`, and get a correctly rendering, source-compatible NAMER material without ever modifying the imported source assets or leaving the Unity Editor.
-**Current focus:** Phase 1 — Core Format Contract + Runtime Decode
+**Current focus:** Phase 01 — core-format-contract-runtime-decode
 
 ## Current Position
 
-Phase: 1 of 5 (Core Format Contract + Runtime Decode)
-Plan: 0 of 3 in current phase
+Phase: 01 (core-format-contract-runtime-decode) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-08-26 -- Phase 1 planning complete
+Last activity: 2026-08-26
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [███░░░░░░░] 33%
 
 ## Performance Metrics
 
@@ -52,6 +52,7 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: -
 
 *Updated after each plan completion*
+| Phase 01-core-format-contract-runtime-decode P03 | 12min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -61,6 +62,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
 - (roadmap): Consolidated the research SUMMARY's 6-phase suggestion into 5 phases to fit coarse granularity; the empty "hardening" phase (batch/determinism/multi-platform) carried no v1 requirement and was folded into relevant phases' success criteria. Batch (BATCH-01) remains v2.
+- [Phase 01]: Hand-authored the Unity project skeleton instead of -createProject and skipped the batchmode open — repo root is non-empty and a batchmode open would emit unignored Library/Temp artifacts (pre-existing .gitignore untouched)
+- [Phase 01]: Unity 6 Texture2D has no GraphicsFormat constructor (GraphicsFormat lives in UnityEngine.Experimental.Rendering) — smoke test uses TextureFormat.RGBA32 + linear=true + graphicsFormat assertion
+- [Phase 01]: .gitignore /packages/ (NuGet) ignores Unity Packages/ on case-insensitive macOS; force-added Packages files — downstream 01-01/01-02 additions under Packages/ also need git add -f until tracked
 
 ### Pending Todos
 
@@ -83,6 +87,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-26T00:18:13.295Z
+Last session: 2026-08-26T01:58:32.891Z
 Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-core-format-contract-runtime-decode/01-CONTEXT.md
+Resume file: None

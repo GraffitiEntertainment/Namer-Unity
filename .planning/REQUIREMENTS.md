@@ -78,7 +78,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Packaging
 
-- [ ] **PKG-01**: Plugin ships as a reusable UPM package (`com.graffitientertainment.namer`) with Runtime/, Editor/, Shaders/, Compute/, Tests/ layout and assembly definitions
+- [x] **PKG-01**: Plugin ships as a reusable UPM package (`com.graffitientertainment.namer`) with Runtime/, Editor/, Shaders/, Compute/, Tests/ layout and assembly definitions
 
 ## v2 Requirements
 
@@ -155,7 +155,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TEST-02 | Phase 4 | Pending |
 | TEST-03 | Phase 3 | Pending |
 | TEST-04 | Phase 2 | Pending |
-| PKG-01 | Phase 1 | Pending |
+| PKG-01 | Phase 1 | Complete |
 
 **Coverage:**
 - v1 requirements: 43 total

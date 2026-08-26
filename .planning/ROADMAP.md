@@ -38,7 +38,7 @@ The journey moves from the format contract outward. First we lock the NAMER pack
 Plans:
 **Wave 1**
 
-- [ ] 01-03: UPM package skeleton (Runtime/Editor/Shader/Compute/Test asmdefs) + round-trip test harness
+- [x] 01-03: UPM package skeleton (Runtime/Editor/Shader/Compute/Test asmdefs) + round-trip test harness
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -143,7 +143,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Core Format Contract + Runtime Decode | 0/3 | Not started | - |
+| 1. Core Format Contract + Runtime Decode | 1/3 | In Progress|  |
 | 2. Source Inspection + GPU Compute Pipeline | 0/3 | Not started | - |
 | 3. Asset Generation + Editor Workflow + Preview | 0/3 | Not started | - |
 | 4. Vertex-Color Decomposition + Residual | 0/3 | Not started | - |

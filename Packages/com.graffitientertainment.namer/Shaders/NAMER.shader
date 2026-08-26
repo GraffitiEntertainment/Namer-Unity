@@ -110,8 +110,6 @@ Shader "GraffitiEntertainment.Namer/NAMER"
 
             // The NAMER shader always decodes a tangent-space normal from the packed
             // surface texture, so the tangent interpolator is always required.
-            #define REQUIRES_WORLD_SPACE_TANGENT_INTERPOLATOR
-
             struct Attributes
             {
                 float4 positionOS   : POSITION;

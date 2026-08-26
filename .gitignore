@@ -1,0 +1,16 @@
+bin/
+obj/
+riderModule.iml
+/_ReSharper.Caches/
+
+# Unity generated
+[Ll]ibrary/
+[Tt]emp/
+[Ll]ogs/
+[Uu]serSettings/
+[Mm]emoryCaptures/
+[Rr]ecordings/
+
+# Unity builds
+[Bb]uild/
+[Bb]uilds/

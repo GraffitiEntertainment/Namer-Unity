@@ -39,5 +39,23 @@ namespace GraffitiEntertainment.Namer.Tests
             // Packed alpha: exact integer bits.
             Assert.AreEqual(expAlpha, (int)NamerFormat.PackAlphaBits(metallic, emissive, roughness));
         }
+
+        /// <summary>
+        /// ENCD-05 standalone decode golden: the neutral DirectX texel (0.625, 0.625)
+        /// must decode to exactly +Z (hand-derived: p = (0.25, 0.25, 0.5), S = 4,
+        /// n = (p.x*S-1, 1-p.y*S, p.z*S-1) = (0, 0, 1)). Covers <see cref="NamerFormat.OctahedralDecode"/>
+        /// directly instead of only through round-trips.
+        /// </summary>
+        [Test]
+        public void GoldenDecode_NeutralOctahedralTexelRecoversPlusZ()
+        {
+            float3 decoded = NamerFormat.OctahedralDecode(new float2(0.625f, 0.625f));
+
+            Assert.AreEqual(0.0, (double)decoded.x, 1e-4, "decode x must be 0 for the neutral texel");
+            Assert.AreEqual(0.0, (double)decoded.y, 1e-4, "decode y must be 0 for the neutral texel");
+            Assert.AreEqual(1.0, (double)decoded.z, 1e-4, "decode z must be +1 for the neutral texel");
+            Assert.GreaterOrEqual((double)math.dot(decoded, new float3(0.0f, 0.0f, 1.0f)), 1.0 - 1e-3,
+                "decoded direction must be +Z");
+        }
     }
 }

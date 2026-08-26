@@ -147,7 +147,7 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             // Prompt before closing the open scene: NewScene(Single) would otherwise
             // silently discard unsaved scene modifications with no undo path.
-            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsToContinue())
+            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
             {
                 Debug.Log("[NAMER] Smoke scene creation cancelled; the open scene was left untouched.");
                 return false;

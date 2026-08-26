@@ -519,21 +519,24 @@ shader.Dispatch(kernel, (w + 7) / 8, (h + 7) / 8, 1);
 | A4 | DX11 groupshared = 32 KB (D3D11 `TGSM` = 8192 regs × 4 B) — from training, not read from a Microsoft page this session | Common Pitfalls | Low — DX11 not exercised this phase; zero groupshared used |
 | A5 | `AsyncGPUReadback` works in EditMode (non-PlayMode) tests as long as a GPU context exists | Code Examples | Medium — if EditMode readback behaves differently than PlayMode, the golden tests must move to a `[UnityTest]` PlayMode pattern or use `WaitForCompletion`; flag for the first kernel test to confirm early |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should the inspector bake `_OcclusionStrength` into the NAMER AO, or take the raw AO map value?**
    - What we know: URP Lit `SampleOcclusion` returns `LerpWhiteTo(occ, _OcclusionStrength)` = lerp(1, occ, strength); the authored AO map is the `.g` channel. NAMER stores a single AO value in the surface B channel.
    - What's unclear: whether "AO" means the authored map or the strength-blended result.
    - Recommendation: take the **raw AO map value** and let the NAMER runtime `_OcclusionStrength` control the blend (consistent with the existing `NamerSurface.hlsl` which applies `_OcclusionStrength` at decode). Leave this as Claude's discretion, but document the choice in the model so Phase 3's material does not double-apply the strength.
+   - **Resolution (plans 02-01/02-02):** use the **raw AO map value** (the `_OcclusionMap.g` texel) as the NAMER AO; the runtime `_OcclusionStrength` blend stays at decode in `NamerSurface.hlsl`; `OcclusionStrength` is recorded as metadata for Phase 3. The cleaning strength is a separate `AoUnmultiplyStrength` model field (default 1.0), distinct from `_OcclusionStrength`.
 
 2. **Are GPU golden fixtures committed as assets/JSON?**
    - What we know: D-14 defines comparison semantics; fixtures are Claude's discretion with researcher input.
    - Recommendation: keep the golden fixtures **procedural** (a small deterministic input texture built in the test, compared against `NamerFormat` computed in-memory) rather than committing binary assets — avoids GUID churn and keeps the oracle in Core. If byte-exact fixtures are wanted, commit a tiny JSON of packed expected values (the Phase 1 golden-vector pattern already uses inline `[TestCase]` values, which is sufficient).
+   - **Resolution (plan 02-03):** golden fixtures are **procedural** — deterministic inputs built in-test, compared against `NamerFormat` computed in-memory (Phase-1 inline golden-vector style). No committed binary/JSON assets.
 
 3. **Does EditMode `AsyncGPUReadback` behave identically to PlayMode?**
    - What we know: `WaitForCompletion` exists; `WaitUntil(() => req.done)` is the standard async pattern. STATE.md notes the Phase 1 PlayMode smoke test was blocked by the interactive editor holding the project lock (headless `-batchmode` cannot run while the editor is open).
    - What's unclear: whether the golden tests run cleanly in EditMode vs needing PlayMode.
    - Recommendation: land `SourceInspectorTests` (no GPU) first to establish the EditMode harness, then the first GPU golden test as a spike to confirm EditMode readback — if it flakes, switch golden tests to PlayMode `[UnityTest]` and keep the CPU `SourceInspector` coverage in EditMode.
+   - **Resolution (plan 02-03 contingency):** `WaitForCompletion` is the robust EditMode readback path for tiny 1x1 reads; `WaitUntil(() => req.done)` for multi-texel reads. If EditMode readback errors/flakes in `-batchmode`, switch the GPU tests to PlayMode `[UnityTest]` and keep CPU `SourceInspector` coverage in EditMode. (Assumption A5 remains the one genuinely-open item.)
 
 ## Environment Availability
 

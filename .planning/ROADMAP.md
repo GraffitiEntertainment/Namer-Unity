@@ -65,8 +65,16 @@ Plans:
 
 Plans:
 
+**Wave 1**
+
 - [ ] 02-01: SourceInspector — material/map/scalar inspection with defaults
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 02-02: Compute dispatch harness + ComputeTexturePool + normalization/octahedral/packing kernels
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 02-03: GPU golden tests vs Core reference + cross-platform compute smoke test
 
 ### Phase 3: Asset Generation + Editor Workflow + Preview

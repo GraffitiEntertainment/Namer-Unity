@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-08-26T18:13:46.293Z"
+stopped_at: Completed 01-02 Tasks 1-2; stopped at Task 3 checkpoint (human visual verify — SHDR-03 not self-approved)
+last_updated: "2026-08-26T18:41:14.003Z"
 last_activity: 2026-08-26
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
-  completed_plans: 2
-  percent: 0
+  completed_plans: 3
+  percent: 20
 ---
 
 # Project State
@@ -70,6 +70,8 @@ Recent decisions affecting current work:
 - [Phase 01]: Removed -quit from the batchmode test command; it quits before the async test run starts (test framework controls its own exit)
 - [Phase 01]: Modernized Tests/Editor asmdef from legacy optionalUnityReferences to explicit UnityEngine.TestRunner/UnityEditor.TestRunner references
 - [Phase 01]: Added com.unity.test-framework as a direct manifest dependency so UnityEditor.TestRunner loads and -runTests runs
+- [Phase 01]: Used URP property-driven blend state (Blend[_SrcBlend][_DstBlend] + _Surface) instead of '#if _SURFACE_TYPE_TRANSPARENT' around Blend — ShaderLab render state cannot be keyword-gated
+- [Phase 01]: Modernized the PlayMode test asmdef (legacy optionalUnityReferences -> explicit UnityEngine.TestRunner reference) to match the 01-01 Editor test asmdef fix
 
 ### Pending Todos
 
@@ -81,6 +83,7 @@ None yet.
 - [Phase 3]: `PreviewRenderUtility` API surface returned 404 during research — confirm signatures during planning.
 - [Phase 4]: Vertex-color barycentric least-squares + seam-splitting is the highest algorithmic risk; no single authoritative reference.
 - [Phase 5]: Palette extraction and edge-preserving filter specifics are sparse in Unity docs.
+- [Phase 01]: Interactive Unity Editor (PID 11637) holds the project lock, blocking the headless PlayMode smoke test (-batchmode) — close the editor or run the PlayMode test in-editor to unblock 01-02 Task 3
 
 ## Deferred Items
 
@@ -92,6 +95,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-26T18:13:38.882Z
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-08-26T18:40:54.574Z
+Stopped at: Completed 01-02 Tasks 1-2; stopped at Task 3 checkpoint (human visual verify — SHDR-03 not self-approved)
 Resume file: None

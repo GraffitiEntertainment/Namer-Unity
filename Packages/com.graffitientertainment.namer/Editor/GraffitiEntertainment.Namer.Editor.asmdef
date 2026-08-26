@@ -1,7 +1,12 @@
 {
   "name": "GraffitiEntertainment.Namer.Editor",
   "rootNamespace": "GraffitiEntertainment.Namer.Editor",
-  "references": ["GraffitiEntertainment.Namer.Core", "GraffitiEntertainment.Namer.Runtime"],
+  "references": [
+    "GraffitiEntertainment.Namer.Core",
+    "GraffitiEntertainment.Namer.Runtime",
+    "Unity.RenderPipelines.Universal.Runtime",
+    "Unity.RenderPipelines.Core.Runtime"
+  ],
   "includePlatforms": ["Editor"],
   "excludePlatforms": [],
   "allowUnsafeCode": false,

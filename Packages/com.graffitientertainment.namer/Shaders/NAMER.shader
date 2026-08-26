@@ -564,7 +564,11 @@ Shader "GraffitiEntertainment.Namer/NAMER"
 
                 UnityMetaInput metaInput;
                 metaInput.Albedo = baseResidual.rgb * _BaseColor.rgb;   // vertex color unavailable in Meta pass
+#ifdef _EMISSION
                 metaInput.Emission = _EmissionColor.rgb * (emissive ? 1.0 : 0.0);
+#else
+                metaInput.Emission = half3(0.0, 0.0, 0.0);   // keyword off: never bake the stale HDR color
+#endif
 
                 return UnityMetaFragment(metaInput);
             }

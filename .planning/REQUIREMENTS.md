@@ -113,12 +113,56 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (to be filled by roadmap) | | |
+| INSP-01 | Phase 2 | Pending |
+| INSP-02 | Phase 2 | Pending |
+| INSP-03 | Phase 2 | Pending |
+| INSP-04 | Phase 2 | Pending |
+| ENCD-01 | Phase 1 | Pending |
+| ENCD-02 | Phase 1 | Pending |
+| ENCD-03 | Phase 1 | Pending |
+| ENCD-04 | Phase 1 | Pending |
+| ENCD-05 | Phase 1 | Pending |
+| ENCD-06 | Phase 1 | Pending |
+| SHDR-01 | Phase 1 | Pending |
+| SHDR-02 | Phase 1 | Pending |
+| SHDR-03 | Phase 1 | Pending |
+| SHDR-04 | Phase 1 | Pending |
+| NORM-01 | Phase 2 | Pending |
+| NORM-02 | Phase 2 | Pending |
+| NORM-03 | Phase 2 | Pending |
+| VCOL-01 | Phase 4 | Pending |
+| VCOL-02 | Phase 4 | Pending |
+| VCOL-03 | Phase 4 | Pending |
+| VCOL-04 | Phase 4 | Pending |
+| VCOL-05 | Phase 4 | Pending |
+| STYL-01 | Phase 5 | Pending |
+| STYL-02 | Phase 5 | Pending |
+| STYL-03 | Phase 5 | Pending |
+| STYL-04 | Phase 5 | Pending |
+| STYL-05 | Phase 5 | Pending |
+| STYL-06 | Phase 5 | Pending |
+| GEN-01 | Phase 3 | Pending |
+| GEN-02 | Phase 3 | Pending |
+| GEN-03 | Phase 3 | Pending |
+| GEN-04 | Phase 3 | Pending |
+| UI-01 | Phase 3 | Pending |
+| UI-02 | Phase 3 | Pending |
+| UI-03 | Phase 3 | Pending |
+| UI-04 | Phase 3 | Pending |
+| UI-05 | Phase 3 | Pending |
+| UI-06 | Phase 3 | Pending |
+| TEST-01 | Phase 1 | Pending |
+| TEST-02 | Phase 4 | Pending |
+| TEST-03 | Phase 3 | Pending |
+| TEST-04 | Phase 2 | Pending |
+| PKG-01 | Phase 1 | Pending |
 
 **Coverage:**
-- v1 requirements: 40 total
-- Mapped to phases: 0
-- Unmapped: 40 ⚠️
+- v1 requirements: 43 total
+- Mapped to phases: 43
+- Unmapped: 0 ✓
+
+Note: the previous header stated "40 total" but the v1 sections contain 43 numbered requirements; this traceability maps all 43.
 
 ---
 *Requirements defined: 2026-08-25*

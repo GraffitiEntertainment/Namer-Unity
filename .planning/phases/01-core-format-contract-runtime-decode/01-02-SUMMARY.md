@@ -67,6 +67,7 @@ completed: 2026-08-26
 1. **Task 1: Write NamerSurface.hlsl + NAMER.shader** - `5855c70` (feat)
 2. **Task 2: URP smoke setup + PlayMode asmdef modernization** - `5248657` (feat)
 3. **Fix: add URP assembly refs to Editor asmdef** - `ac0f97f` (fix)
+4. **Fix: OUTPUT_SH4 → OUTPUT_SH (shader compile)** - `25cc48e` (fix)
 
 **Task 3 (checkpoint:human-verify) NOT committed** — automated portion (smoke scene generation) is delivered via `NamerSmokeSetup.cs` (Task 2); the visual comparison awaits the human.
 
@@ -119,10 +120,18 @@ completed: 2026-08-26
 - **Files modified:** `Packages/com.graffitientertainment.namer/Editor/GraffitiEntertainment.Namer.Editor.asmdef`
 - **Committed in:** `ac0f97f` (fix)
 
+**5. [Rule 3 - Blocking] Shader compile error: `OUTPUT_SH4` too few arguments (pink error shader)**
+
+- **Found during:** Task 3 checkpoint (user re-ran after asmdef fix; material rendered pink)
+- **Issue:** The ForwardLit pass called `OUTPUT_SH4(...)` with 4 arguments, but under the `LIGHTMAP_ON` variant (and the APV variants) `OUTPUT_SH4` is a 5-parameter macro — `error: 'OUTPUT_SH4': Too few arguments to a macro call at NAMER.shader(213)`. The failed compile dropped the material to the pink error shader.
+- **Fix:** Switched to `OUTPUT_SH(output.normalWS.xyz, output.vertexSH)` — always a 2-parameter macro in both `LIGHTMAP_ON` and non-lightmap branches — which samples `SampleSHVertex` (the same legacy non-APV SH path that URP Lit's `SampleProbeSHVertex` falls back to).
+- **Files modified:** `Packages/com.graffitientertainment.namer/Shaders/NAMER.shader`
+- **Committed in:** `25cc48e` (fix)
+
 ---
 
-**Total deviations:** 4 (2 plan inaccuracy/refinement, 2 blocking)
-**Impact on plan:** All necessary for correctness. The blend-state fix and the asmdef reference fix are functional; the git-index fix was process-only. No scope creep.
+**Total deviations:** 5 (2 plan inaccuracy/refinement, 3 blocking)
+**Impact on plan:** All necessary for correctness. The blend-state fix, asmdef reference fix, and `OUTPUT_SH` macro fix are functional; the git-index fix was process-only. No scope creep.
 
 ## Issues Encountered
 
@@ -157,6 +166,7 @@ None — no external service configuration. The one manual step is the Task 3 vi
 - Task 1 commit `5855c70` verified present (2 shader files, 683 insertions, no deletions).
 - Task 2 commit `5248657` verified present (NamerSmokeSetup.cs + Runtime asmdef, 162 insertions / 4 deletions).
 - Fix commit `ac0f97f` verified present (Editor asmdef URP assembly refs, 6 insertions / 1 deletion).
+- Fix commit `25cc48e` verified present (OUTPUT_SH4 → OUTPUT_SH, 1 insertion / 1 deletion).
 - Pre-existing staged files (`.gitignore`, `.idea/**`, `NAMER_UNITY_PLUGIN_PRD.md`, `Namer-Unity.sln`) remain staged and were NOT swept into any commit.
 - Shader grep assertions verified: `Shader "GraffitiEntertainment.Namer/NAMER"` (first line), `UniversalFragmentPBR`/`NamerOctahedralDecode`/`vertexColor`/`_SurfaceMap`/`_EmissionColor`, `1.0 - p.y * S`, `1.0 + sqrt(disc)`, `smoothness = 1.0 - roughness`, and all 5 `LightMode` tags present.
 - NOT verified (documented blocker): shader compile + headless PlayMode test, blocked by the open interactive Unity Editor.

@@ -42,6 +42,7 @@ A user can select a textured FBX in Unity, run `Process with NAMER`, and get a c
 
 ## Context
 
+- **Current state (after Phase 1, 2026-08-26):** `com.graffitientertainment.namer` UPM package scaffolded (Core/Runtime/Editor/Tests asmdefs, GUID-stable metas committed); format contract locked in pure-C# `Core/NamerFormat.cs` and mirrored line-for-line in `Shaders/NamerSurface.hlsl`; walking skeleton green end-to-end (Core encode → packed bytes → shader decode → render); EditMode 31/31 + PlayMode 3/3 headless at HEAD; SHDR-03 visual parity human-approved. Deferred into later phases: GPU kernels (2), packed-texture write/import stamping incl. point sampling (3), literal Blender fixtures (v2 PIPE-02), GBuffer pass (unscheduled).
 - The existing `GraffitiEntertainment/BlenderNamerPlugin` (develop branch) is the reference implementation for the NAMER encoding and texture-processing concepts; Unity should preserve format compatibility where useful but use Unity-native APIs and GPU compute rather than porting the Blender implementation.
 - NAMER runtime representation: two textures plus optional mesh vertex colors. Texture 1 RGB = base/residual color (alpha free). Texture 2 RGBA = packed surface data (octahedral normal X/Y, AO, metallic bit, emissive bit, 6-bit roughness → 64 roughness values). Emissive color stored as material metadata.
 - Processing pipeline: select source → inspect meshes/materials → read/normalize PBR textures → remove baked lighting where feasible → normalize AO → encode octahedral normals → pack surface texture → optional vertex-color decomposition → optional stylization → generate textures/mesh/material/shader → preview → save under generated-assets directory.
@@ -64,11 +65,11 @@ A user can select a textured FBX in Unity, run `Process with NAMER`, and get a c
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| C# + Unity compute shaders (no C++ native plugins) | Unity-native, portable, sufficient for v1 | — Pending |
-| URP-first shader; HDRP deferred | Largest target audience first, avoid milestone risk | — Pending |
-| Format compatibility with Blender NAMER encoding | Cross-tool workflow equivalency | — Pending |
-| Explicit `Process with NAMER` command (no auto-import processing in v1) | Predictability; automation added later | — Pending |
-| Stylization via reusable NAMERStyleProfile ScriptableObject | Profiles reusable across unrelated assets; no hard-coded styles | — Pending |
+| C# + Unity compute shaders (no C++ native plugins) | Unity-native, portable, sufficient for v1 | — Pending (compute lands Phase 2) |
+| URP-first shader; HDRP deferred | Largest target audience first, avoid milestone risk | Phase 1: URP 17.0.4 hand-written HLSL decode shader shipped; SHDR-03 parity vs URP Lit human-approved; GBuffer/deferred unsupported (tracked limitation) |
+| Format compatibility with Blender NAMER encoding | Cross-tool workflow equivalency | Phase 1: contract locked in pure-C# Core mirroring `namer_core.py` math (barycentric octahedral, strict bit thresholds, linear 6-bit roughness); golden vectors green; literal Blender-executed fixtures deferred to v2 PIPE-02 |
+| Explicit `Process with NAMER` command (no auto-import processing in v1) | Predictability; automation added later | — Pending (Phase 3) |
+| Stylization via reusable NAMERStyleProfile ScriptableObject | Profiles reusable across unrelated assets; no hard-coded styles | — Pending (Phase 5) |
 
 ## Evolution
 

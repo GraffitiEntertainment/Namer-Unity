@@ -56,9 +56,42 @@ namespace GraffitiEntertainment.Namer.Editor
 
         private static void ConfigureURP()
         {
-            if (GraphicsSettings.defaultRenderPipeline is UniversalRenderPipelineAsset)
+            // URP is only effectively active when the project default is a URP asset
+            // AND the active quality level has no non-URP override (a null quality
+            // override inherits the project default).
+            bool defaultIsUrp = GraphicsSettings.defaultRenderPipeline is UniversalRenderPipelineAsset;
+            bool qualityOverrideIsUrpOrNone =
+                QualitySettings.renderPipeline == null ||
+                QualitySettings.renderPipeline is UniversalRenderPipelineAsset;
+
+            if (defaultIsUrp && qualityOverrideIsUrpOrNone)
             {
-                return; // A URP asset is already assigned.
+                return; // A URP asset is already active at every level that matters.
+            }
+
+            // Assigning below permanently rewrites ProjectSettings (Graphics +
+            // Quality); confirm before touching global state (cancel = skip).
+            bool overwritesExistingPipeline =
+                GraphicsSettings.defaultRenderPipeline != null ||
+                QualitySettings.renderPipeline != null;
+
+            string message = overwritesExistingPipeline
+                ? "The current render pipeline settings are not fully configured for URP.\n\n"
+                    + "Assign 'NamerSmokeURP' to GraphicsSettings.defaultRenderPipeline and the "
+                    + "active quality level's renderPipeline override?\n\n"
+                    + "This permanently rewrites ProjectSettings (Graphics + Quality) and is not "
+                    + "restored by this tool."
+                : "No render pipeline is assigned.\n\n"
+                    + "Assign 'NamerSmokeURP' to GraphicsSettings.defaultRenderPipeline and the "
+                    + "active quality level's renderPipeline?\n\n"
+                    + "This permanently rewrites ProjectSettings (Graphics + Quality) and is not "
+                    + "restored by this tool.";
+
+            if (!EditorUtility.DisplayDialog("NAMER Smoke Setup", message, "Assign URP Asset", "Skip"))
+            {
+                Debug.Log("[NAMER] URP configuration skipped by user; assign a URP asset manually "
+                    + "(Project Settings > Graphics / Quality) if the smoke scene renders pink.");
+                return;
             }
 
             UniversalRendererData rendererData = ScriptableObject.CreateInstance<UniversalRendererData>();

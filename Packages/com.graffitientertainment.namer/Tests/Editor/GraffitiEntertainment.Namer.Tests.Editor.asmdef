@@ -1,0 +1,15 @@
+{
+  "name": "GraffitiEntertainment.Namer.Tests.Editor",
+  "rootNamespace": "GraffitiEntertainment.Namer.Tests",
+  "references": ["GraffitiEntertainment.Namer.Core", "Unity.Mathematics"],
+  "includePlatforms": ["Editor"],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": ["nunit.framework.dll"],
+  "autoReferenced": false,
+  "defineConstraints": ["UNITY_INCLUDE_TESTS"],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": ["TestAssemblies"]
+}

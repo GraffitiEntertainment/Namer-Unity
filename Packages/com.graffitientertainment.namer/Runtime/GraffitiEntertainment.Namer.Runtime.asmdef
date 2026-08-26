@@ -1,0 +1,14 @@
+{
+  "name": "GraffitiEntertainment.Namer.Runtime",
+  "rootNamespace": "GraffitiEntertainment.Namer",
+  "references": ["GraffitiEntertainment.Namer.Core"],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

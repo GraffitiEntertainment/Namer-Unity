@@ -1,0 +1,2 @@
+// NAMERPack.compute
+// GPU surface-packing kernels. Intentionally empty — kernels land in Phase 2.

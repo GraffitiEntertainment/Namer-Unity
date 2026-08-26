@@ -36,7 +36,10 @@ namespace GraffitiEntertainment.Namer.Editor
             Material namerMaterial = CreateNamerMaterial();
 
             // 3. Build the side-by-side smoke scene (NAMER + URP Lit spheres).
-            BuildSmokeScene(namerMaterial);
+            if (!BuildSmokeScene(namerMaterial))
+            {
+                return; // The user declined to save/close the open scene.
+            }
 
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
@@ -107,8 +110,16 @@ namespace GraffitiEntertainment.Namer.Editor
             return material;
         }
 
-        private static void BuildSmokeScene(Material namerMaterial)
+        private static bool BuildSmokeScene(Material namerMaterial)
         {
+            // Prompt before closing the open scene: NewScene(Single) would otherwise
+            // silently discard unsaved scene modifications with no undo path.
+            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsToContinue())
+            {
+                Debug.Log("[NAMER] Smoke scene creation cancelled; the open scene was left untouched.");
+                return false;
+            }
+
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
             // NAMER sphere (left).
@@ -149,6 +160,7 @@ namespace GraffitiEntertainment.Namer.Editor
             light.transform.rotation = Quaternion.Euler(50.0f, -30.0f, 0.0f);
 
             EditorSceneManager.SaveScene(scene, SmokeScenePath);
+            return true;
         }
     }
 }

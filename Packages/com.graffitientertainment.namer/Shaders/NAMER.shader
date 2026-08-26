@@ -211,7 +211,7 @@ Shader "GraffitiEntertainment.Namer/NAMER"
 #ifdef DYNAMICLIGHTMAP_ON
                 output.dynamicLightmapUV = input.dynamicLightmapUV.xy * unity_DynamicLightmapST.xy + unity_DynamicLightmapST.zw;
 #endif
-                OUTPUT_SH4(vertexInput.positionWS, output.normalWS.xyz, GetWorldSpaceNormalizeViewDir(vertexInput.positionWS), output.vertexSH);
+                OUTPUT_SH(output.normalWS.xyz, output.vertexSH);
 
 #ifdef _ADDITIONAL_LIGHTS_VERTEX
                 output.fogFactorAndVertexLight = half4(fogFactor, vertexLight);

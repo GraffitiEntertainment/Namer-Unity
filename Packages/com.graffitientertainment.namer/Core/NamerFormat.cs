@@ -19,7 +19,7 @@ namespace GraffitiEntertainment.Namer.Core
         /// </summary>
         public static float2 OctahedralEncode(float3 v)
         {
-            float sum = max(v.x + v.y + v.z, 1e-6f);
+            float sum = max(v.x + v.y + v.z, NamerConstants.Epsilon);
             return new float2(0.5f + 0.5f * v.x / sum, 0.5f + 0.5f * v.y / sum);
         }
 
@@ -36,7 +36,7 @@ namespace GraffitiEntertainment.Namer.Core
 
             float dotP = dot(p, p);
             float disc = max(1.0f - 2.0f * dotP, 0.0f);
-            float S = (1.0f + sqrt(disc)) / max(dotP, 1e-6f);
+            float S = (1.0f + sqrt(disc)) / max(dotP, NamerConstants.Epsilon);
 
             float3 n;
             n.x = p.x * S - 1.0f;
@@ -54,7 +54,7 @@ namespace GraffitiEntertainment.Namer.Core
         {
             byte metallicBit = metallic > NamerConstants.MetallicThreshold ? NamerConstants.MetallicBit : (byte)0;
             byte emissiveBit = emissive > NamerConstants.EmissiveThreshold ? NamerConstants.EmissiveBit : (byte)0;
-            byte roughnessBits = (byte)clamp((int)floor(roughness * 63.0f), 0, NamerConstants.RoughnessMask);
+            byte roughnessBits = (byte)clamp((int)floor(roughness * NamerConstants.RoughnessLevels), 0, NamerConstants.RoughnessMask);
             return (byte)(metallicBit | emissiveBit | roughnessBits);
         }
 
@@ -65,7 +65,7 @@ namespace GraffitiEntertainment.Namer.Core
         {
             metallic = (a & NamerConstants.MetallicBit) != 0;
             emissive = (a & NamerConstants.EmissiveBit) != 0;
-            roughness = (a & NamerConstants.RoughnessMask) / 63.0f;
+            roughness = (a & NamerConstants.RoughnessMask) / NamerConstants.RoughnessLevels;
         }
 
         /// <summary>
@@ -75,7 +75,7 @@ namespace GraffitiEntertainment.Namer.Core
         public static float4 PackSurface(float3 normal, float ao, float metallic, float emissive, float roughness)
         {
             float2 oct = OctahedralEncode(normal);
-            float alpha = PackAlphaBits(metallic, emissive, roughness) / 255.0f;
+            float alpha = PackAlphaBits(metallic, emissive, roughness) / NamerConstants.AlphaByteScale;
             return new float4(oct.x, oct.y, ao, alpha);
         }
 
@@ -87,7 +87,7 @@ namespace GraffitiEntertainment.Namer.Core
         {
             normal = OctahedralDecode(new float2(surface.x, surface.y));
             ao = surface.z;
-            byte alpha = (byte)clamp((int)floor(surface.w * 255.0f + 0.5f), 0, 255);
+            byte alpha = (byte)clamp((int)floor(surface.w * NamerConstants.AlphaByteScale + 0.5f), 0, 255);
             UnpackAlphaBits(alpha, out metallic, out emissive, out roughness);
         }
     }

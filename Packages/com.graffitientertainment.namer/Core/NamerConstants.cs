@@ -23,7 +23,13 @@ namespace GraffitiEntertainment.Namer.Core
         /// <summary>Strict threshold (> not >=) for setting the emissive bit.</summary>
         public const float EmissiveThreshold = 0.1f;
 
-        /// <summary>One 6-bit roughness quantization step (1 / 63).</summary>
-        public const float RoughnessStep = 1.0f / 63.0f;
+        /// <summary>Number of distinct 6-bit roughness quantization levels (2^6 - 1).</summary>
+        public const float RoughnessLevels = 63.0f;
+
+        /// <summary>Byte scale for normalizing packed alpha bytes to/from [0,1].</summary>
+        public const float AlphaByteScale = 255.0f;
+
+        /// <summary>Numeric epsilon for divide guards shared by encode/decode.</summary>
+        public const float Epsilon = 1e-6f;
     }
 }

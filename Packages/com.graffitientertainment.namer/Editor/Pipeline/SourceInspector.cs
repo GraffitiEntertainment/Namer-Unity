@@ -247,7 +247,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private static void ReadUrpLit(Material material, NamerMaterialInspection result)
         {
             result.BaseMap = TryGetTexture(material, "_BaseMap");
-            result.BaseMapIsSrgb = result.BaseMap != null && GraphicsFormatUtility.IsSRGBFormat(result.BaseMap.graphicsFormat);
+            result.BaseMapIsSrgb = IsSrgb(result.BaseMap);
             result.BaseColor = TryGetColor(material, "_BaseColor", Color.white);
 
             result.NormalMap = TryGetTexture(material, "_BumpMap");
@@ -271,7 +271,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private static void ReadStandard(Material material, NamerMaterialInspection result)
         {
             result.BaseMap = TryGetTexture(material, "_MainTex");
-            result.BaseMapIsSrgb = result.BaseMap != null && GraphicsFormatUtility.IsSRGBFormat(result.BaseMap.graphicsFormat);
+            result.BaseMapIsSrgb = IsSrgb(result.BaseMap);
             result.BaseColor = TryGetColor(material, "_Color", Color.white);
 
             result.NormalMap = TryGetTexture(material, "_BumpMap");
@@ -303,7 +303,7 @@ namespace GraffitiEntertainment.Namer.Editor
             // Best-effort scan of the known property names (D-06): try URP Lit names
             // first, then Standard aliases, guarded by HasProperty.
             result.BaseMap = TryGetTexture(material, "_BaseMap") ?? TryGetTexture(material, "_MainTex");
-            result.BaseMapIsSrgb = result.BaseMap != null && GraphicsFormatUtility.IsSRGBFormat(result.BaseMap.graphicsFormat);
+            result.BaseMapIsSrgb = IsSrgb(result.BaseMap);
             result.BaseColor = TryGetColor(material, "_BaseColor", TryGetColor(material, "_Color", Color.white));
 
             result.NormalMap = TryGetTexture(material, "_BumpMap");
@@ -385,7 +385,23 @@ namespace GraffitiEntertainment.Namer.Editor
 
         private static bool IsSrgb(Texture2D map)
         {
-            return map != null && GraphicsFormatUtility.IsSRGBFormat(map.graphicsFormat);
+            if (map == null)
+            {
+                return false;
+            }
+
+            // Imported textures are the real source path, and their graphicsFormat
+            // is normalized to the linear variant on this stack (verified: an
+            // sRGBTexture=true import reports R8G8B8A8_UNorm). The authored-sRGB
+            // signal lives on the TextureImporter. Runtime-created textures have
+            // no importer, so fall back to the graphics format there.
+            string assetPath = AssetDatabase.GetAssetPath(map);
+            if (!string.IsNullOrEmpty(assetPath) && AssetImporter.GetAtPath(assetPath) is TextureImporter importer)
+            {
+                return importer.sRGBTexture;
+            }
+
+            return GraphicsFormatUtility.IsSRGBFormat(map.graphicsFormat);
         }
 
         private static float TryGetFloat(Material material, string name, float fallback)

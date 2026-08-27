@@ -1,3 +1,4 @@
+using System.IO;
 using GraffitiEntertainment.Namer.Core;
 using GraffitiEntertainment.Namer.Editor;
 using NUnit.Framework;
@@ -87,8 +88,21 @@ namespace GraffitiEntertainment.Namer.Tests
             Assert.IsNotNull(shader, "URP Lit shader not found");
 
             Material material = new Material(shader);
-            Texture2D linearAo = new Texture2D(1, 1, TextureFormat.RGBA32, false, true);
-            Texture2D srgbMap = new Texture2D(1, 1, TextureFormat.RGBA32, false, false);
+
+            // Runtime-created Texture2Ds never surface an sRGB graphicsFormat on this
+            // platform, and imported textures report linear graphicsFormat variants
+            // even when imported sRGB — so the importer flag is the authoritative
+            // authored-sRGB signal, and the fixture must come through the importer:
+            // the exact path production consumes. Self-check the flags so a fixture
+            // regression fails here loudly instead of as an inspector failure.
+            EnsureTempFolder();
+            Texture2D linearAo = CreateImportedMap(TempFolder + "/NamerTestAoLinear.png", false);
+            Texture2D srgbMap = CreateImportedMap(TempFolder + "/NamerTestDataSrgb.png", true);
+            TextureImporter linearImporter = (TextureImporter)AssetImporter.GetAtPath(TempFolder + "/NamerTestAoLinear.png");
+            Assert.IsFalse(linearImporter.sRGBTexture, "fixture: linear map must keep sRGBTexture == false");
+            TextureImporter srgbImporter = (TextureImporter)AssetImporter.GetAtPath(TempFolder + "/NamerTestDataSrgb.png");
+            Assert.IsTrue(srgbImporter.sRGBTexture, "fixture: sRGB map must keep sRGBTexture == true");
+
             try
             {
                 // Linear-authored AO map: flag recorded false, no sRGB warning.
@@ -110,8 +124,28 @@ namespace GraffitiEntertainment.Namer.Tests
             }
             finally
             {
-                Destroy(material, linearAo, srgbMap);
+                Destroy(material);
+                AssetDatabase.DeleteAsset(TempFolder);
             }
+        }
+
+        /// <summary>
+        /// Creates a 1x1 imported texture whose sRGB flag comes from the
+        /// TextureImporter (the path real source assets take), because
+        /// runtime-constructed Texture2Ds do not report sRGB graphics formats.
+        /// </summary>
+        private static Texture2D CreateImportedMap(string path, bool srgb)
+        {
+            Texture2D source = new Texture2D(1, 1, TextureFormat.RGBA32, false, true);
+            source.SetPixel(0, 0, new Color(0.5f, 0.5f, 0.5f, 1f));
+            source.Apply();
+            File.WriteAllBytes(path, source.EncodeToPNG());
+            Destroy(source);
+            AssetDatabase.ImportAsset(path);
+            TextureImporter importer = (TextureImporter)AssetImporter.GetAtPath(path);
+            importer.sRGBTexture = srgb;
+            importer.SaveAndReimport();
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
         }
 
         private static int CountSrgbWarnings(NamerMaterialInspection inspection)

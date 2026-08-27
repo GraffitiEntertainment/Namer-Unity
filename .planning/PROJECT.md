@@ -42,7 +42,7 @@ A user can select a textured FBX in Unity, run `Process with NAMER`, and get a c
 
 ## Context
 
-- **Current state (after Phase 1, 2026-08-26):** `com.graffitientertainment.namer` UPM package scaffolded (Core/Runtime/Editor/Tests asmdefs, GUID-stable metas committed); format contract locked in pure-C# `Core/NamerFormat.cs` and mirrored line-for-line in `Shaders/NamerSurface.hlsl`; walking skeleton green end-to-end (Core encode → packed bytes → shader decode → render); EditMode 31/31 + PlayMode 3/3 headless at HEAD; SHDR-03 visual parity human-approved. Deferred into later phases: GPU kernels (2), packed-texture write/import stamping incl. point sampling (3), literal Blender fixtures (v2 PIPE-02), GBuffer pass (unscheduled).
+- **Current state (after Phase 2, 2026-08-27):** Phase 1 delivered the `com.graffitientertainment.namer` UPM scaffold + format contract (`Core/NamerFormat.cs` ⇄ `Shaders/NamerSurface.hlsl`) and the walking-skeleton runtime decode shader (SHDR-03 parity human-approved). Phase 2 added the CPU front door and GPU pipeline: `SourceInspector` resolves all 5 selection kinds (material / scene GameObject / prefab asset / FBX sub-assets / folder) into deduped `NamerMaterialInspection` units with per-map sRGB metadata, and `NamerComputePipeline` runs 3 staged kernels (`NAMERPack.compute`: normalize → octahedral-encode → pack) through `NamerEncode.hlsl` with `R16G16B16A16_SFloat` intermediates, `R8G8B8A8_UNorm` output, and a `ComputeTexturePool` release contract. GPU golden tests vs the Core C# oracle (D-14 tolerances), full-pipeline smoke tests, and a leak watchdog are green; authored-sRGB detection reads `TextureImporter.sRGBTexture` (see Key Decisions). EditMode 46/46 + PlayMode 3/3 headless at HEAD. Outputs are in-memory only so far. Deferred into later phases: asset generation/writes + import stamping incl. point sampling (3), vertex-color decomposition (4), literal Blender fixtures (v2 PIPE-02), GBuffer pass (unscheduled).
 - The existing `GraffitiEntertainment/BlenderNamerPlugin` (develop branch) is the reference implementation for the NAMER encoding and texture-processing concepts; Unity should preserve format compatibility where useful but use Unity-native APIs and GPU compute rather than porting the Blender implementation.
 - NAMER runtime representation: two textures plus optional mesh vertex colors. Texture 1 RGB = base/residual color (alpha free). Texture 2 RGBA = packed surface data (octahedral normal X/Y, AO, metallic bit, emissive bit, 6-bit roughness → 64 roughness values). Emissive color stored as material metadata.
 - Processing pipeline: select source → inspect meshes/materials → read/normalize PBR textures → remove baked lighting where feasible → normalize AO → encode octahedral normals → pack surface texture → optional vertex-color decomposition → optional stylization → generate textures/mesh/material/shader → preview → save under generated-assets directory.
@@ -65,11 +65,12 @@ A user can select a textured FBX in Unity, run `Process with NAMER`, and get a c
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| C# + Unity compute shaders (no C++ native plugins) | Unity-native, portable, sufficient for v1 | — Pending (compute lands Phase 2) |
+| C# + Unity compute shaders (no C++ native plugins) | Unity-native, portable, sufficient for v1 | Phase 2: three staged kernels (normalize/encode/pack) in `NAMERPack.compute` + `NamerEncode.hlsl` running via direct `Dispatch`; GPU golden tests match the Core C# oracle within D-14 tolerances; `ComputeTexturePool` governs temp RT lifecycle |
 | URP-first shader; HDRP deferred | Largest target audience first, avoid milestone risk | Phase 1: URP 17.0.4 hand-written HLSL decode shader shipped; SHDR-03 parity vs URP Lit human-approved; GBuffer/deferred unsupported (tracked limitation) |
 | Format compatibility with Blender NAMER encoding | Cross-tool workflow equivalency | Phase 1: contract locked in pure-C# Core mirroring `namer_core.py` math (barycentric octahedral, strict bit thresholds, linear 6-bit roughness); golden vectors green; literal Blender-executed fixtures deferred to v2 PIPE-02 |
 | Explicit `Process with NAMER` command (no auto-import processing in v1) | Predictability; automation added later | — Pending (Phase 3) |
 | Stylization via reusable NAMERStyleProfile ScriptableObject | Profiles reusable across unrelated assets; no hard-coded styles | — Pending (Phase 5) |
+| Authored-sRGB detection reads `TextureImporter.sRGBTexture`, not `Texture2D.graphicsFormat` | Unity 6000.0.82f1/Metal normalizes graphicsFormat to linear variants — sRGB imports report `R8G8B8A8_UNorm`, so graphicsFormat checks never return true | Phase 2 (code-review WR-04 root cause): `SourceInspector.IsSrgb` is importer-first via `AssetDatabase.GetAssetPath`; runtime-created textures fall back to graphicsFormat. Fixed real false-negatives that would have skipped sRGB decode on user assets |
 
 ## Evolution
 
@@ -89,4 +90,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-25 after initialization*
+*Last updated: 2026-08-27 after Phase 2 completion*

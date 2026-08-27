@@ -328,6 +328,32 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             result.Roughness = 1f - result.Smoothness;
 
+            // Per-map sRGB metadata (WR-04). The compute kernels consume normal / AO /
+            // metallicGloss maps as raw texel data — only the base map is ever sRGB
+            // decoded — so an sRGB-imported data map contradicts the kernels' assumption
+            // and is worth surfacing to the artist.
+            result.NormalMapIsSrgb = IsSrgb(result.NormalMap);
+            result.MetallicGlossMapIsSrgb = IsSrgb(result.MetallicGlossMap);
+            result.OcclusionMapIsSrgb = IsSrgb(result.OcclusionMap);
+
+            if (result.NormalMapIsSrgb)
+            {
+                result.Warnings.Add("NormalMap '" + result.NormalMap.name
+                    + "' is flagged sRGB — NAMER reads normal maps as raw texel data without conversion; reimport it as linear for exact results.");
+            }
+
+            if (result.MetallicGlossMapIsSrgb)
+            {
+                result.Warnings.Add("MetallicGlossMap '" + result.MetallicGlossMap.name
+                    + "' is flagged sRGB — NAMER reads metallic/smoothness as raw texel data without conversion; reimport it as linear for exact results.");
+            }
+
+            if (result.OcclusionMapIsSrgb)
+            {
+                result.Warnings.Add("OcclusionMap '" + result.OcclusionMap.name
+                    + "' is flagged sRGB — NAMER reads AO as raw texel data without conversion; reimport it as linear for exact results.");
+            }
+
             // Emissive = max(EmissionColor.r, g, b) when emission is present
             // (map exists OR emission color is non-black), else 0.
             bool emissionColorNonBlack =
@@ -355,6 +381,11 @@ namespace GraffitiEntertainment.Namer.Editor
         private static Texture2D TryGetTexture(Material material, string name)
         {
             return material.HasProperty(name) ? material.GetTexture(name) as Texture2D : null;
+        }
+
+        private static bool IsSrgb(Texture2D map)
+        {
+            return map != null && GraphicsFormatUtility.IsSRGBFormat(map.graphicsFormat);
         }
 
         private static float TryGetFloat(Material material, string name, float fallback)
@@ -392,11 +423,11 @@ namespace GraffitiEntertainment.Namer.Editor
                 Debug.Log("[NAMER]   [Material] " + name + " — shader '" + i.ShaderName + "'");
                 Debug.Log("[NAMER]     BaseMap: " + DescribeMap(i.BaseMap, i.BaseMapIsSrgb)
                     + ", BaseColor: " + i.BaseColor);
-                Debug.Log("[NAMER]     NormalMap: " + DescribeMap(i.NormalMap, false) + ", BumpScale: " + i.BumpScale);
-                Debug.Log("[NAMER]     MetallicGlossMap: " + DescribeMap(i.MetallicGlossMap, false)
+                Debug.Log("[NAMER]     NormalMap: " + DescribeMap(i.NormalMap, i.NormalMapIsSrgb) + ", BumpScale: " + i.BumpScale);
+                Debug.Log("[NAMER]     MetallicGlossMap: " + DescribeMap(i.MetallicGlossMap, i.MetallicGlossMapIsSrgb)
                     + ", Metallic: " + i.Metallic + ", Smoothness: " + i.Smoothness
                     + ", Roughness: " + i.Roughness + ", SmoothnessTextureChannel: " + i.SmoothnessTextureChannel);
-                Debug.Log("[NAMER]     OcclusionMap: " + DescribeMap(i.OcclusionMap, false)
+                Debug.Log("[NAMER]     OcclusionMap: " + DescribeMap(i.OcclusionMap, i.OcclusionMapIsSrgb)
                     + ", OcclusionStrength: " + i.OcclusionStrength + ", AoUnmultiplyStrength: " + i.AoUnmultiplyStrength);
                 Debug.Log("[NAMER]     EmissionMap: " + DescribeMap(i.EmissionMap, false)
                     + ", EmissionColor: " + i.EmissionColor + ", Emissive: " + i.Emissive);

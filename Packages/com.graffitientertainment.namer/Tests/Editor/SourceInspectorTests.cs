@@ -78,6 +78,56 @@ namespace GraffitiEntertainment.Namer.Tests
             }
         }
 
+        // -- WR-04: per-map sRGB metadata for data maps ------------------------
+
+        [Test]
+        public void DataMapSrgbFlags_RecordedAndWarnedOnlyForSrgbDataMaps()
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+            Assert.IsNotNull(shader, "URP Lit shader not found");
+
+            Material material = new Material(shader);
+            Texture2D linearAo = new Texture2D(1, 1, TextureFormat.RGBA32, false, true);
+            Texture2D srgbMap = new Texture2D(1, 1, TextureFormat.RGBA32, false, false);
+            try
+            {
+                // Linear-authored AO map: flag recorded false, no sRGB warning.
+                material.SetTexture("_OcclusionMap", linearAo);
+                NamerMaterialInspection linearInspect = SourceInspector.Inspect(material).Materials[0];
+                Assert.IsFalse(linearInspect.OcclusionMapIsSrgb, "linear AO map should record OcclusionMapIsSrgb == false");
+                Assert.AreEqual(0, CountSrgbWarnings(linearInspect), "linear data maps must not raise sRGB warnings");
+
+                // sRGB-authored data maps (TextureImporter default): flags recorded true
+                // and one warning per map, since the kernels read them as raw texel data.
+                material.SetTexture("_OcclusionMap", srgbMap);
+                material.SetTexture("_MetallicGlossMap", srgbMap);
+                material.SetTexture("_BumpMap", srgbMap);
+                NamerMaterialInspection srgbInspect = SourceInspector.Inspect(material).Materials[0];
+                Assert.IsTrue(srgbInspect.OcclusionMapIsSrgb, "sRGB AO map should record OcclusionMapIsSrgb == true");
+                Assert.IsTrue(srgbInspect.MetallicGlossMapIsSrgb, "sRGB metallicGloss map should record MetallicGlossMapIsSrgb == true");
+                Assert.IsTrue(srgbInspect.NormalMapIsSrgb, "sRGB normal map should record NormalMapIsSrgb == true");
+                Assert.AreEqual(3, CountSrgbWarnings(srgbInspect), "one sRGB warning per sRGB-flagged data map");
+            }
+            finally
+            {
+                Destroy(material, linearAo, srgbMap);
+            }
+        }
+
+        private static int CountSrgbWarnings(NamerMaterialInspection inspection)
+        {
+            int count = 0;
+            foreach (string warning in inspection.Warnings)
+            {
+                if (warning.Contains("sRGB"))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
         // -- INSP-04: neutral defaults ----------------------------------------
 
         [Test]

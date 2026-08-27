@@ -1,4 +1,5 @@
 using System.Collections;
+using GraffitiEntertainment.Namer.Core;
 using GraffitiEntertainment.Namer.Editor;
 using NUnit.Framework;
 using Unity.Collections;
@@ -36,13 +37,20 @@ namespace GraffitiEntertainment.Namer.Tests
             try
             {
                 // Scenario 1: scalar-only, sRGB-authored base color (sRGB decode + AO un-multiply).
-                yield return RunScenario(pipeline, baseIsSrgb: true, useMetallicGlossMap: false);
+                yield return RunScenario(pipeline, baseIsSrgb: true, useMetallicGlossMap: false, dataMapsAreSrgb: false);
 
                 // Scenario 2: scalar-only, linear-authored base color (must NOT be sRGB-decoded).
-                yield return RunScenario(pipeline, baseIsSrgb: false, useMetallicGlossMap: false);
+                yield return RunScenario(pipeline, baseIsSrgb: false, useMetallicGlossMap: false, dataMapsAreSrgb: false);
 
                 // Scenario 3: metallic/gloss map path (R = metallic, A = smoothness).
-                yield return RunScenario(pipeline, baseIsSrgb: true, useMetallicGlossMap: true);
+                yield return RunScenario(pipeline, baseIsSrgb: true, useMetallicGlossMap: true, dataMapsAreSrgb: false);
+
+                // Scenario 4 (WR-04): sRGB-authored AO + metallicGloss data maps. The
+                // kernels treat data maps as raw texel data; this scenario pins that an
+                // sRGB-flagged data map still arrives byte-exact as authored (no sRGB
+                // decode), so the packed bytes match the CPU oracle computed from the
+                // raw values.
+                yield return RunScenario(pipeline, baseIsSrgb: true, useMetallicGlossMap: true, dataMapsAreSrgb: true);
 
                 // D-13 leak watchdog, asserted BEFORE Dispose (Dispose clears the live set,
                 // so asserting after it would compare 0 == 0 and could never fail).
@@ -55,13 +63,14 @@ namespace GraffitiEntertainment.Namer.Tests
             }
         }
 
-        private static IEnumerator RunScenario(NamerComputePipeline pipeline, bool baseIsSrgb, bool useMetallicGlossMap)
+        private static IEnumerator RunScenario(NamerComputePipeline pipeline, bool baseIsSrgb, bool useMetallicGlossMap, bool dataMapsAreSrgb)
         {
-            // Base color is uniform gray; AO is a linear data map (g = 0.5 to exercise un-multiply).
+            // Base color is uniform gray; AO is a data map (g = 0.5 to exercise un-multiply)
+            // authored either linear or sRGB to pin the raw-data-map upload contract (WR-04).
             Texture2D baseMap = new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, false, baseIsSrgb ? false : true);
-            Texture2D aoMap = new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, false, true);
+            Texture2D aoMap = new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, false, dataMapsAreSrgb ? false : true);
             Texture2D metallicGlossMap = useMetallicGlossMap
-                ? new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, false, true)
+                ? new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, false, dataMapsAreSrgb ? false : true)
                 : null;
 
             try
@@ -105,6 +114,23 @@ namespace GraffitiEntertainment.Namer.Tests
                     Assert.IsFalse(surfaceReq.hasError, "packed surface readback must not error");
                     NativeArray<Color32> surfaceData = surfaceReq.GetData<Color32>();
                     Assert.Greater(surfaceData.Length, 0, "packed surface readback must return pixels");
+
+                    // WR-04: data maps are raw texel data — pin the packed bytes against the CPU
+                    // oracle computed from the raw authored values. An sRGB-flagged data map must
+                    // arrive byte-exact as authored (no sRGB decode), so the strict metallic
+                    // threshold and 6-bit roughness quantization track the oracle either way.
+                    // (Smoothness scalar 0.5 mirrors the inspection's Smoothness below.)
+                    Color32 surfacePixel = surfaceData[0];
+                    float aoRaw = aoMap.GetPixel(0, 0).g;
+                    float metallicRaw = metallicGlossMap != null ? metallicGlossMap.GetPixel(0, 0).r : 0.0f;
+                    float smoothnessRaw = metallicGlossMap != null ? metallicGlossMap.GetPixel(0, 0).a : 0.0f;
+                    float effectiveMetallic = metallicGlossMap != null ? metallicRaw : 0.0f;
+                    float effectiveRoughness = metallicGlossMap != null ? 1f - smoothnessRaw * 0.5f : 0.5f;
+                    byte expectedAlpha = NamerFormat.PackAlphaBits(effectiveMetallic, 0.0f, effectiveRoughness);
+                    Assert.AreEqual((int)expectedAlpha, (int)surfacePixel.a,
+                        "packed alpha byte must match the CPU oracle for raw data-map values (sRGB data maps = " + dataMapsAreSrgb + ")");
+                    Assert.AreEqual((double)aoRaw, surfacePixel.b / 255.0, 1.0 / 255.0,
+                        "packed AO byte must be the raw authored value, no sRGB decode (sRGB data maps = " + dataMapsAreSrgb + ")");
 
                     // W2: end-to-end normalize assertion against the CPU-computed expectation.
                     AsyncGPUReadbackRequest baseReq = AsyncGPUReadback.Request(result.NormalizedBaseColor, 0, TextureFormat.RGBA32);

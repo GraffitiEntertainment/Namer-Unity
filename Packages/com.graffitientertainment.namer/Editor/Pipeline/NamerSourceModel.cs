@@ -24,6 +24,12 @@ namespace GraffitiEntertainment.Namer.Editor
     /// reference plus <see cref="OcclusionStrength"/> metadata. The strength blend is
     /// applied at decode (Phase 1's NamerSurface.hlsl), never baked here, so Phase 3
     /// cannot double-apply it.
+    ///
+    /// Per-map sRGB metadata: only <see cref="BaseMapIsSrgb"/> feeds a conversion (the
+    /// normalize kernel's sRGB decode). Normal/AO/metallicGloss maps are consumed as
+    /// raw texel data by the compute kernels regardless of their import flag; their
+    /// *IsSrgb fields record that flag and <c>SourceInspector</c> warns when it is set,
+    /// since an sRGB-authored data map contradicts the raw-data assumption.
     /// </summary>
     public sealed class NamerMaterialInspection
     {
@@ -37,14 +43,17 @@ namespace GraffitiEntertainment.Namer.Editor
         public Color BaseColor;
 
         public Texture2D NormalMap;
+        public bool NormalMapIsSrgb;
         public float BumpScale;
 
         public Texture2D MetallicGlossMap;
+        public bool MetallicGlossMapIsSrgb;
         public float Metallic;
         public float Smoothness;
         public int SmoothnessTextureChannel;
 
         public Texture2D OcclusionMap;
+        public bool OcclusionMapIsSrgb;
         public float OcclusionStrength;
 
         public Texture2D EmissionMap;

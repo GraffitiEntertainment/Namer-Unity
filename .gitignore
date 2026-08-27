@@ -14,3 +14,9 @@ riderModule.iml
 # Unity builds
 [Bb]uild/
 [Bb]uilds/
+
+# IDE — Rider/VS generate these per machine
+.idea/
+.vs/
+*.csproj
+*.sln

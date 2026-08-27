@@ -113,10 +113,7 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 // Model asset (FBX) or any GameObject asset without prefab contents:
                 // materials are sub-assets, not components.
-                foreach (Material m in AssetDatabase.LoadAllAssetsAtPath<Material>(assetPath))
-                {
-                    AddUnique(m, materials, seen);
-                }
+                AddSubAssetMaterials(assetPath, materials, seen);
 
                 return;
             }
@@ -134,11 +131,7 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 foreach (string guid in AssetDatabase.FindAssets("t:Model", new[] { path }))
                 {
-                    string modelPath = AssetDatabase.GUIDToAssetPath(guid);
-                    foreach (Material m in AssetDatabase.LoadAllAssetsAtPath<Material>(modelPath))
-                    {
-                        AddUnique(m, materials, seen);
-                    }
+                    AddSubAssetMaterials(AssetDatabase.GUIDToAssetPath(guid), materials, seen);
                 }
 
                 return;
@@ -148,10 +141,7 @@ namespace GraffitiEntertainment.Namer.Editor
             // asset): materials are sub-assets.
             if (!string.IsNullOrEmpty(path))
             {
-                foreach (Material m in AssetDatabase.LoadAllAssetsAtPath<Material>(path))
-                {
-                    AddUnique(m, materials, seen);
-                }
+                AddSubAssetMaterials(path, materials, seen);
 
                 return;
             }
@@ -164,6 +154,18 @@ namespace GraffitiEntertainment.Namer.Editor
             foreach (Material m in renderer.sharedMaterials)
             {
                 AddUnique(m, materials, seen);
+            }
+        }
+
+        private static void AddSubAssetMaterials(string assetPath, List<Material> materials, HashSet<int> seen)
+        {
+            // LoadAllAssetsAtPath is non-generic (returns Object[]); filter materials.
+            foreach (Object subAsset in AssetDatabase.LoadAllAssetsAtPath(assetPath))
+            {
+                if (subAsset is Material material)
+                {
+                    AddUnique(material, materials, seen);
+                }
             }
         }
 

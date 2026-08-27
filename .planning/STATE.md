@@ -84,6 +84,7 @@ Recent decisions affecting current work:
 - [Phase 02-source-inspection-gpu-compute-pipeline]: GPU path follows the plan's sRGB upload contract verbatim (_SourceIsSrgb from BaseMapIsSrgb); Blit linearization is verified numerically in 02-03, not assumed here
 - [Phase 02-source-inspection-gpu-compute-pipeline]: 02-03 verified the sRGB upload contract numerically: Graphics.Blit from an sRGB Texture2D to a linear RenderTexture is a raw copy (no implicit sRGB->linear), so the compute shader's single SRGBToLinear in CSNormalize is the correct decode — the Blit double-decode hazard did not materialize
 - [Phase 02-source-inspection-gpu-compute-pipeline]: GPU golden decode-dot reference = NamerFormat.OctahedralDecode(OctahedralEncode(texel)) so the D-14 dot >= 1-1e-3 assertion stays self-consistent for all 5 golden vectors (incl. the pathological (1,0,0) texel D, avoiding the Phase 1 Pitfall 3 texel-direction oracle)
+- [Phase 02-source-inspection-gpu-compute-pipeline]: Unity 6000.0.82f1/Metal normalizes Texture2D.graphicsFormat to linear variants — sRGB-imported textures report R8G8B8A8_UNorm, so graphicsFormat-based sRGB detection never returns true (code-review WR-04 root cause). Authored-sRGB detection must read TextureImporter.sRGBTexture via AssetDatabase.GetAssetPath (runtime-created textures fall back to graphicsFormat). BaseMapIsSrgb false-negatives from the old check would have skipped sRGB decode on real user assets
 
 ### Pending Todos
 

@@ -20,7 +20,8 @@ findings:
   warning: 4
   info: 5
   total: 9
-status: issues_found
+status: fixed
+fixed: 2026-08-27
 ---
 
 # Phase 2: Code Review Report
@@ -28,7 +29,7 @@ status: issues_found
 **Reviewed:** 2026-08-27T18:01:20Z
 **Depth:** standard
 **Files Reviewed:** 11
-**Status:** issues_found
+**Status:** fixed (all 4 Warnings resolved; Info findings documented as-is)
 
 ## Summary
 
@@ -44,7 +45,21 @@ Static adversarial review of the Phase 2 deliverables: the three staged compute 
 
 **Key concerns:** the compute result contract has no release path (outputs accumulate as live RTs and are destroyed under the caller at Dispose), the D-13 leak-watchdog assertion is a tautology that cannot fail, folder inspection silently misses prefab-contained materials, and the sRGB robustness of data-map uploads is untested territory.
 
+
+## Fix Outcomes (2026-08-27)
+
+All four Warnings were fixed by the gsd-code-fixer plus an orchestrator root-cause follow-up; the full EditMode suite re-verified green (46/46, exit 0) after the fixes.
+
+| Finding | Outcome | Commit |
+|---------|---------|--------|
+| WR-01 | Fixed — public result release contract on `NamerComputeResult`; outputs return to the pool; `Dispose` no longer destroys results a caller owns | `d2ad4b7` |
+| WR-02 | Fixed — leak watchdog now asserts `LiveRenderTargetCount` returns to baseline after releasing each result, before pipeline disposal; the assertion can fail | `d2ad4b7` |
+| WR-03 | Fixed — folder inspection resolves prefab assets' renderers/materials with instance-ID dedupe, matching the single-selection path | `a3b5829` |
+| WR-04 | Fixed — per-map sRGB metadata recorded + warned; then root-caused further: `graphicsFormat` reports linear variants for imported textures on this stack, so detection now reads `TextureImporter.sRGBTexture` for imported assets (graphicsFormat fallback for runtime-created). This also fixes latent `BaseMapIsSrgb` false-negatives that would have skipped sRGB decode in the real user path. Test fixtures import real PNGs via TextureImporter | `82431b3`, `59de1f8` |
+| IN-01..IN-05 | Not addressed (documented; revisit if Phase 3+ touches these paths) | — |
+
 ## Narrative Findings (AI reviewer)
+
 
 ### Warnings
 

@@ -95,8 +95,16 @@ Plans:
 
 Plans:
 
+**Wave 1**
+
 - [ ] 03-01: AssetGenerator — write material/textures/mesh to NAMERGenerated with import stamping + config
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 03-02: NAMEREditorWindow + `Process with NAMER` command + before/after preview + debug views
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 03-03: Source-immutability + asset-path tests; assemble shippable MVP package
 
 **UI hint**: yes

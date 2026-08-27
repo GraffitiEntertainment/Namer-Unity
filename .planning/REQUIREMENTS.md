@@ -62,12 +62,12 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Editor Workflow & Preview
 
-- [ ] **UI-01**: NAMER editor window is available at `Tools > NAMER > Processor`
-- [ ] **UI-02**: User can trigger processing via an explicit `Process with NAMER` command (no automatic import processing in v1)
-- [ ] **UI-03**: Editor window exposes processing controls (style strength, smoothing, palette, AO controls, normal detail, roughness simplification, vertex color decomposition, residual resolution)
-- [ ] **UI-04**: User can preview the actual selected mesh before/after (original, NAMER, stylized NAMER)
-- [ ] **UI-05**: Debug channel views are available (vertex color only, residual, reconstructed base, AO, normal, roughness, metallic, emissive, reconstruction error)
-- [ ] **UI-06**: Preview updates interactively when processing controls change (GPU-favored)
+- [x] **UI-01**: NAMER editor window is available at `Tools > NAMER > Processor`
+- [x] **UI-02**: User can trigger processing via an explicit `Process with NAMER` command (no automatic import processing in v1)
+- [x] **UI-03**: Editor window exposes processing controls (style strength, smoothing, palette, AO controls, normal detail, roughness simplification, vertex color decomposition, residual resolution)
+- [x] **UI-04**: User can preview the actual selected mesh before/after (original, NAMER, stylized NAMER)
+- [x] **UI-05**: Debug channel views are available (vertex color only, residual, reconstructed base, AO, normal, roughness, metallic, emissive, reconstruction error)
+- [x] **UI-06**: Preview updates interactively when processing controls change (GPU-favored)
 
 ### Testing
 
@@ -145,12 +145,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GEN-02 | Phase 3 | Pending |
 | GEN-03 | Phase 3 | Complete |
 | GEN-04 | Phase 3 | Complete |
-| UI-01 | Phase 3 | Pending |
-| UI-02 | Phase 3 | Pending |
-| UI-03 | Phase 3 | Pending |
-| UI-04 | Phase 3 | Pending |
-| UI-05 | Phase 3 | Pending |
-| UI-06 | Phase 3 | Pending |
+| UI-01 | Phase 3 | Complete |
+| UI-02 | Phase 3 | Complete |
+| UI-03 | Phase 3 | Complete |
+| UI-04 | Phase 3 | Complete |
+| UI-05 | Phase 3 | Complete |
+| UI-06 | Phase 3 | Complete |
 | TEST-01 | Phase 1 | Complete |
 | TEST-02 | Phase 4 | Pending |
 | TEST-03 | Phase 3 | Pending |

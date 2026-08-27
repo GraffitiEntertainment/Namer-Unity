@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-08-27T22:06:15.278Z"
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-08-27T22:54:00.233Z"
 last_activity: 2026-08-27
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 9
-  completed_plans: 7
-  percent: 40
+  completed_plans: 8
+  percent: 89
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 ## Current Position
 
 Phase: 3 (asset-generation-editor-workflow-preview) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-08-27
 
-Progress: [████████░░] 78%
+Progress: [█████████░] 89%
 
 ## Performance Metrics
 
@@ -59,6 +59,7 @@ Progress: [████████░░] 78%
 | Phase 02-source-inspection-gpu-compute-pipeline P02 | 6min | 2 tasks | 8 files |
 | Phase 02-source-inspection-gpu-compute-pipeline P03 | 10min | 2 tasks | 2 files |
 | Phase 03-asset-generation-editor-workflow-preview P01 | 7min | 3 tasks | 10 files |
+| Phase 03-asset-generation-editor-workflow-preview P02 | 44min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -88,6 +89,9 @@ Recent decisions affecting current work:
 - [Phase 02-source-inspection-gpu-compute-pipeline]: Unity 6000.0.82f1/Metal normalizes Texture2D.graphicsFormat to linear variants — sRGB-imported textures report R8G8B8A8_UNorm, so graphicsFormat-based sRGB detection never returns true (code-review WR-04 root cause). Authored-sRGB detection must read TextureImporter.sRGBTexture via AssetDatabase.GetAssetPath (runtime-created textures fall back to graphicsFormat). BaseMapIsSrgb false-negatives from the old check would have skipped sRGB decode on real user assets
 - [Phase 03-asset-generation-editor-workflow-preview]: AssetGenerator readback uses NamerComputePipeline.RequestReadback (the pipeline's existing AsyncGPUReadback contract) rather than AsyncGPUReadback.Request inline — D-08
 - [Phase 03-asset-generation-editor-workflow-preview]: Base color linear->sRGB uses Graphics.ConvertTexture into an sRGB Texture2D (R8G8B8A8_SRGB) — the inverse of the compute shader's SRGBToLinear, no per-pixel C# loop (NORM-03)
+- [Phase 03-asset-generation-editor-workflow-preview]: Preview recompute assigns NamerComputePipeline result render targets directly to in-memory NAMER/debug materials (no readback) — readback stays exclusive to the disk-write path (D-10)
+- [Phase 03-asset-generation-editor-workflow-preview]: Before/after preview is a single combined PreviewRenderUtility render (both meshes in one BeginPreview/EndPreview) with Before/After captions above the halves, so both panes share one honest camera (D-09)
+- [Phase 03-asset-generation-editor-workflow-preview]: Output controls bind directly to the EditorPrefs-backed NamerProcessorSettings (Destination/Prefix/Suffix/OverwriteGenerated), not a separate UI model
 
 ### Pending Todos
 
@@ -111,6 +115,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-27T22:06:15.269Z
-Stopped at: Completed 03-01-PLAN.md
+Last session: 2026-08-27T22:54:00.216Z
+Stopped at: Completed 03-02-PLAN.md
 Resume file: None

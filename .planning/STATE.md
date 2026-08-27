@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 3 UI-SPEC approved
-last_updated: "2026-08-27T21:43:48.450Z"
-last_activity: 2026-08-27 -- Phase 3 planning complete
+last_updated: "2026-08-27T21:47:06.012Z"
+last_activity: 2026-08-27 -- Phase 3 execution started
 progress:
   total_phases: 5
   completed_phases: 2
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-25)
 
 **Core value:** A user can select a textured FBX in Unity, run `Process with NAMER`, and get a correctly rendering, source-compatible NAMER material without ever modifying the imported source assets or leaving the Unity Editor.
-**Current focus:** Phase 3 — asset generation + editor workflow + preview
+**Current focus:** Phase 3 — asset-generation-editor-workflow-preview
 
 ## Current Position
 
-Phase: 3
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-08-27 -- Phase 3 planning complete
+Phase: 3 (asset-generation-editor-workflow-preview) — EXECUTING
+Plan: 1 of 3
+Status: Executing Phase 3
+Last activity: 2026-08-27 -- Phase 3 execution started
 
 Progress: [██████████] 100%
 

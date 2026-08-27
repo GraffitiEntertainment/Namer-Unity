@@ -79,7 +79,8 @@ namespace GraffitiEntertainment.Namer.Editor
                 return result;
             }
 
-            string destinationFolder = destination + AssetGenerator.SanitizeFileName(selection.name) + "/";
+            string destinationFolder = destination.TrimEnd('/', '\\') + "/"
+                + AssetGenerator.SanitizeFileName(selection.name) + "/";
             EnsureFolder(destinationFolder);
 
             NamerComputePipeline pipeline = null;

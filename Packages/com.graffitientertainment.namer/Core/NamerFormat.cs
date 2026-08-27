@@ -70,11 +70,12 @@ namespace GraffitiEntertainment.Namer.Core
 
         /// <summary>
         /// Packs a full NAMER surface: R/G = octahedral normal, B = AO (no transform),
-        /// A = packed alpha bits normalized to [0,1].
+        /// A = packed alpha bits normalized to [0,1]. <paramref name="normalTexel"/> is a
+        /// raw DirectX normal-map texel in [0,1] (octahedrally re-encoded here).
         /// </summary>
-        public static float4 PackSurface(float3 normal, float ao, float metallic, float emissive, float roughness)
+        public static float4 PackSurface(float3 normalTexel, float ao, float metallic, float emissive, float roughness)
         {
-            float2 oct = OctahedralEncode(normal);
+            float2 oct = OctahedralEncode(normalTexel);
             float alpha = PackAlphaBits(metallic, emissive, roughness) / NamerConstants.AlphaByteScale;
             return new float4(oct.x, oct.y, ao, alpha);
         }

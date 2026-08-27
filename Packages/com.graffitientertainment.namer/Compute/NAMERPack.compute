@@ -1,2 +1,103 @@
 // NAMERPack.compute
-// GPU surface-packing kernels. Intentionally empty — kernels land in Phase 2.
+// GPU surface-packing kernels (Phase 2, plan 02-02).
+//
+// Three staged kernels mirror Core/NamerFormat line-for-line through the shared
+// NamerEncode.hlsl include. Roughness = 1 - smoothness is computed in CSNormalize
+// (before quantization); quantization happens inside NamerPackAlphaBits via
+// NamerPackSurfaceFromOct in CSSurfacePack.
+//
+// Base color is the only channel that receives sRGB -> linear conversion.
+// Normal / AO / metallic / roughness are never color-converted.
+//
+// All write targets are LINEAR (D-11). _SurfaceOut is R8G8B8A8_UNorm linear;
+// intermediates are R16G16B16A16_SFloat linear. Compute never writes sRGB.
+
+#include "NamerEncode.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
+
+#pragma kernel CSNormalize
+#pragma kernel CSOctahedralEncode
+#pragma kernel CSSurfacePack
+
+// Kernel-written outputs (linear, random-access).
+RWTexture2D<float4> _BaseColorOut;
+RWTexture2D<float4> _Octahedral;
+RWTexture2D<float4> _PackInputs;
+RWTexture2D<float4> _SurfaceOut;
+
+// Blit-uploaded inputs (never written by kernels).
+Texture2D<float4> _BaseColorIn;      // base map or white fill
+Texture2D<float4> _NormalTexel;      // raw DirectX normal map or neutral (0.5,0.5,1.0)
+Texture2D<float4> _AoIn;             // AO map or white fill
+Texture2D<float4> _MetallicGlossIn;  // metallic/gloss map or neutral fill
+
+// Uniforms.
+float _SourceIsSrgb;
+float _AoUnmultiplyStrength;
+float _Metallic;
+float _SmoothnessScalar;
+float _Roughness;
+float _Emissive;
+float _SmoothnessTextureChannel;
+float _HasMetallicGlossMap;
+int2 _Size;
+
+[numthreads(8,8,1)]
+void CSNormalize(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float4 baseColorIn = _BaseColorIn[id.xy];
+    float3 base = (_SourceIsSrgb > 0.5) ? SRGBToLinear(baseColorIn.rgb) : baseColorIn.rgb;
+    float ao = _AoIn[id.xy].g;
+    _BaseColorOut[id.xy] = float4(base / lerp(1.0, max(ao, NAMER_EPSILON), _AoUnmultiplyStrength), 1.0);
+
+    float metallic;
+    float roughness;
+    if (_HasMetallicGlossMap > 0.5)
+    {
+        float4 metallicGloss = _MetallicGlossIn[id.xy];
+        metallic = metallicGloss.r;
+        float smoothnessSource = (_SmoothnessTextureChannel == 1.0) ? baseColorIn.a : metallicGloss.a;
+        float smoothness = smoothnessSource * _SmoothnessScalar;
+        roughness = 1.0 - smoothness;
+    }
+    else
+    {
+        metallic = _Metallic;
+        roughness = _Roughness;
+    }
+
+    _PackInputs[id.xy] = float4(metallic, roughness, _Emissive, 1.0);
+}
+
+[numthreads(8,8,1)]
+void CSOctahedralEncode(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float2 oct = NamerOctahedralEncode(_NormalTexel[id.xy].xyz);
+    _Octahedral[id.xy] = float4(oct, _AoIn[id.xy].g, 0.0);
+}
+
+[numthreads(8,8,1)]
+void CSSurfacePack(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float2 oct = _Octahedral[id.xy].rg;
+    float ao = _Octahedral[id.xy].b;
+    float metallic = _PackInputs[id.xy].x;
+    float roughness = _PackInputs[id.xy].y;
+    float emissive = _PackInputs[id.xy].z;
+    _SurfaceOut[id.xy] = NamerPackSurfaceFromOct(oct, ao, metallic, emissive, roughness);
+}

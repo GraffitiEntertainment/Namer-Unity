@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 2 context gathered
-last_updated: "2026-08-27T00:26:53.663Z"
+last_updated: "2026-08-27T00:47:29.753Z"
 last_activity: 2026-08-27
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 6
-  completed_plans: 4
+  completed_plans: 5
   percent: 20
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 ## Current Position
 
 Phase: 02 (Source Inspection + GPU Compute Pipeline) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-08-27
 
-Progress: [███████░░░] 67%
+Progress: [████████░░] 83%
 
 ## Performance Metrics
 
@@ -56,6 +56,7 @@ Progress: [███████░░░] 67%
 | Phase 01-core-format-contract-runtime-decode P01 | 26min | 2 tasks | 7 files |
 | Phase 01-core-format-contract-runtime-decode P02 | 100min | 3 tasks | 5 files |
 | Phase 02-source-inspection-gpu-compute-pipeline P01 | 10min | 2 tasks | 4 files |
+| Phase 02-source-inspection-gpu-compute-pipeline P02 | 6min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,8 @@ Recent decisions affecting current work:
 - [Phase 01]: URP OUTPUT_SH4 is a 5-param macro under LIGHTMAP_ON/APV (4-arg call fails 'too few arguments'); use OUTPUT_SH (always 2-param, SampleSHVertex legacy path) unless the shader opts into APV
 - [Phase 02-source-inspection-gpu-compute-pipeline]: SourceInspector resolves FBX/model assets via non-generic AssetDatabase.LoadAllAssetsAtPath (returns Object[]) with a Material filter — LoadAllAssetsAtPath<T> does not exist in Unity 6
 - [Phase 02-source-inspection-gpu-compute-pipeline]: Roughness = 1 - Smoothness; Emissive = max(EmissionColor RGB) when a map or non-black emission color is present; AoUnmultiplyStrength (cleaning, default 1.0) kept distinct from OcclusionStrength (decode-time blend metadata)
+- [Phase 02-source-inspection-gpu-compute-pipeline]: _BaseColor tint stays as material metadata (not baked into the normalized texture), matching the emissive-color-as-metadata convention
+- [Phase 02-source-inspection-gpu-compute-pipeline]: GPU path follows the plan's sRGB upload contract verbatim (_SourceIsSrgb from BaseMapIsSrgb); Blit linearization is verified numerically in 02-03, not assumed here
 
 ### Pending Todos
 
@@ -101,6 +104,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-27T00:25:17.048Z
+Last session: 2026-08-27T00:44:21.911Z
 Stopped at: Phase 2 context gathered
 Resume file: None

@@ -32,9 +32,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Base Texture Normalization
 
-- [ ] **NORM-01**: Processor produces a cleaned base color texture with unwanted baked lighting removed where feasible
-- [ ] **NORM-02**: Source maps are normalized (color space, orientation, scalar-vs-map unification) in a GPU compute pipeline
-- [ ] **NORM-03**: Per-pixel processing of 2K/4K textures runs via compute shaders, not per-pixel C# loops
+- [x] **NORM-01**: Processor produces a cleaned base color texture with unwanted baked lighting removed where feasible
+- [x] **NORM-02**: Source maps are normalized (color space, orientation, scalar-vs-map unification) in a GPU compute pipeline
+- [x] **NORM-03**: Per-pixel processing of 2K/4K textures runs via compute shaders, not per-pixel C# loops
 
 ### Vertex Color Decomposition
 
@@ -127,9 +127,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SHDR-02 | Phase 1 | Complete |
 | SHDR-03 | Phase 1 | Complete |
 | SHDR-04 | Phase 1 | Complete |
-| NORM-01 | Phase 2 | Pending |
-| NORM-02 | Phase 2 | Pending |
-| NORM-03 | Phase 2 | Pending |
+| NORM-01 | Phase 2 | Complete |
+| NORM-02 | Phase 2 | Complete |
+| NORM-03 | Phase 2 | Complete |
 | VCOL-01 | Phase 4 | Pending |
 | VCOL-02 | Phase 4 | Pending |
 | VCOL-03 | Phase 4 | Pending |

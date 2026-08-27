@@ -1,7 +1,8 @@
 ---
 phase: 02-source-inspection-gpu-compute-pipeline
 verified: 2026-08-27T18:40:53Z
-status: human_needed
+status: verified
+human_verification_resolved: 2026-08-27T19:28:12Z
 score: 20/20 must-haves verified (4/4 roadmap success criteria + 16/16 plan truths)
 overrides_applied: 0
 human_verification:
@@ -17,7 +18,14 @@ human_verification:
 
 **Phase Goal:** Read URP Lit/Standard source materials and produce the normalized base color and packed surface textures entirely in GPU compute, verified against the CPU reference
 **Verified:** 2026-08-27T18:40:53Z
-**Status:** human_needed (2 items; all automated must-haves verified)
+**Status:** verified — 20/20 automated must-haves + 2/2 human-verification items passed via UAT (see below)
+
+## Human Verification Resolution (2026-08-27)
+
+Both `human_verification` items were executed and passed in the live editor by the user, recorded in `02-HUMAN-UAT.md` (status: complete, commit `76e5781`):
+
+1. **Inspect Selection menu** — user ran `Tools > NAMER > Inspect Selection` in the live editor; the `[NAMER]` console report rendered. Result: pass.
+2. **FBX/model sub-asset selection** — user inspected `Assets/Models/Neo-T-Pose.fbx`; embedded sub-asset materials resolved through `AddSubAssetMaterials`. Result: pass.
 **Re-verification:** No — initial verification
 **Mode note:** Phase is `mode: mvp`; the ROADMAP goal is not User Story format (same condition as Phase 1, recorded there as a process note). All three PLANs carry one identical validating User Story, used for User Flow Coverage below. Optional cleanup: `/gsd mvp-phase 2`.
 

@@ -13,7 +13,7 @@ The journey moves from the format contract outward. First we lock the NAMER pack
 
 - [x] **Phase 1: Core Format Contract + Runtime Decode** - Define the packed format in pure-C# Core and decode it in the URP runtime shader (completed 2026-08-26)
 - [x] **Phase 2: Source Inspection + GPU Compute Pipeline** - Read source materials and produce normalized + packed textures in GPU compute (completed 2026-08-27)
-- [ ] **Phase 3: Asset Generation + Editor Workflow + Preview** - Generate NAMER assets non-destructively from an editor window with preview
+- [x] **Phase 3: Asset Generation + Editor Workflow + Preview** - Generate NAMER assets non-destructively from an editor window with preview (completed 2026-08-27)
 - [ ] **Phase 4: Vertex-Color Decomposition + Residual** - Fit low-frequency color into vertex colors with an adaptive residual texture
 - [ ] **Phase 5: Stylization** - Apply reference-image-driven, hue-preserving stylization via NAMERStyleProfile
 
@@ -105,7 +105,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 03-03: Source-immutability + asset-path tests; assemble shippable MVP package
+- [x] 03-03: Source-immutability + asset-path tests; assemble shippable MVP package
 
 **UI hint**: yes
 
@@ -161,6 +161,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Core Format Contract + Runtime Decode | 3/3 | Complete   | 2026-08-26 |
 | 2. Source Inspection + GPU Compute Pipeline | 3/3 | Complete   | 2026-08-27 |
-| 3. Asset Generation + Editor Workflow + Preview | 2/3 | In Progress|  |
+| 3. Asset Generation + Editor Workflow + Preview | 3/3 | Complete   | 2026-08-27 |
 | 4. Vertex-Color Decomposition + Residual | 0/3 | Not started | - |
 | 5. Stylization | 0/3 | Not started | - |

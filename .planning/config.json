@@ -32,7 +32,8 @@
     "ai_integration_phase": true,
     "tdd_mode": false,
     "code_review_command": "claude -p --model glm-5.2",
-    "ui_review": true
+    "ui_review": true,
+    "_auto_chain_active": true
   },
   "ship": {
     "pr_body_sections": [
@@ -69,7 +70,6 @@
   "agent_skills": {},
   "features": {},
   "runtime": "opencode",
-  "branching_strategy": "none",
   "quick_branch_template": null,
   "intel": {
     "enabled": false

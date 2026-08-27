@@ -1,0 +1,27 @@
+namespace GraffitiEntertainment.Namer.Editor
+{
+    /// <summary>
+    /// Shared constants for the Phase 3 asset-generation and editor-workflow layer.
+    /// Centralizes the generated-asset label (D-04), the default destination (D-01),
+    /// the prefix/suffix defaults (D-02), and the UI debounce interval (UI-SPEC) so no
+    /// magic strings or magic numbers are inlined across the processor, generator, and
+    /// window. Replicates the <c>Core/NamerConstants.cs</c> shape in the Editor namespace.
+    /// </summary>
+    public static class NamerEditorConstants
+    {
+        /// <summary>Asset label applied to every generated asset; the D-04 overwrite stamp.</summary>
+        public const string GeneratedLabel = "NamerGenerated";
+
+        /// <summary>Default generated-output root under the project Assets/ folder (D-01).</summary>
+        public const string DefaultDestination = "Assets/NAMERGenerated/";
+
+        /// <summary>Default file-name prefix applied to generated assets (D-02).</summary>
+        public const string DefaultPrefix = "";
+
+        /// <summary>Default file-name suffix applied to generated assets (D-02).</summary>
+        public const string DefaultSuffix = "_Namer";
+
+        /// <summary>UI debounce interval in seconds (UI-SPEC; named constant, not a magic number).</summary>
+        public const float DebounceSeconds = 0.3f;
+    }
+}

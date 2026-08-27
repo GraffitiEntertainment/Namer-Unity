@@ -92,22 +92,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 PrefabAssetType prefabType = PrefabUtility.GetPrefabAssetType(go);
                 if (prefabType == PrefabAssetType.Regular || prefabType == PrefabAssetType.Variant)
                 {
-                    GameObject contents = PrefabUtility.LoadPrefabContents(assetPath);
-                    try
-                    {
-                        if (contents != null)
-                        {
-                            foreach (Renderer renderer in contents.GetComponentsInChildren<Renderer>(true))
-                            {
-                                AddSharedMaterials(renderer, materials, seen);
-                            }
-                        }
-                    }
-                    finally
-                    {
-                        PrefabUtility.UnloadPrefabContents(contents);
-                    }
-
+                    AddPrefabContentsMaterials(assetPath, materials, seen);
                     return;
                 }
 
@@ -120,13 +105,22 @@ namespace GraffitiEntertainment.Namer.Editor
 
             string path = AssetDatabase.GetAssetPath(selection);
 
-            // Folder (DefaultAsset): recurse for materials and model sub-asset materials.
+            // Folder (DefaultAsset): recurse for materials, prefab-contained materials,
+            // and model sub-asset materials.
             if (selection is DefaultAsset && AssetDatabase.IsValidFolder(path))
             {
                 foreach (string guid in AssetDatabase.FindAssets("t:Material", new[] { path }))
                 {
                     Material m = AssetDatabase.LoadAssetAtPath<Material>(AssetDatabase.GUIDToAssetPath(guid));
                     AddUnique(m, materials, seen);
+                }
+
+                // Prefab assets are the most common material container; resolve their
+                // renderers through prefab contents exactly like a direct prefab
+                // selection would (WR-03).
+                foreach (string guid in AssetDatabase.FindAssets("t:Prefab", new[] { path }))
+                {
+                    AddPrefabContentsMaterials(AssetDatabase.GUIDToAssetPath(guid), materials, seen);
                 }
 
                 foreach (string guid in AssetDatabase.FindAssets("t:Model", new[] { path }))
@@ -154,6 +148,30 @@ namespace GraffitiEntertainment.Namer.Editor
             foreach (Material m in renderer.sharedMaterials)
             {
                 AddUnique(m, materials, seen);
+            }
+        }
+
+        /// <summary>
+        /// Resolves a prefab asset's materials by loading its prefab contents and walking
+        /// all renderers (inactive included), unloading the contents afterwards. Shared by
+        /// the prefab-selection path and the folder path so both resolve identically.
+        /// </summary>
+        private static void AddPrefabContentsMaterials(string assetPath, List<Material> materials, HashSet<int> seen)
+        {
+            GameObject contents = PrefabUtility.LoadPrefabContents(assetPath);
+            try
+            {
+                if (contents != null)
+                {
+                    foreach (Renderer renderer in contents.GetComponentsInChildren<Renderer>(true))
+                    {
+                        AddSharedMaterials(renderer, materials, seen);
+                    }
+                }
+            }
+            finally
+            {
+                PrefabUtility.UnloadPrefabContents(contents);
             }
         }
 

@@ -235,6 +235,40 @@ namespace GraffitiEntertainment.Namer.Tests
             }
         }
 
+        // -- INSP-01 / WR-03: folder resolution of prefab assets ----------------
+
+        [Test]
+        public void FolderResolution_FindsMaterialsInsidePrefabs()
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+            Assert.IsNotNull(shader, "URP Lit shader not found");
+
+            EnsureTempFolder();
+            Material shared = new Material(shader);
+            AssetDatabase.CreateAsset(shared, TempFolder + "/NamerTestFolderSharedMaterial.mat");
+            GameObject source = new GameObject("FolderPrefabSource");
+            MeshRenderer renderer = source.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = shared;
+            try
+            {
+                PrefabUtility.SaveAsPrefabAsset(source, TempFolder + "/NamerTestFolderPrefab.prefab");
+                DefaultAsset folder = AssetDatabase.LoadAssetAtPath<DefaultAsset>(TempFolder);
+                Assert.IsNotNull(folder, "temp folder DefaultAsset should load");
+
+                // The .mat also lives in the folder, so the t:Material pass finds it too;
+                // the prefab pass must resolve the same instance and dedupe to one entry.
+                NamerSourceModel model = SourceInspector.Inspect(folder);
+                Assert.AreEqual(1, model.Materials.Count,
+                    "folder of prefabs should resolve the prefab's material, deduped with the direct material asset");
+                Assert.AreEqual(shared.GetInstanceID(), model.Materials[0].Material.GetInstanceID());
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(TempFolder);
+                Destroy(source);
+            }
+        }
+
         // -- INSP-01: prefab-asset resolution ---------------------------------
 
         [Test]

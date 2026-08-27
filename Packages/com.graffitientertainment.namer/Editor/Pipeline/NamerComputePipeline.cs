@@ -53,14 +53,18 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>
         /// Number of render targets currently live in the pool. 02-03's leak watchdog
-        /// asserts this returns to baseline after <see cref="Process"/> + <see cref="Dispose"/>.
+        /// asserts this returns to baseline after each <see cref="Process"/> +
+        /// <see cref="ReleaseResult"/> pair, before <see cref="Dispose"/>.
         /// </summary>
         public int LiveRenderTargetCount => _pool.LiveCount;
 
         /// <summary>
         /// Runs the three staged kernels and returns in-memory normalized base-color and
-        /// packed surface render targets. The caller owns the returned targets and must
-        /// read them back (via <see cref="RequestReadback"/>) before disposing this pipeline.
+        /// packed surface render targets. The result's two targets are leased from the
+        /// pool: read them back (via <see cref="RequestReadback"/>), then return them
+        /// with <see cref="ReleaseResult"/> — a batch of N materials must not accumulate
+        /// live outputs. Targets still unreleased when this pipeline is disposed are
+        /// destroyed with it, so release every result before disposing.
         /// </summary>
         public NamerComputeResult Process(NamerMaterialInspection inspection)
         {
@@ -120,6 +124,24 @@ namespace GraffitiEntertainment.Namer.Editor
                 Release(octahedral);
                 Release(packInputs);
             }
+        }
+
+        /// <summary>
+        /// Returns a <see cref="Process"/> result's two render targets to the pool for
+        /// reuse by later <see cref="Process"/> calls. Call after readback; afterwards
+        /// the result is invalid (its targets are null) and must not be used again.
+        /// </summary>
+        public void ReleaseResult(NamerComputeResult result)
+        {
+            if (result == null)
+            {
+                return;
+            }
+
+            _pool.Release(result.NormalizedBaseColor);
+            _pool.Release(result.PackedSurface);
+            result.NormalizedBaseColor = null;
+            result.PackedSurface = null;
         }
 
         /// <summary>
@@ -246,8 +268,12 @@ namespace GraffitiEntertainment.Namer.Editor
     }
 
     /// <summary>
-    /// In-memory result of <see cref="NamerComputePipeline.Process"/>. The caller owns
-    /// the two render targets and must read them back before the pipeline is disposed.
+    /// In-memory result of <see cref="NamerComputePipeline.Process"/>. The two render
+    /// targets are leased from the pipeline's pool, not owned by the caller: read them
+    /// back, then return them with <see cref="NamerComputePipeline.ReleaseResult"/>.
+    /// After <see cref="NamerComputePipeline.ReleaseResult"/> the fields are null; if
+    /// the pipeline is disposed while a result is still unreleased, its targets are
+    /// destroyed with it and become unusable.
     /// </summary>
     public sealed class NamerComputeResult
     {

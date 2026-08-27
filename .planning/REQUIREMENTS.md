@@ -74,7 +74,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **TEST-01**: Automated tests cover octahedral encode/decode, metallic/emissive/roughness bit packing, and AO preservation
 - [ ] **TEST-02**: Automated tests cover vertex color fitting, residual reconstruction, and UV seam behavior
 - [ ] **TEST-03**: Automated tests cover generated asset paths and source-asset immutability
-- [ ] **TEST-04**: GPU kernels are verified against the CPU reference implementation (Core assembly) via round-trip tests
+- [x] **TEST-04**: GPU kernels are verified against the CPU reference implementation (Core assembly) via round-trip tests
 
 ### Packaging
 
@@ -154,7 +154,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TEST-01 | Phase 1 | Complete |
 | TEST-02 | Phase 4 | Pending |
 | TEST-03 | Phase 3 | Pending |
-| TEST-04 | Phase 2 | Pending |
+| TEST-04 | Phase 2 | Complete |
 | PKG-01 | Phase 1 | Complete |
 
 **Coverage:**

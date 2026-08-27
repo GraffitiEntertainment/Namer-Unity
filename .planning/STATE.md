@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Phase 2 context gathered
-last_updated: "2026-08-27T00:47:29.753Z"
+status: verifying
+stopped_at: Completed 02-03-PLAN.md (GPU golden + compute smoke tests)
+last_updated: "2026-08-27T01:15:35.350Z"
 last_activity: 2026-08-27
 progress:
   total_phases: 5
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 6
-  completed_plans: 5
-  percent: 20
+  completed_plans: 6
+  percent: 40
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 
 Phase: 02 (Source Inspection + GPU Compute Pipeline) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-27
 
-Progress: [████████░░] 83%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Progress: [████████░░] 83%
 | Phase 01-core-format-contract-runtime-decode P02 | 100min | 3 tasks | 5 files |
 | Phase 02-source-inspection-gpu-compute-pipeline P01 | 10min | 2 tasks | 4 files |
 | Phase 02-source-inspection-gpu-compute-pipeline P02 | 6min | 2 tasks | 8 files |
+| Phase 02-source-inspection-gpu-compute-pipeline P03 | 10min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -81,6 +82,8 @@ Recent decisions affecting current work:
 - [Phase 02-source-inspection-gpu-compute-pipeline]: Roughness = 1 - Smoothness; Emissive = max(EmissionColor RGB) when a map or non-black emission color is present; AoUnmultiplyStrength (cleaning, default 1.0) kept distinct from OcclusionStrength (decode-time blend metadata)
 - [Phase 02-source-inspection-gpu-compute-pipeline]: _BaseColor tint stays as material metadata (not baked into the normalized texture), matching the emissive-color-as-metadata convention
 - [Phase 02-source-inspection-gpu-compute-pipeline]: GPU path follows the plan's sRGB upload contract verbatim (_SourceIsSrgb from BaseMapIsSrgb); Blit linearization is verified numerically in 02-03, not assumed here
+- [Phase 02-source-inspection-gpu-compute-pipeline]: 02-03 verified the sRGB upload contract numerically: Graphics.Blit from an sRGB Texture2D to a linear RenderTexture is a raw copy (no implicit sRGB->linear), so the compute shader's single SRGBToLinear in CSNormalize is the correct decode — the Blit double-decode hazard did not materialize
+- [Phase 02-source-inspection-gpu-compute-pipeline]: GPU golden decode-dot reference = NamerFormat.OctahedralDecode(OctahedralEncode(texel)) so the D-14 dot >= 1-1e-3 assertion stays self-consistent for all 5 golden vectors (incl. the pathological (1,0,0) texel D, avoiding the Phase 1 Pitfall 3 texel-direction oracle)
 
 ### Pending Todos
 
@@ -104,6 +107,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-27T00:44:21.911Z
-Stopped at: Phase 2 context gathered
+Last session: 2026-08-27T01:15:34.958Z
+Stopped at: Completed 02-03-PLAN.md (GPU golden + compute smoke tests)
 Resume file: None

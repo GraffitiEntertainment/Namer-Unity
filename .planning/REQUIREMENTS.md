@@ -9,10 +9,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Material Inspection
 
-- [ ] **INSP-01**: User can select a GameObject, prefab, FBX/model, material, or asset folder as the NAMER processing source
-- [ ] **INSP-02**: Processor inspects URP Lit source materials and locates Base Color, Normal, AO, Metallic, Roughness/Smoothness, Emission, and Alpha maps when present
-- [ ] **INSP-03**: Processor reads scalar material properties as fallbacks when separate maps are absent (Unity Standard supported where available)
-- [ ] **INSP-04**: Missing maps use sensible defaults without failing the pipeline
+- [x] **INSP-01**: User can select a GameObject, prefab, FBX/model, material, or asset folder as the NAMER processing source
+- [x] **INSP-02**: Processor inspects URP Lit source materials and locates Base Color, Normal, AO, Metallic, Roughness/Smoothness, Emission, and Alpha maps when present
+- [x] **INSP-03**: Processor reads scalar material properties as fallbacks when separate maps are absent (Unity Standard supported where available)
+- [x] **INSP-04**: Missing maps use sensible defaults without failing the pipeline
 
 ### NAMER Encoding
 
@@ -113,10 +113,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INSP-01 | Phase 2 | Pending |
-| INSP-02 | Phase 2 | Pending |
-| INSP-03 | Phase 2 | Pending |
-| INSP-04 | Phase 2 | Pending |
+| INSP-01 | Phase 2 | Complete |
+| INSP-02 | Phase 2 | Complete |
+| INSP-03 | Phase 2 | Complete |
+| INSP-04 | Phase 2 | Complete |
 | ENCD-01 | Phase 1 | Complete |
 | ENCD-02 | Phase 1 | Complete |
 | ENCD-03 | Phase 1 | Complete |

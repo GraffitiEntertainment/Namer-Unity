@@ -23,5 +23,8 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>UI debounce interval in seconds (UI-SPEC; named constant, not a magic number).</summary>
         public const float DebounceSeconds = 0.3f;
+
+        /// <summary>Default AO un-multiply strength (D-08; persisted in <see cref="NamerProcessorSettings"/>).</summary>
+        public const float DefaultAoUnmultiplyStrength = 1f;
     }
 }

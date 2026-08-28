@@ -15,6 +15,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private const string PrefixKey = "NamerProcessor.Prefix";
         private const string SuffixKey = "NamerProcessor.Suffix";
         private const string OverwriteGeneratedKey = "NamerProcessor.OverwriteGenerated";
+        private const string AoUnmultiplyStrengthKey = "NamerProcessor.AoUnmultiplyStrength";
 
         /// <summary>Generated-output root folder (D-01 default: Assets/NAMERGenerated/).</summary>
         public string Destination
@@ -42,6 +43,13 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             get { return EditorPrefs.GetBool(OverwriteGeneratedKey, false); }
             set { EditorPrefs.SetBool(OverwriteGeneratedKey, value); }
+        }
+
+        /// <summary>AO un-multiply strength applied during generation (D-08; drives the live preview).</summary>
+        public float AoUnmultiplyStrength
+        {
+            get { return EditorPrefs.GetFloat(AoUnmultiplyStrengthKey, NamerEditorConstants.DefaultAoUnmultiplyStrength); }
+            set { EditorPrefs.SetFloat(AoUnmultiplyStrengthKey, value); }
         }
     }
 }

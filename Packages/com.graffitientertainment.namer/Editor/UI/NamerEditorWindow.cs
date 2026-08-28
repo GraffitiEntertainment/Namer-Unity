@@ -164,8 +164,7 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             _model = SourceInspector.Inspect(_selection);
 
-            NamerMaterialInspection primary = PrimaryInspection;
-            _aoStrength = primary != null ? primary.AoUnmultiplyStrength : 1f;
+            _aoStrength = _settings.AoUnmultiplyStrength;
 
             _previewMesh = ResolvePreviewMesh(_selection);
             if (_previewMesh != null)
@@ -447,6 +446,7 @@ namespace GraffitiEntertainment.Namer.Editor
             if (!Mathf.Approximately(newAo, _aoStrength))
             {
                 _aoStrength = newAo;
+                _settings.AoUnmultiplyStrength = newAo;
                 MarkDirty();
             }
 

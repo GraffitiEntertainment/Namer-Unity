@@ -1,5 +1,5 @@
 ---
-status: diagnosed
+status: fix_applied
 phase: 03-asset-generation-editor-workflow-preview
 source: [03-VERIFICATION.md]
 started: 2026-08-27
@@ -43,7 +43,7 @@ blocked: 0
 
 <!-- YAML format for plan-phase --gaps consumption -->
 - truth: "Dragging the AO un-multiply slider recomputes the preview in ~300 ms in memory, with no asset written to disk and no error"
-  status: diagnosed
+  status: fix_applied
   reason: "User reported: 'If I move AO down ao unmultiply-strength, it gives an error that the process is block refusing to overwrite non-generated asset' — the slider recompute path hits the generator's overwrite gate instead of staying preview-only (D-10)"
   severity: blocker
   test: 1
@@ -51,8 +51,9 @@ blocked: 0
   artifacts: [".planning/debug/ao-slider-overwrite-gate.md", ".planning/debug/ao-recompute-affordance.md", ".planning/debug/rerun-overwrite-stamp.md"]
   missing: []
   debug_session: "ao-slider-overwrite-gate"
+  fix_commit: "6062b19"
 - truth: "Orbit interaction matches the standard Unity object-preview expectation (drag rotates the object/scene; before/after panes track it)"
-  status: diagnosed
+  status: fix_applied
   reason: "User reported: 'when I rotate the images, the before and after should move or be in the scene to rotate with the object'"
   severity: minor
   test: 1
@@ -60,8 +61,9 @@ blocked: 0
   artifacts: [".planning/debug/preview-orbit-expectation.md"]
   missing: []
   debug_session: "preview-orbit-expectation"
+  fix_commit: "3b46ce8"
 - truth: "The AO recompute path is discoverable in the window UI (automatic ~300 ms debounced recompute is apparent, or an explicit affordance exists)"
-  status: diagnosed
+  status: fix_applied
   reason: "User reported: 'I don't see a AO recompute button?'"
   severity: minor
   test: 1
@@ -69,8 +71,9 @@ blocked: 0
   artifacts: [".planning/debug/ao-recompute-affordance.md"]
   missing: []
   debug_session: "ao-recompute-affordance"
+  fix_commit: "2bbd2ea"
 - truth: "Re-running Process with Overwrite generated enabled replaces the assets the first run itself generated (NamerGenerated-stamped)"
-  status: diagnosed
+  status: fix_applied
   reason: "User reported: 're-run doesn't allow overwriting the generated assets says only NamerGenerated-stampped assets trying to overwrite the surface.png' — same gate message as the AO-slider error, suggesting the stamp applied at generation is not detected on the next run"
   severity: major
   test: 2
@@ -78,8 +81,9 @@ blocked: 0
   artifacts: [".planning/debug/rerun-overwrite-stamp.md", ".planning/debug/ao-slider-overwrite-gate.md"]
   missing: []
   debug_session: "rerun-overwrite-stamp"
+  fix_commit: "6062b19"
 - truth: "NAMERPack.compute compiles without warnings on Metal"
-  status: diagnosed
+  status: fix_applied
   reason: "User reported 6 shader warnings: 'Shader warning in NAMERPack: signed/unsigned mismatch, unsigned assumed' at NAMERPack.compute(80) and (92) in kernels CSNormalize, CSOctahedralEncode, CSSurfacePack (on metal)"
   severity: minor
   test: 1
@@ -87,3 +91,4 @@ blocked: 0
   artifacts: [".planning/debug/namerpack-signed-unsigned.md"]
   missing: []
   debug_session: "namerpack-signed-unsigned"
+  fix_commit: "191a9fb"

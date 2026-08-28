@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: ready_to_plan
-stopped_at: Phase 3 complete (3/3) — ready to discuss Phase 4
-last_updated: 2026-08-28T00:18:49.850Z
-last_activity: 2026-08-27
+status: planning
+stopped_at: Completed 03-03-PLAN.md
+last_updated: "2026-08-28T20:37:40.957Z"
+last_activity: 2026-08-28
 progress:
-  total_phases: 5
+  total_phases: 6
   completed_phases: 3
   total_plans: 9
   completed_plans: 9
-  percent: 60
+  percent: 50
 ---
 
 # Project State
@@ -21,11 +21,11 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-25)
 
 **Core value:** A user can select a textured FBX in Unity, run `Process with NAMER`, and get a correctly rendering, source-compatible NAMER material without ever modifying the imported source assets or leaving the Unity Editor.
-**Current focus:** Phase 4 — vertex color decomposition + residual
+**Current focus:** Phase 03.1 — AO extraction: un-multiply baked AO from the base texture, with bake tweaks
 
 ## Current Position
 
-Phase: 4
+Phase: 03.1
 Plan: Not started
 Status: Ready to plan
 Last activity: 2026-08-28
@@ -64,6 +64,10 @@ Progress: [██████████] 100%
 | Phase 03-asset-generation-editor-workflow-preview P03 | 27min | 3 tasks | 7 files |
 
 ## Accumulated Context
+
+### Roadmap Evolution
+
+- Phase 03.1 inserted after Phase 3: AO extraction: un-multiply baked AO from the base texture, with bake tweaks (cubemap light from high-res model, blur, etc.) (URGENT)
 
 ### Decisions
 

@@ -12,11 +12,13 @@ namespace GraffitiEntertainment.Namer.Editor
     /// URP materials render magenta/fallback-error through the built-in preview path, so
     /// every render calls <see cref="PreviewRenderUtility.Render(bool, bool)"/> with
     /// <c>allowScriptableRenderPipeline = true</c> (RESEARCH Pitfall 1). The two mesh
-    /// instances are drawn symmetric about the world origin (the orbit pivot), which is
-    /// the honest before/after midpoint; framing distance is derived from the mesh bounds
-    /// plus the horizontal separation so both instances stay in view. Orbit/zoom mutate
-    /// the shared camera state (Task 2 wires the mouse events); re-framing re-fits
-    /// <see cref="Mesh.bounds"/> only when the framed mesh changes.
+    /// instances are drawn symmetric about the world origin, which is the honest
+    /// before/after midpoint; framing distance is derived from the mesh bounds plus the
+    /// horizontal separation so both instances stay in view. Orbit rotates each instance
+    /// IN PLACE about its own bounds center (the standard Unity object-preview
+    /// expectation — drag spins the object, camera stays put); zoom moves the fixed
+    /// camera along its viewing axis. Re-framing re-fits <see cref="Mesh.bounds"/> only
+    /// when the framed mesh changes.
     /// </summary>
     public sealed class NamerPreviewRenderer : IDisposable
     {
@@ -65,14 +67,17 @@ namespace GraffitiEntertainment.Namer.Editor
             _preview.lights[0].transform.rotation = Quaternion.Euler(50f, -30f, 0f);
             _preview.lights[1].transform.rotation = Quaternion.Euler(340f, 218f, 177f);
 
-            // Draw each instance so its mesh-bounds center lands on the ±separation
-            // offset, symmetric about the orbit pivot (world origin).
-            Vector3 boundsCenter = mesh.bounds.center;
-            Vector3 beforePosition = new Vector3(-HalfSeparation, 0f, 0f) - boundsCenter;
-            Vector3 afterPosition = new Vector3(HalfSeparation, 0f, 0f) - boundsCenter;
+            // Draw each instance rotated IN PLACE about its own bounds center: the draw
+            // transform maps v -> rotation * v + position, so countering the rotated
+            // bounds center keeps each pane's object centered on the ±separation offset
+            // while it spins (camera fixed — Unity Inspector-preview semantics).
+            Quaternion meshRotation = Quaternion.Euler(_pitch, _yaw, 0f);
+            Vector3 rotatedBoundsCenter = meshRotation * mesh.bounds.center;
+            Vector3 beforePosition = new Vector3(-HalfSeparation, 0f, 0f) - rotatedBoundsCenter;
+            Vector3 afterPosition = new Vector3(HalfSeparation, 0f, 0f) - rotatedBoundsCenter;
 
-            _preview.DrawMesh(mesh, beforePosition, Quaternion.identity, before, 0);
-            _preview.DrawMesh(mesh, afterPosition, Quaternion.identity, after, 0);
+            _preview.DrawMesh(mesh, beforePosition, meshRotation, before, 0);
+            _preview.DrawMesh(mesh, afterPosition, meshRotation, after, 0);
 
             // allowScriptableRenderPipeline = true is REQUIRED for URP materials —
             // the default false path renders them magenta/fallback-error.
@@ -111,8 +116,8 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Orbits the shared camera around the pivot by yaw (world up) and pitch (local X)
-        /// degrees; pitch is clamped to keep the camera above/below the mesh.
+        /// Rotates both preview instances in place by yaw (world up) and pitch (local X)
+        /// degrees; pitch is clamped to keep both poles reachable. The camera stays fixed.
         /// </summary>
         public void Orbit(float yawDegrees, float pitchDegrees)
         {
@@ -122,7 +127,7 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Zooms the shared camera along its forward axis (positive scroll = closer),
+        /// Zooms the fixed camera along its viewing axis (positive scroll = closer),
         /// clamped to a sane distance range.
         /// </summary>
         public void Zoom(float scrollDelta)
@@ -162,10 +167,10 @@ namespace GraffitiEntertainment.Namer.Editor
                 return;
             }
 
-            Quaternion rotation = Quaternion.Euler(_pitch, _yaw, 0f);
-            Vector3 position = rotation * new Vector3(0f, 0f, -_distance);
-            _preview.camera.transform.position = position;
-            _preview.camera.transform.rotation = rotation;
+            // Camera fixed on its viewing axis, looking at the before/after midpoint
+            // (world origin); orbit rotation is applied to the mesh instances in Render.
+            _preview.camera.transform.position = new Vector3(0f, 0f, -_distance);
+            _preview.camera.transform.rotation = Quaternion.identity;
         }
     }
 }

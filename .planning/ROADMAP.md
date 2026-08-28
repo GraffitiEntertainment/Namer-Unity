@@ -111,13 +111,24 @@ Plans:
 
 ### Phase 03.1: AO extraction: un-multiply baked AO from the base texture, with bake tweaks (cubemap light from high-res model, blur, etc.) (INSERTED)
 
-**Goal:** [Urgent work - to be planned]
-**Requirements**: TBD
+**Goal:** Deliver real AO to the packed surface B channel and un-multiply baked AO out of the base color via two sources — image-space extraction (fixes the always-white-AO live pain) and a high-to-low geometry bake (64-direction visibility, cage offset 0.01, 10%-bounds ray distance, 16 px seam dilation) — with AO blur/strength/contrast tweaks
+**Requirements**: NORM-02, ENCD-03, UI-03 (boundary-aware IDs strengthened by this phase; no dedicated IDs — success criteria derived from CONTEXT.md D-01..D-13)
 **Depends on:** Phase 3
-**Plans:** 0 plans
+**Plans:** 3 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 03.1 to break down)
+
+**Wave 1**
+
+- [ ] 03.1-01: Image-space AO extraction + un-multiply floor (0.1) + source gate (D-07/D-09) + round-trip tests
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 03.1-02: Geometry bake subsystem (BVH + Burst baker + JFA dilation + fallback D-06 + three-way Process gate + tests)
+
+**Wave 3** *(blocked on Waves 1-2 completion)*
+
+- [ ] 03.1-03: AO tweak controls (blur/strength/contrast) + high-res occluder field + settings + automatic bake trigger + UI tests
 
 ### Phase 4: Vertex-Color Decomposition + Residual
 

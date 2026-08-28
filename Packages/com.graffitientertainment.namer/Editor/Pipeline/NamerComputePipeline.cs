@@ -13,9 +13,11 @@ namespace GraffitiEntertainment.Namer.Editor
     /// staged kernels in <c>Compute/NAMERPack.compute</c> on the GPU — never per-pixel C#.
     ///
     /// All render targets are declared with <see cref="GraphicsFormat"/> (intermediates
-    /// <see cref="GraphicsFormat.R16G16B16A16_SFloat"/> linear, final packed surface
-    /// <see cref="GraphicsFormat.R8G8B8A8_UNorm"/> linear), never sRGB, so compute can
-    /// write them directly (D-11). Source sRGB/isReadable flags are never mutated.
+    /// <see cref="GraphicsFormat.R16G16B16A16_SFloat"/> linear; inputs and the final
+    /// packed surface <see cref="GraphicsFormat.R8G8B8A8_UNorm"/> raw), never sRGB, so
+    /// compute can write them directly (D-11) and uploads carry source bytes through
+    /// unconverted regardless of the project color space. Source sRGB/isReadable flags
+    /// are never mutated.
     ///
     /// The <c>_BaseColor</c> tint is intentionally NOT baked into the normalized base —
     /// it stays as material metadata on the runtime NAMER shader.
@@ -77,7 +79,10 @@ namespace GraffitiEntertainment.Namer.Editor
             int h = inspection.BaseMap != null ? inspection.BaseMap.height : DefaultResolution;
 
             RenderTextureDescriptor intermediate = NewDescriptor(w, h, GraphicsFormat.R16G16B16A16_SFloat);
-            RenderTextureDescriptor surface = NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm);
+            // Inputs and the packed surface are 8-bit raw staging: copy-compatible with
+            // the RGBA32 sources so Upload can raw-copy them (kernels alone own any
+            // color conversion, D-11). Sources are 8-bit, so nothing is lost vs float16.
+            RenderTextureDescriptor unorm8 = NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm);
 
             RenderTexture baseColorIn = null;
             RenderTexture normalTexel = null;
@@ -90,14 +95,14 @@ namespace GraffitiEntertainment.Namer.Editor
 
             try
             {
-                baseColorIn = _pool.Lease(intermediate);
-                normalTexel = _pool.Lease(intermediate);
-                aoIn = _pool.Lease(intermediate);
-                metallicGlossIn = _pool.Lease(intermediate);
+                baseColorIn = _pool.Lease(unorm8);
+                normalTexel = _pool.Lease(unorm8);
+                aoIn = _pool.Lease(unorm8);
+                metallicGlossIn = _pool.Lease(unorm8);
                 baseColorOut = _pool.Lease(intermediate);
                 octahedral = _pool.Lease(intermediate);
                 packInputs = _pool.Lease(intermediate);
-                surfaceOut = _pool.Lease(surface);
+                surfaceOut = _pool.Lease(unorm8);
 
                 Upload(inspection.BaseMap, baseColorIn, WhiteFill());
                 Upload(inspection.NormalMap, normalTexel, NeutralNormalTexture());
@@ -212,7 +217,23 @@ namespace GraffitiEntertainment.Namer.Editor
 
         private static void Upload(Texture source, RenderTexture target, Texture2D fallback)
         {
-            Graphics.Blit(source != null ? source : fallback, target);
+            Texture upload = source != null ? source : fallback;
+
+            // Raw texel copy — no sampling, so no color-space conversion in any project
+            // color space. A sampled Graphics.Blit hardware-decodes sRGB-declared
+            // sources under a Linear project, double-decoding base color (the shader's
+            // _SourceIsSrgb decode) and violating the raw data-map contract in the
+            // kernels. CopyTexture requires equal dimensions, so only the rare
+            // resolution-mismatch path (including the 1x1 fills) still blits — those
+            // fills are linear-declared, which never converts in either color space.
+            if (upload.width == target.width && upload.height == target.height)
+            {
+                Graphics.CopyTexture(upload, target);
+            }
+            else
+            {
+                Graphics.Blit(upload, target);
+            }
         }
 
         private static RenderTextureDescriptor NewDescriptor(int width, int height, GraphicsFormat format)

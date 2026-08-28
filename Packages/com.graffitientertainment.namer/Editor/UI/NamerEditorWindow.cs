@@ -51,6 +51,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private double _lastChange;
         private bool _busy;
         private bool _recomputing;
+        private ColorSpace _previewColorSpace = ColorSpace.Uninitialized;
 
         private string _status = string.Empty;
         private bool _statusIsError;
@@ -183,6 +184,16 @@ namespace GraffitiEntertainment.Namer.Editor
 
         private void Tick()
         {
+            // A live color-space flip re-gates both the upload path and the preview
+            // base-map encode, but only RecomputePreview evaluates those gates, so a
+            // flip must re-run the debounced recompute (else the window keeps rendering
+            // textures bound under the old space).
+            if (QualitySettings.activeColorSpace != _previewColorSpace)
+            {
+                _previewColorSpace = QualitySettings.activeColorSpace;
+                MarkDirty();
+            }
+
             if (_busy || !_dirty)
             {
                 return;

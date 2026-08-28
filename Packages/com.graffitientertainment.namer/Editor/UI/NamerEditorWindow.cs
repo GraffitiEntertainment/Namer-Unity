@@ -523,18 +523,28 @@ namespace GraffitiEntertainment.Namer.Editor
             _statusIsError = false;
             Repaint();
 
-            NamerProcessResult result = NamerProcessor.Process(_selection, _settings);
-
-            foreach (string warning in result.Warnings)
+            try
             {
-                Debug.Log("[NAMER]   [warning] " + warning);
+                NamerProcessResult result = NamerProcessor.Process(_selection, _settings);
+
+                foreach (string warning in result.Warnings)
+                {
+                    Debug.Log("[NAMER]   [warning] " + warning);
+                }
+
+                _status = DescribeResult(result);
+                _statusIsError = !string.IsNullOrEmpty(result.Error);
             }
-
-            _status = DescribeResult(result);
-            _statusIsError = !string.IsNullOrEmpty(result.Error);
-
-            _busy = false;
-            Repaint();
+            catch (Exception ex)
+            {
+                _status = "Processing failed: " + ex.Message;
+                _statusIsError = true;
+            }
+            finally
+            {
+                _busy = false;
+                Repaint();
+            }
         }
 
         private string DescribeResult(NamerProcessResult result)

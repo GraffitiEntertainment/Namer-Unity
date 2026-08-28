@@ -161,6 +161,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Core Format Contract + Runtime Decode | 3/3 | Complete   | 2026-08-26 |
 | 2. Source Inspection + GPU Compute Pipeline | 3/3 | Complete   | 2026-08-27 |
-| 3. Asset Generation + Editor Workflow + Preview | 3/3 | Complete   | 2026-08-27 |
+| 3. Asset Generation + Editor Workflow + Preview | 3/3 | Complete    | 2026-08-28 |
 | 4. Vertex-Color Decomposition + Residual | 0/3 | Not started | - |
 | 5. Stylization | 0/3 | Not started | - |

@@ -64,9 +64,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [x] **UI-01**: NAMER editor window is available at `Tools > NAMER > Processor`
 - [x] **UI-02**: User can trigger processing via an explicit `Process with NAMER` command (no automatic import processing in v1)
-- [ ] **UI-03**: Editor window exposes processing controls (style strength, smoothing, palette, AO controls, normal detail, roughness simplification, vertex color decomposition, residual resolution) — *Phase 3 delivered the AO un-multiply control; the remaining controls are Phase 4/5 scope (D-11/D-14)*
-- [ ] **UI-04**: User can preview the actual selected mesh before/after (original, NAMER, stylized NAMER) — *Phase 3 delivered original + NAMER preview; stylized NAMER is Phase 5 scope*
-- [ ] **UI-05**: Debug channel views are available (vertex color only, residual, reconstructed base, AO, normal, roughness, metallic, emissive, reconstruction error) — *Phase 3 delivered base/AO/normal/roughness/metallic/emissive; vertex-color/residual/reconstruction-error views are Phase 4 scope (D-11)*
+- [x] **UI-03**: Editor window exposes processing controls (style strength, smoothing, palette, AO controls, normal detail, roughness simplification, vertex color decomposition, residual resolution) — *Phase 3 delivered the AO un-multiply control; the remaining controls are Phase 4/5 scope (D-11/D-14)*
+- [x] **UI-04**: User can preview the actual selected mesh before/after (original, NAMER, stylized NAMER) — *Phase 3 delivered original + NAMER preview; stylized NAMER is Phase 5 scope*
+- [x] **UI-05**: Debug channel views are available (vertex color only, residual, reconstructed base, AO, normal, roughness, metallic, emissive, reconstruction error) — *Phase 3 delivered base/AO/normal/roughness/metallic/emissive; vertex-color/residual/reconstruction-error views are Phase 4 scope (D-11)*
 - [x] **UI-06**: Preview updates interactively when processing controls change (GPU-favored)
 
 ### Testing

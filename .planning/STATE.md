@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: planning
-stopped_at: Completed 03-03-PLAN.md
-last_updated: "2026-08-28T20:37:40.957Z"
+stopped_at: Phase 3.1 context gathered
+last_updated: "2026-08-28T22:39:54.749Z"
 last_activity: 2026-08-28
 progress:
   total_phases: 6
@@ -123,6 +123,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-27T23:37:35.064Z
-Stopped at: Completed 03-03-PLAN.md
-Resume file: None
+Last session: 2026-08-28T22:39:54.730Z
+Stopped at: Phase 3.1 context gathered
+Resume file: .planning/phases/03.1-ao-extraction-un-multiply-baked-ao-from-the-base-texture-wit/03.1-CONTEXT.md

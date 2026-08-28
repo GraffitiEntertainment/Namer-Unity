@@ -374,6 +374,8 @@ namespace GraffitiEntertainment.Namer.Editor
                 material.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
                 material.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
                 material.SetFloat("_ZWrite", 0f);
+                material.renderQueue = (int)RenderQueue.Transparent;
+                material.SetOverrideTag("RenderType", "Transparent");
             }
 
             AssetDatabase.CreateAsset(material, materialPath);

@@ -25,6 +25,8 @@ namespace GraffitiEntertainment.Namer.Editor
     public sealed class NamerComputePipeline : IDisposable
     {
         private const string ComputeShaderPath = "Packages/com.graffitientertainment.namer/Compute/NAMERPack.compute";
+        private const string RawCopyShaderPath = "Packages/com.graffitientertainment.namer/Editor/Pipeline/NamerRawCopy.shader";
+        private const string ReencodeSrgbKeyword = "_REENCODE_SRGB";
         private const int DefaultResolution = 256;
 
         private static readonly Color NeutralNormalFill = new Color(0.5f, 0.5f, 1.0f, 1.0f);
@@ -39,6 +41,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private static Texture2D _whiteFill;
         private static Texture2D _neutralNormalTexture;
         private static Texture2D _neutralMetallicGlossTexture;
+        private static Material _rawCopyMaterial;
 
         public NamerComputePipeline()
         {
@@ -219,21 +222,46 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             Texture upload = source != null ? source : fallback;
 
-            // Raw texel copy — no sampling, so no color-space conversion in any project
-            // color space. A sampled Graphics.Blit hardware-decodes sRGB-declared
-            // sources under a Linear project, double-decoding base color (the shader's
-            // _SourceIsSrgb decode) and violating the raw data-map contract in the
-            // kernels. CopyTexture requires equal dimensions, so only the rare
-            // resolution-mismatch path (including the 1x1 fills) still blits — those
-            // fills are linear-declared, which never converts in either color space.
-            if (upload.width == target.width && upload.height == target.height)
+            // Raw upload through the NamerRawCopy material: a plain Graphics.Blit
+            // hardware-decodes sRGB-declared sources under a Linear project, which the
+            // kernels' _SourceIsSrgb decode would then double-decode. The material's
+            // _REENCODE_SRGB variant cancels that decode in-shader (both conversions
+            // run in float with one quantization at the write, so the source bytes
+            // arrive bit-exactly), and a sampled blit accepts every source shape —
+            // RGB24 layouts, mip chains, and non-base resolutions alike, none of which
+            // Graphics.CopyTexture's format/mip restrictions tolerate.
+            Material rawCopy = RawCopyMaterial();
+            bool reencode = GraphicsFormatUtility.IsSRGBFormat(upload.graphicsFormat)
+                && QualitySettings.activeColorSpace == ColorSpace.Linear;
+            if (reencode)
             {
-                Graphics.CopyTexture(upload, target);
+                rawCopy.EnableKeyword(ReencodeSrgbKeyword);
             }
             else
             {
-                Graphics.Blit(upload, target);
+                rawCopy.DisableKeyword(ReencodeSrgbKeyword);
             }
+
+            Graphics.Blit(upload, target, rawCopy);
+        }
+
+        private static Material RawCopyMaterial()
+        {
+            if (_rawCopyMaterial == null)
+            {
+                Shader shader = AssetDatabase.LoadAssetAtPath<Shader>(RawCopyShaderPath);
+                if (shader == null)
+                {
+                    throw new InvalidOperationException("NAMER raw-copy shader not found at " + RawCopyShaderPath);
+                }
+
+                _rawCopyMaterial = new Material(shader)
+                {
+                    hideFlags = HideFlags.HideAndDontSave,
+                };
+            }
+
+            return _rawCopyMaterial;
         }
 
         private static RenderTextureDescriptor NewDescriptor(int width, int height, GraphicsFormat format)

@@ -63,6 +63,75 @@ namespace GraffitiEntertainment.Namer.Tests
             }
         }
 
+        [UnityTest]
+        public IEnumerator Process_AcceptsMipmappedSourceTextures_CopyingMip0Raw()
+        {
+            if (!SystemInfo.supportsComputeShaders || !SystemInfo.supportsAsyncGPUReadback)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable on this backend (" + SystemInfo.graphicsDeviceType + ") — skipping (D-15: Metal is the verified target, CI matrix is v2).");
+                yield break;
+            }
+
+            // Imported asset textures carry mip chains while the upload targets are
+            // single-mip; Upload must carry mip 0 raw (the only level the kernels
+            // read). CopyTexture-based staging threw on real assets ("mismatching
+            // mip counts", then "mismatching data size" for RGB24 sources).
+            NamerComputePipeline pipeline = new NamerComputePipeline();
+            try
+            {
+                Texture2D baseMap = new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, true, false);
+                Texture2D aoMap = new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, true, true);
+                try
+                {
+                    FillSolid(baseMap, new Color(0.5f, 0.5f, 0.5f, 1.0f));
+                    baseMap.Apply(true, false);
+                    FillSolid(aoMap, new Color(0.0f, 0.5f, 0.0f, 1.0f));
+                    aoMap.Apply(true, false);
+                    Assert.Greater(baseMap.mipmapCount, 1, "source must actually carry a mip chain for this test to mean anything");
+
+                    NamerMaterialInspection inspection = new NamerMaterialInspection
+                    {
+                        BaseMap = baseMap,
+                        BaseMapIsSrgb = true,
+                        NormalMap = null,
+                        OcclusionMap = aoMap,
+                        MetallicGlossMap = null,
+                        Metallic = 0.0f,
+                        Smoothness = 0.5f,
+                        Roughness = 0.5f,
+                        Emissive = 0.0f,
+                        AoUnmultiplyStrength = 1.0f,
+                        SmoothnessTextureChannel = 0,
+                    };
+
+                    NamerComputeResult result = pipeline.Process(inspection);
+                    try
+                    {
+                        AsyncGPUReadbackRequest baseReq = AsyncGPUReadback.Request(result.NormalizedBaseColor, 0, TextureFormat.RGBA32);
+                        yield return new WaitUntil(() => baseReq.done);
+                        Assert.IsFalse(baseReq.hasError, "normalized base readback must not error");
+
+                        Color32 normalized = baseReq.GetData<Color32>()[0];
+                        float expected = SRGBToLinear(baseMap.GetPixel(0, 0).r) / Mathf.Max(aoMap.GetPixel(0, 0).g, 1e-6f);
+                        Assert.AreEqual((double)expected, normalized.r / 255.0, 1.0 / 255.0,
+                            "mip-0 upload must carry the raw authored bytes (single sRGB decode), not mip-filtered or converted values");
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(result);
+                    }
+                }
+                finally
+                {
+                    Destroy(baseMap, aoMap);
+                }
+            }
+            finally
+            {
+                pipeline.Dispose();
+            }
+        }
+
         private static IEnumerator RunScenario(NamerComputePipeline pipeline, bool baseIsSrgb, bool useMetallicGlossMap, bool dataMapsAreSrgb)
         {
             // Base color is uniform gray; AO is a data map (g = 0.5 to exercise un-multiply)

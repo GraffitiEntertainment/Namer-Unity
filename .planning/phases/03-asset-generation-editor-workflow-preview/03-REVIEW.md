@@ -175,3 +175,20 @@ string folderName = Path.GetFileName(normalized);
 _Reviewed: 2026-08-27T23:48:52Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
+
+## Fix Log
+
+_Applied by Claude (gsd-code-fixer)._
+
+| ID | Fix | Commit |
+|----|-----|--------|
+| CR-01 | Reject `..` and path separators in prefix/suffix; re-validate composed paths are confined under the destination before any write | `aa6a6b7` |
+| CR-02 | Apply the selected debug channel to the debug material immediately on toolbar change | `fbbae52` |
+| WR-01 | Wrap `RunProcess` in try/catch/finally so `_busy` is always released | `edbadf9` |
+| WR-02 | Thread `AoUnmultiplyStrength` through `NamerProcessorSettings` into generation | `123c3ab` |
+| WR-03 | Pre-flight all target paths (per-material and whole batch) before any write | `368c1b8` |
+| WR-04 | Normalize folder path separators to forward slashes before AssetDatabase calls | `2da8b7a` |
+| WR-05 | Set transparent render queue and RenderType override on transparent materials | `3fbf0b3` |
+| WR-06 | Resolve a persistent prefab mesh (or verify persistence) before unloading prefab contents | `506a3c4` |
+
+_Regression test for CR-01 path-confinement was added in the WR-03 commit (`368c1b8`), where the pre-GPU preflight path made it a clean non-GPU `[Test]`._

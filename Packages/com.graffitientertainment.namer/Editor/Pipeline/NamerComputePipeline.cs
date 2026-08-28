@@ -26,7 +26,7 @@ namespace GraffitiEntertainment.Namer.Editor
     {
         private const string ComputeShaderPath = "Packages/com.graffitientertainment.namer/Compute/NAMERPack.compute";
         private const string RawCopyShaderPath = "Packages/com.graffitientertainment.namer/Editor/Pipeline/NamerRawCopy.shader";
-        private const string ReencodeSrgbKeyword = "_REENCODE_SRGB";
+        internal const string ReencodeSrgbKeyword = "_REENCODE_SRGB";
         private const int DefaultResolution = 256;
 
         private static readonly Color NeutralNormalFill = new Color(0.5f, 0.5f, 1.0f, 1.0f);
@@ -245,7 +245,7 @@ namespace GraffitiEntertainment.Namer.Editor
             Graphics.Blit(upload, target, rawCopy);
         }
 
-        private static Material RawCopyMaterial()
+        internal static Material RawCopyMaterial()
         {
             if (_rawCopyMaterial == null)
             {

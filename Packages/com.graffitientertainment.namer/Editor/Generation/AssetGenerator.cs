@@ -4,6 +4,7 @@ using System.Text;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 
 namespace GraffitiEntertainment.Namer.Editor
@@ -75,13 +76,32 @@ namespace GraffitiEntertainment.Namer.Editor
             int width = result.Width;
             int height = result.Height;
 
+            // Base color: the pipeline result is a LINEAR float16 render target, but the
+            // base PNG must hold sRGB-encoded bytes (D-06 imports it sRGB). Encode on the
+            // GPU by blitting through the raw-copy material with _REENCODE_SRGB — the
+            // explicit IEC 61966-2-1 encode, the exact inverse of the kernel's
+            // SRGBToLinear, and color-space independent — then read the encoded bytes
+            // back. Graphics.ConvertTexture must NOT be used here: it converts on the GPU
+            // only and never updates the destination Texture2D's CPU data, which
+            // EncodeToPNG encodes — the PNG would carry uninitialized memory. No per-pixel
+            // C# loop (NORM-03) and no new shader asset.
+            var baseEncodeDescriptor = new RenderTextureDescriptor(width, height, GraphicsFormat.R8G8B8A8_UNorm, 0)
+            {
+                sRGB = false,
+            };
+            RenderTexture baseEncodeRt = RenderTexture.GetTemporary(baseEncodeDescriptor);
+            Material rawCopy = NamerComputePipeline.RawCopyMaterial();
+            rawCopy.EnableKeyword(NamerComputePipeline.ReencodeSrgbKeyword);
+            Graphics.Blit(result.NormalizedBaseColor, baseEncodeRt, rawCopy);
+            rawCopy.DisableKeyword(NamerComputePipeline.ReencodeSrgbKeyword);
+
             // D-08: read back via the pipeline's AsyncGPUReadback contract. Both RTs are
             // RGBA32-quantized on readback; forcePlayerLoopUpdate pumps the request even
             // in edit mode where there is no player loop driving async GPU reads.
             AsyncGPUReadbackRequest surfaceRequest =
                 NamerComputePipeline.RequestReadback(result.PackedSurface, 0, TextureFormat.RGBA32);
             AsyncGPUReadbackRequest baseRequest =
-                NamerComputePipeline.RequestReadback(result.NormalizedBaseColor, 0, TextureFormat.RGBA32);
+                NamerComputePipeline.RequestReadback(baseEncodeRt, 0, TextureFormat.RGBA32);
 
             surfaceRequest.forcePlayerLoopUpdate = true;
             baseRequest.forcePlayerLoopUpdate = true;
@@ -91,12 +111,14 @@ namespace GraffitiEntertainment.Namer.Editor
 
             if (surfaceRequest.hasError || baseRequest.hasError)
             {
+                RenderTexture.ReleaseTemporary(baseEncodeRt);
                 throw new InvalidOperationException(
                     "GPU readback failed while generating NAMER assets; no files were written.");
             }
 
             NativeArray<byte> surfaceData = surfaceRequest.GetData<byte>();
             NativeArray<byte> baseData = baseRequest.GetData<byte>();
+            RenderTexture.ReleaseTemporary(baseEncodeRt);
 
             // Packed surface: linear data (R8G8B8A8_UNorm), loaded raw with no color-space
             // conversion. Bit-packed alpha cannot survive any conversion, compression,
@@ -105,30 +127,23 @@ namespace GraffitiEntertainment.Namer.Editor
             surfaceTex.LoadRawTextureData(surfaceData);
             surfaceTex.Apply(false, false);
 
-            // Base color: read back into a LINEAR texture, then convert linear -> sRGB on
-            // the GPU via Graphics.ConvertTexture (the exact inverse of the compute shader's
-            // SRGBToLinear, IEC 61966-2-1). No per-pixel C# loop (NORM-03) and no custom
-            // shader/compute asset.
-            Texture2D baseLinear = new Texture2D(width, height, TextureFormat.RGBA32, false, true);
-            baseLinear.LoadRawTextureData(baseData);
-            baseLinear.Apply(false, false);
-
-            // Destination texture is sRGB (graphicsFormat == GraphicsFormat.R8G8B8A8_SRGB):
-            // a Texture2D constructed with linear=false uses the sRGB variant of RGBA32.
-            Texture2D baseSrgb = new Texture2D(width, height, TextureFormat.RGBA32, false, false);
-            Graphics.ConvertTexture(baseLinear, baseSrgb);
+            // Base color: the readback already holds sRGB-encoded bytes; the sRGB-declared
+            // texture (linear=false) keeps the in-memory texture, the PNG, and the
+            // importer in agreement.
+            Texture2D baseTex = new Texture2D(width, height, TextureFormat.RGBA32, false, false);
+            baseTex.LoadRawTextureData(baseData);
+            baseTex.Apply(false, false);
 
             try
             {
                 WriteSurfaceTexture(surfaceTex, surfacePath, settings.OverwriteGenerated);
-                WriteBaseTexture(baseSrgb, basePath, settings.OverwriteGenerated);
+                WriteBaseTexture(baseTex, basePath, settings.OverwriteGenerated);
                 WriteMaterial(inspection, surfacePath, basePath, materialPath, settings.OverwriteGenerated);
             }
             finally
             {
                 UnityEngine.Object.DestroyImmediate(surfaceTex);
-                UnityEngine.Object.DestroyImmediate(baseLinear);
-                UnityEngine.Object.DestroyImmediate(baseSrgb);
+                UnityEngine.Object.DestroyImmediate(baseTex);
             }
 
             return new NamerGeneratedAsset

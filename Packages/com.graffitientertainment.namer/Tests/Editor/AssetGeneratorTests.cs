@@ -386,11 +386,12 @@ namespace GraffitiEntertainment.Namer.Tests
             try
             {
                 // A linear source base map of 0.5 must come out sRGB-encoded in the generated
-                // _Base.png: the linear -> sRGB GPU conversion shifts the mid-tone byte UP. A raw
-                // linear pass-through would leave the byte unchanged, so asserting the generated
-                // byte is strictly greater than the authored source byte proves the conversion ran
-                // (D-06). The source byte is read from the authored PNG rather than assumed, so
-                // this is robust to the project color-space and EncodeToPNG conventions.
+                // _Base.png with the exact IEC 61966-2-1 byte the raw-copy encode produces for
+                // the authored source byte (read from the authored PNG rather than assumed), and
+                // with the alpha the kernel writes (1.0 -> 255). Byte equality pins the whole
+                // save path: a uniform-garbage PNG (an encode step whose result never reaches
+                // CPU data) fails the byte match, and a raw linear pass-through fails because
+                // 0.502 encodes to ~184, not the authored 128 (D-06).
                 Material source = CreateSourceMaterial(
                     TempFolder, "TestSourceMat", new Color(0.5f, 0.5f, 0.5f, 1f), 0f, 0.5f);
                 string baseMapPath = TempFolder + "/TestSourceMat_BaseMap.png";
@@ -409,10 +410,17 @@ namespace GraffitiEntertainment.Namer.Tests
                 NamerGeneratedAsset asset = result.GeneratedAssets[0];
 
                 Color32 basePixel = ReadPngPixel32(asset.BaseTexturePath);
-                Assert.Greater((int)basePixel.r, sourceByte,
-                    "base PNG must be sRGB-encoded (byte " + basePixel.r + " > linear source byte " + sourceByte + ")");
-                Assert.Greater((int)basePixel.g, sourceByte, "green channel must be sRGB-encoded");
-                Assert.Greater((int)basePixel.b, sourceByte, "blue channel must be sRGB-encoded");
+                int expectedByte = Mathf.RoundToInt(LinearToSrgbChannel(sourceByte / 255f) * 255f);
+                Assert.LessOrEqual(Mathf.Abs((int)basePixel.r - expectedByte), 1,
+                    "red must be the sRGB encode of the linear source byte (expected ~" + expectedByte
+                    + ", authored " + sourceByte + ", got " + basePixel.r + ")");
+                Assert.LessOrEqual(Mathf.Abs((int)basePixel.g - expectedByte), 1,
+                    "green channel must be sRGB-encoded");
+                Assert.LessOrEqual(Mathf.Abs((int)basePixel.b - expectedByte), 1,
+                    "blue channel must be sRGB-encoded");
+                Assert.AreEqual(255, (int)basePixel.a,
+                    "base PNG alpha must be the kernel's 1.0 — anything else means the bytes "
+                    + "did not come from the GPU result");
             }
             finally
             {
@@ -454,6 +462,14 @@ namespace GraffitiEntertainment.Namer.Tests
             importer.sRGBTexture = srgb;
             importer.SaveAndReimport();
             return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+
+        // Exact IEC 61966-2-1 linear -> sRGB encode — the C# mirror of
+        // NamerRawCopy.shader's NamerLinearToSRGB, used as the D-06 save-path oracle.
+        private static float LinearToSrgbChannel(float c)
+        {
+            c = Mathf.Max(c, 0f);
+            return c <= 0.0031308f ? c * 12.92f : 1.055f * Mathf.Pow(c, 1f / 2.4f) - 0.055f;
         }
 
         private static Color32 ReadPngPixel32(string path)

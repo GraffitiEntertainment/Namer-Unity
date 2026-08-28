@@ -425,11 +425,18 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             bool stamped = Array.IndexOf(AssetDatabase.GetLabels(existing), NamerEditorConstants.GeneratedLabel) >= 0;
-            if (!stamped || !overwriteGenerated)
+            if (!stamped)
             {
                 throw new InvalidOperationException(
                     "Refusing to overwrite non-generated asset '" + path + "'. "
                     + "Only NamerGenerated-stamped assets in the destination folder can be overwritten.");
+            }
+
+            if (!overwriteGenerated)
+            {
+                throw new InvalidOperationException(
+                    "Refusing to overwrite '" + path + "' because 'Overwrite generated' is disabled. "
+                    + "Enable the 'Overwrite generated' toggle in the processor window's Output section to replace NamerGenerated assets.");
             }
         }
 

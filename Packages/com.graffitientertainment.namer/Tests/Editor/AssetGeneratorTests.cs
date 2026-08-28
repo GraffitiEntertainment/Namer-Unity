@@ -246,6 +246,68 @@ namespace GraffitiEntertainment.Namer.Tests
             yield return null;
         }
 
+        /// <summary>
+        /// The exact UAT test-2 scenario (D-04): after a fresh successful run, a re-run
+        /// with overwrite still off must refuse while naming the disabled toggle — never
+        /// mislabeling the stamped target as non-generated — and a re-run with overwrite
+        /// on must replace the FIRST RUN'S OWN output with no manual stamping anywhere,
+        /// proving the generation-time <see cref="AssetGenerator"/> stamp round-trips.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator OverwriteGating_FirstRunStampRoundTrip_RefusalNamesTheRealReason()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU generation test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            EnsureTempFolder();
+            PrefsSnapshot prefs = CapturePrefs();
+            try
+            {
+                Material source = CreateSourceMaterial(
+                    TempFolder, "TestSourceMat", new Color(0.5f, 0.5f, 0.5f, 1f), 0f, 0.5f);
+
+                var first = new NamerProcessorSettings
+                {
+                    Destination = TempFolder + "/Out",
+                    OverwriteGenerated = false,
+                };
+                NamerProcessResult generated = NamerProcessor.Process(source, first);
+                Assert.IsNull(generated.Error, "first Process should succeed: " + generated.Error);
+                Assert.AreEqual(1, generated.GeneratedAssets.Count);
+
+                // Re-run with overwrite still off against the first run's own stamped
+                // output: the refusal must name the disabled toggle, and must NOT claim
+                // the stamped target is non-generated (the UAT-reported defect).
+                NamerProcessResult toggleOff = NamerProcessor.Process(source, first);
+                Assert.IsNotNull(toggleOff.Error, "re-run with overwrite off must refuse");
+                Assert.IsTrue(toggleOff.Error.Contains("'Overwrite generated' is disabled"),
+                    "refusal must identify the disabled toggle as the reason: " + toggleOff.Error);
+                Assert.IsFalse(toggleOff.Error.Contains("non-generated"),
+                    "a NamerGenerated-stamped target must not be mislabeled non-generated: " + toggleOff.Error);
+
+                // Re-run with overwrite on, against the first run's untouched output —
+                // no manual AssetDatabase.SetLabels anywhere — must replace cleanly.
+                var overwrite = new NamerProcessorSettings
+                {
+                    Destination = TempFolder + "/Out",
+                    OverwriteGenerated = true,
+                };
+                NamerProcessResult rerun = NamerProcessor.Process(source, overwrite);
+                Assert.IsNull(rerun.Error, "stamped overwrite re-run should succeed: " + rerun.Error);
+                Assert.AreEqual(1, rerun.GeneratedAssets.Count);
+            }
+            finally
+            {
+                RestorePrefs(prefs);
+                AssetDatabase.DeleteAsset(TempFolder);
+            }
+
+            yield return null;
+        }
+
         // -- GEN-04 / Pitfall 2: import stamping round-trip -------------------
 
         [UnityTest]

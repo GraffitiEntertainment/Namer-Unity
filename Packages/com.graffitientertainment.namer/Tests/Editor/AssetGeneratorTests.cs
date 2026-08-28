@@ -84,6 +84,41 @@ namespace GraffitiEntertainment.Namer.Tests
             }
         }
 
+        /// <summary>
+        /// A prefix or suffix containing <c>..</c> or a path separator is a path-traversal
+        /// attempt against the composed write path; it must be rejected with a blocking
+        /// <see cref="NamerProcessResult.Error"/> and zero generated assets — before any
+        /// GPU work or disk write (T-03-01).
+        /// </summary>
+        [Test]
+        public void PrefixSuffixValidation_RejectsPathTraversal()
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+            Assert.IsNotNull(shader, "URP Lit shader not found");
+
+            Material material = new Material(shader);
+            PrefsSnapshot prefs = CapturePrefs();
+            EnsureTempFolder();
+            try
+            {
+                NamerProcessResult escapePrefix = NamerProcessor.Process(
+                    material, new NamerProcessorSettings { Destination = TempFolder, Prefix = "../" });
+                Assert.IsFalse(string.IsNullOrEmpty(escapePrefix.Error), "escaping prefix must be rejected");
+                Assert.AreEqual(0, escapePrefix.GeneratedAssets.Count, "escaping prefix must produce zero assets");
+
+                NamerProcessResult escapeSuffix = NamerProcessor.Process(
+                    material, new NamerProcessorSettings { Destination = TempFolder, Suffix = "/../" });
+                Assert.IsFalse(string.IsNullOrEmpty(escapeSuffix.Error), "escaping suffix must be rejected");
+                Assert.AreEqual(0, escapeSuffix.GeneratedAssets.Count, "escaping suffix must produce zero assets");
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(TempFolder);
+                RestorePrefs(prefs);
+                Destroy(material);
+            }
+        }
+
         // -- D-16: path + naming ---------------------------------------------
 
         [UnityTest]

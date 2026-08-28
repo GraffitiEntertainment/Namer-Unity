@@ -86,6 +86,8 @@ namespace GraffitiEntertainment.Namer.Editor
             NamerComputePipeline pipeline = null;
             try
             {
+                AssetGenerator.PreflightTargets(model, settings, destinationFolder);
+
                 pipeline = new NamerComputePipeline();
                 AssetGenerator generator = new AssetGenerator();
 

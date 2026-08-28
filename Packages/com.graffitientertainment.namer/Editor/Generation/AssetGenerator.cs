@@ -56,19 +56,21 @@ namespace GraffitiEntertainment.Namer.Editor
             ValidateDestinationFolder(destinationFolder);
             ValidatePrefixAndSuffix(settings);
 
-            string safeName = SanitizeFileName(inspection.Material != null ? inspection.Material.name : "Unnamed");
-            string prefix = settings.Prefix ?? string.Empty;
-            string suffix = settings.Suffix ?? string.Empty;
-
-            string basePath = destinationFolder + prefix + safeName + suffix + "_Base.png";
-            string surfacePath = destinationFolder + prefix + safeName + suffix + "_Surface.png";
-            string materialPath = destinationFolder + prefix + safeName + suffix + ".mat";
+            string basePath = ComposePath(inspection, settings, destinationFolder, "_Base.png");
+            string surfacePath = ComposePath(inspection, settings, destinationFolder, "_Surface.png");
+            string materialPath = ComposePath(inspection, settings, destinationFolder, ".mat");
 
             // T-03-01 defense in depth: re-validate the fully composed paths, not just
             // the destination folder, so no future change can escape the configured folder.
             ValidateComposedPath(basePath, destinationFolder);
             ValidateComposedPath(surfacePath, destinationFolder);
             ValidateComposedPath(materialPath, destinationFolder);
+
+            // T-03-02 / D-04: pre-flight every target before the first write so a refusal
+            // on the base or material path cannot leave a partially-written asset set.
+            EnsureWritableTarget(surfacePath, settings.OverwriteGenerated);
+            EnsureWritableTarget(basePath, settings.OverwriteGenerated);
+            EnsureWritableTarget(materialPath, settings.OverwriteGenerated);
 
             int width = result.Width;
             int height = result.Height;
@@ -135,6 +137,49 @@ namespace GraffitiEntertainment.Namer.Editor
                 BaseTexturePath = basePath,
                 SurfaceTexturePath = surfacePath,
             };
+        }
+
+        /// <summary>
+        /// Pre-flights every target path for a whole batch before any GPU work or disk
+        /// write (T-03-02 / D-04). An overwrite refusal or an escaping prefix/suffix
+        /// surfaces here as a blocking error, so a multi-material batch never leaves a
+        /// partially generated asset set behind.
+        /// </summary>
+        public static void PreflightTargets(
+            NamerSourceModel model,
+            NamerProcessorSettings settings,
+            string destinationFolder)
+        {
+            ValidatePrefixAndSuffix(settings);
+
+            foreach (NamerMaterialInspection inspection in model.Materials)
+            {
+                EnsureWritableTarget(
+                    ComposePath(inspection, settings, destinationFolder, "_Surface.png"),
+                    settings.OverwriteGenerated);
+                EnsureWritableTarget(
+                    ComposePath(inspection, settings, destinationFolder, "_Base.png"),
+                    settings.OverwriteGenerated);
+                EnsureWritableTarget(
+                    ComposePath(inspection, settings, destinationFolder, ".mat"),
+                    settings.OverwriteGenerated);
+            }
+        }
+
+        /// <summary>
+        /// Composes one generated-asset path from the configured destination, the
+        /// sanitized material name, and the validated prefix/suffix (D-02).
+        /// </summary>
+        private static string ComposePath(
+            NamerMaterialInspection inspection,
+            NamerProcessorSettings settings,
+            string destinationFolder,
+            string extension)
+        {
+            string safeName = SanitizeFileName(inspection.Material != null ? inspection.Material.name : "Unnamed");
+            string prefix = settings.Prefix ?? string.Empty;
+            string suffix = settings.Suffix ?? string.Empty;
+            return destinationFolder + prefix + safeName + suffix + extension;
         }
 
         /// <summary>

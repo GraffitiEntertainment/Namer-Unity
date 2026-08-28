@@ -403,6 +403,11 @@ namespace GraffitiEntertainment.Namer.Editor
             if (newChannel != _debugChannel)
             {
                 _debugChannel = newChannel;
+                if (_debugMaterial != null)
+                {
+                    _debugMaterialFactory.SetChannel(_debugMaterial, Mathf.Max(0, _debugChannel - 1));
+                }
+
                 Repaint();
             }
 

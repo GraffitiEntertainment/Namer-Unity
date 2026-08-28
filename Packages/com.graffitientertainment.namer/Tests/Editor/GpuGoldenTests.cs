@@ -45,8 +45,9 @@ namespace GraffitiEntertainment.Namer.Tests
 
         /// <summary>
         /// CSOctahedralEncode produces the same octahedral R/G as
-        /// <see cref="NamerFormat.OctahedralEncode"/> (within 1/255), and the oct decoded
-        /// with <see cref="NamerFormat.OctahedralDecode"/> agrees with the source unit
+        /// <see cref="NamerFormat.OctahedralEncode"/> applied to the unpacked raw DirectX
+        /// texel (within 1/255), and the oct decoded with
+        /// <see cref="NamerFormat.OctahedralDecode"/> agrees with the source unit
         /// tangent normal via dot &gt;= 1 - 1e-3.
         /// </summary>
         [UnityTest]
@@ -86,7 +87,7 @@ namespace GraffitiEntertainment.Namer.Tests
 
                     Color32 pixel = ReadBackColor32(octahedral, 1)[0];
                     float2 oct = new float2(pixel.r / 255.0f, pixel.g / 255.0f);
-                    float2 expected = NamerFormat.OctahedralEncode(texel);
+                    float2 expected = NamerFormat.OctahedralEncode(ReconstructRawTexel(texel, 1.0f));
 
                     Assert.AreEqual((double)expected.x, (double)oct.x, ByteTolerance, "oct R vector " + i);
                     Assert.AreEqual((double)expected.y, (double)oct.y, ByteTolerance, "oct G vector " + i);
@@ -100,6 +101,63 @@ namespace GraffitiEntertainment.Namer.Tests
                 {
                     Release(normalTexel, aoIn, octahedral);
                 }
+            }
+
+            yield return null;
+        }
+
+        /// <summary>
+        /// CSOctahedralEncode unpacks Unity's delivered normal-map layouts before
+        /// encoding: a raw-RGB upload (X in R, A = 1) and the NormalMap importer's
+        /// DXT5nm/AG swizzle (X in A, R white, B unreliable) must produce identical
+        /// octahedral bytes for the same authored direction. Live UAT regression
+        /// (2026-08-28): the kernel encoded the raw [0,1] texel, so a NormalMap-imported
+        /// 2048x2048 source (measured R = 255 everywhere, X in A) packed a phantom
+        /// normal dominated by the white R channel — the result neither looked like a
+        /// normal map nor lit like one.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator CSOctahedralEncode_UnpacksAgSwizzleAndRgbLayoutsIdentically()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU golden test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            ComputeShader compute = LoadShader();
+            int kernel = compute.FindKernel("CSOctahedralEncode");
+
+            // Authored DirectX X/Y bytes (Z is rebuilt by the unpack, never sampled).
+            float2[] cases =
+            {
+                new float2(0.5f, 0.5f),   // neutral (0, 0, 1)
+                new float2(0.8f, 0.7f),   // +X +Y quadrant
+                new float2(0.25f, 0.6f),  // -X +Y quadrant
+                new float2(0.6f, 0.3f),   // +X -Y quadrant
+            };
+
+            for (int i = 0; i < cases.Length; i++)
+            {
+                float x = cases[i].x;
+                float y = cases[i].y;
+                float3 rawTexel = ReconstructRawTexel(new float3(x, y, 0.0f), 1.0f);
+                float2 expected = NamerFormat.OctahedralEncode(rawTexel);
+
+                // The same direction delivered in both Unity layouts; B differs to
+                // prove it is ignored (the AG layout overwrites it during import).
+                Color rgbDelivered = new Color(x, y, rawTexel.z, 1.0f);
+                Color agDelivered = new Color(1.0f, y, 0.13f, x);
+
+                Color32 rgbOct = EncodeSingleTexel(compute, kernel, rgbDelivered);
+                Color32 agOct = EncodeSingleTexel(compute, kernel, agDelivered);
+
+                Assert.AreEqual((double)expected.x, (double)(rgbOct.r / 255.0f), ByteTolerance, "raw-RGB oct R case " + i);
+                Assert.AreEqual((double)expected.y, (double)(rgbOct.g / 255.0f), ByteTolerance, "raw-RGB oct G case " + i);
+                Assert.AreEqual((double)expected.x, (double)(agOct.r / 255.0f), ByteTolerance, "AG-swizzle oct R case " + i);
+                Assert.AreEqual((double)expected.y, (double)(agOct.g / 255.0f), ByteTolerance, "AG-swizzle oct G case " + i);
+                Assert.AreEqual((int)rgbOct.r, (int)agOct.r, "both layouts must produce identical oct R bytes case " + i);
+                Assert.AreEqual((int)rgbOct.g, (int)agOct.g, "both layouts must produce identical oct G bytes case " + i);
             }
 
             yield return null;
@@ -284,6 +342,45 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         // --------------------------------------------------------------------
+
+        // Mirrors CSOctahedralEncode's Unity-layout unpack: X selected from R (raw
+        // RGB upload, A = 1) or A (DXT5nm/AG swizzle, R white) via x *= w, then Z
+        // rebuilt from the signed XY as the authored DirectX byte.
+        private static float3 ReconstructRawTexel(float3 rgb, float a)
+        {
+            float x = rgb.x * a;
+            float2 signedXY = new float2(x, rgb.y) * 2.0f - 1.0f;
+            float z = math.sqrt(1.0f - math.saturate(math.dot(signedXY, signedXY))) * 0.5f + 0.5f;
+            return new float3(x, rgb.y, z);
+        }
+
+        private static Color32 EncodeSingleTexel(ComputeShader compute, int kernel, Color delivered)
+        {
+            RenderTexture normalTexel = null;
+            RenderTexture aoIn = null;
+            RenderTexture octahedral = null;
+            try
+            {
+                normalTexel = CreateRenderTexture(GraphicsFormat.R16G16B16A16_SFloat, 1, 1);
+                aoIn = CreateRenderTexture(GraphicsFormat.R16G16B16A16_SFloat, 1, 1);
+                octahedral = CreateRenderTexture(GraphicsFormat.R16G16B16A16_SFloat, 1, 1);
+
+                UploadPixels(normalTexel, new[] { delivered }, 1, 1);
+                UploadPixels(aoIn, new[] { Color.white }, 1, 1);
+
+                compute.SetInts("_Size", new[] { 1, 1 });
+                compute.SetTexture(kernel, "_NormalTexel", normalTexel);
+                compute.SetTexture(kernel, "_AoIn", aoIn);
+                compute.SetTexture(kernel, "_Octahedral", octahedral);
+                compute.Dispatch(kernel, 1, 1, 1);
+
+                return ReadBackColor32(octahedral, 1)[0];
+            }
+            finally
+            {
+                Release(normalTexel, aoIn, octahedral);
+            }
+        }
 
         private static ComputeShader LoadShader()
         {

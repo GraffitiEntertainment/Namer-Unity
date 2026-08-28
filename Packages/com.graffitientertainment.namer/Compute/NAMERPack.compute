@@ -27,7 +27,7 @@ RWTexture2D<float4> _SurfaceOut;
 
 // Blit-uploaded inputs (never written by kernels).
 Texture2D<float4> _BaseColorIn;      // base map or white fill
-Texture2D<float4> _NormalTexel;      // raw DirectX normal map or neutral (0.5,0.5,1.0)
+Texture2D<float4> _NormalTexel;      // Unity normal texel (raw RGB or DXT5nm/AG swizzle) or neutral (0.5,0.5,1.0)
 Texture2D<float4> _AoIn;             // AO map or white fill
 Texture2D<float4> _MetallicGlossIn;  // metallic/gloss map or neutral fill
 
@@ -82,7 +82,17 @@ void CSOctahedralEncode(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    float2 oct = NamerOctahedralEncode(_NormalTexel[id.xy].xyz);
+    // Unity delivers imported normal maps either raw RGB (X in R, A = 1) or in the
+    // DXT5nm/AG swizzle its NormalMap importer applies (X in A, R white, B
+    // unreliable); x *= w selects X in both layouts (UnpackNormalmapRGorAG's
+    // trick). Z is rebuilt from the signed XY so the Blender-mirrored encode
+    // receives the authored raw DirectX texel it is defined over.
+    float4 texel = _NormalTexel[id.xy];
+    texel.x *= texel.w;
+    float2 signedXY = texel.xy * 2.0 - 1.0;
+    texel.z = sqrt(1.0 - saturate(dot(signedXY, signedXY))) * 0.5 + 0.5;
+
+    float2 oct = NamerOctahedralEncode(texel.xyz);
     _Octahedral[id.xy] = float4(oct, _AoIn[id.xy].g, 0.0);
 }
 

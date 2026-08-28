@@ -54,6 +54,7 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             ValidateDestinationFolder(destinationFolder);
+            ValidatePrefixAndSuffix(settings);
 
             string safeName = SanitizeFileName(inspection.Material != null ? inspection.Material.name : "Unnamed");
             string prefix = settings.Prefix ?? string.Empty;
@@ -62,6 +63,12 @@ namespace GraffitiEntertainment.Namer.Editor
             string basePath = destinationFolder + prefix + safeName + suffix + "_Base.png";
             string surfacePath = destinationFolder + prefix + safeName + suffix + "_Surface.png";
             string materialPath = destinationFolder + prefix + safeName + suffix + ".mat";
+
+            // T-03-01 defense in depth: re-validate the fully composed paths, not just
+            // the destination folder, so no future change can escape the configured folder.
+            ValidateComposedPath(basePath, destinationFolder);
+            ValidateComposedPath(surfacePath, destinationFolder);
+            ValidateComposedPath(materialPath, destinationFolder);
 
             int width = result.Width;
             int height = result.Height;
@@ -178,6 +185,46 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 throw new InvalidOperationException(
                     "Destination '" + destinationFolder + "' must resolve under the project Assets/ folder.");
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // Prefix/suffix + composed-path confinement (T-03-01)
+        // ---------------------------------------------------------------------
+
+        private static void ValidatePrefixAndSuffix(NamerProcessorSettings settings)
+        {
+            ValidatePathSegment(settings.Prefix ?? string.Empty, "Prefix");
+            ValidatePathSegment(settings.Suffix ?? string.Empty, "Suffix");
+        }
+
+        private static void ValidatePathSegment(string value, string fieldName)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return;
+            }
+
+            if (value.IndexOf("..", StringComparison.Ordinal) >= 0
+                || value.IndexOf('/') >= 0
+                || value.IndexOf('\\') >= 0
+                || value.IndexOf(':') >= 0)
+            {
+                throw new InvalidOperationException(
+                    fieldName + " must not contain '..' or path separators ('/', '\\', ':').");
+            }
+        }
+
+        private static void ValidateComposedPath(string path, string destinationFolder)
+        {
+            string fullPath = Path.GetFullPath(path);
+            string fullDestination = Path.GetFullPath(destinationFolder.TrimEnd('/', '\\'));
+
+            if (!fullPath.Equals(fullDestination, StringComparison.OrdinalIgnoreCase)
+                && !fullPath.StartsWith(fullDestination + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Generated path escapes the destination folder: '" + path + "'.");
             }
         }
 

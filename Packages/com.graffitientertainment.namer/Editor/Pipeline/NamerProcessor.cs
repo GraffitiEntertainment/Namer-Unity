@@ -153,7 +153,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 return;
             }
 
-            string parent = Path.GetDirectoryName(normalized);
+            string parent = Path.GetDirectoryName(normalized)?.Replace('\\', '/');
             string folderName = Path.GetFileName(normalized);
 
             if (!string.IsNullOrEmpty(parent))

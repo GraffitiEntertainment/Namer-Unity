@@ -442,7 +442,12 @@ namespace GraffitiEntertainment.Namer.Editor
             EditorGUILayout.LabelField("Processing", EditorStyles.boldLabel);
 
             EditorGUI.BeginDisabledGroup(inspection == null || _busy);
-            float newAo = EditorGUILayout.Slider("AO Un-multiply Strength", _aoStrength, 0f, 1f);
+            float newAo = EditorGUILayout.Slider(
+                new GUIContent(
+                    "AO Un-multiply Strength",
+                    "Automatically recomputes the preview in memory " + NamerEditorConstants.DebounceSeconds
+                        + " s after the slider stops — nothing is written to disk."),
+                _aoStrength, 0f, 1f);
             if (!Mathf.Approximately(newAo, _aoStrength))
             {
                 _aoStrength = newAo;
@@ -451,6 +456,12 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             EditorGUI.EndDisabledGroup();
+
+            // Visible feedback for the otherwise-invisible debounced preview recompute:
+            // pending/recomputing while dirty, settled once the compute finishes.
+            EditorGUILayout.LabelField(
+                _dirty || _recomputing ? "Recomputing preview…" : "Preview up to date",
+                EditorStyles.miniLabel);
 
             EditorGUILayout.Space();
         }

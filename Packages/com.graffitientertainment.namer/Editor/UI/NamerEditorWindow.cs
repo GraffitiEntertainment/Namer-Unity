@@ -610,10 +610,22 @@ namespace GraffitiEntertainment.Namer.Editor
 
         private static Mesh FindMeshInPrefab(string assetPath)
         {
+            // Embedded meshes are persistent sub-assets of the prefab; prefer them so the
+            // returned mesh is never owned by the temporary prefab contents (WR-06).
+            Mesh subAsset = FindMeshSubAsset(assetPath);
+            if (subAsset != null)
+            {
+                return subAsset;
+            }
+
+            // External (FBX) meshes are not part of the prefab asset; resolve through the
+            // prefab contents but only keep a mesh that is a persistent asset — otherwise
+            // UnloadPrefabContents would destroy it.
             GameObject contents = PrefabUtility.LoadPrefabContents(assetPath);
             try
             {
-                return contents != null ? FindMeshInGameObject(contents) : null;
+                Mesh mesh = contents != null ? FindMeshInGameObject(contents) : null;
+                return mesh != null && AssetDatabase.Contains(mesh) ? mesh : null;
             }
             finally
             {

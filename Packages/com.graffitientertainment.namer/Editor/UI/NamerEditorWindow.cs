@@ -1,6 +1,7 @@
 using System;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 
 namespace GraffitiEntertainment.Namer.Editor
 {
@@ -37,6 +38,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private Material _namerMaterial;
         private Material _debugMaterial;
         private NamerComputeResult _liveResult;
+        private RenderTexture _previewBaseRt;
 
         private UnityEngine.Object _selection;
         private NamerSourceModel _model;
@@ -213,8 +215,10 @@ namespace GraffitiEntertainment.Namer.Editor
                 inspection.AoUnmultiplyStrength = _aoStrength;
                 _liveResult = _pipeline.Process(inspection);
 
+                RenderTexture previewBaseMap = ResolvePreviewBaseMap();
+
                 _namerMaterial.SetTexture(SurfaceMapId, _liveResult.PackedSurface);
-                _namerMaterial.SetTexture(BaseResidualMapId, _liveResult.NormalizedBaseColor);
+                _namerMaterial.SetTexture(BaseResidualMapId, previewBaseMap);
                 _namerMaterial.SetColor(BaseColorId, inspection.BaseColor);
                 _namerMaterial.SetColor(EmissionColorId, inspection.EmissionColor);
                 _namerMaterial.SetFloat(OcclusionStrengthId, inspection.OcclusionStrength);
@@ -228,7 +232,7 @@ namespace GraffitiEntertainment.Namer.Editor
                     _namerMaterial.DisableKeyword("_EMISSION");
                 }
 
-                _debugMaterialFactory.SetTextures(_debugMaterial, _liveResult.PackedSurface, _liveResult.NormalizedBaseColor);
+                _debugMaterialFactory.SetTextures(_debugMaterial, _liveResult.PackedSurface, previewBaseMap);
                 _debugMaterialFactory.SetChannel(_debugMaterial, Mathf.Max(0, _debugChannel - 1));
                 _debugMaterial.SetFloat(OcclusionStrengthId, inspection.OcclusionStrength);
 
@@ -277,8 +281,59 @@ namespace GraffitiEntertainment.Namer.Editor
             }
         }
 
+        /// <summary>
+        /// Resolves the base color map the preview materials should sample. The pipeline's
+        /// <see cref="NamerComputeResult.NormalizedBaseColor"/> is a linear float16 target,
+        /// while <c>_BaseResidualMap</c> is an sRGB-declared slot: a Linear project
+        /// hardware-decodes the saved sRGB PNG on sample, so binding the raw linear target
+        /// is already correct there. A Gamma project performs no decode anywhere, so the
+        /// raw linear values would shade darker than the before pane (and darker than the
+        /// correctly saved material). Re-encode through the raw-copy material with
+        /// <c>_REENCODE_SRGB</c> — the same exact IEC 61966-2-1 primitive the save path
+        /// uses — so the preview matches the saved material in both color spaces.
+        /// </summary>
+        private RenderTexture ResolvePreviewBaseMap()
+        {
+            if (QualitySettings.activeColorSpace != ColorSpace.Gamma)
+            {
+                return _liveResult.NormalizedBaseColor;
+            }
+
+            if (_previewBaseRt == null
+                || _previewBaseRt.width != _liveResult.Width
+                || _previewBaseRt.height != _liveResult.Height)
+            {
+                if (_previewBaseRt != null)
+                {
+                    _previewBaseRt.Release();
+                    DestroyImmediate(_previewBaseRt);
+                }
+
+                var descriptor = new RenderTextureDescriptor(
+                    _liveResult.Width, _liveResult.Height, GraphicsFormat.R8G8B8A8_UNorm, 0)
+                {
+                    sRGB = false,
+                };
+                _previewBaseRt = new RenderTexture(descriptor);
+                _previewBaseRt.Create();
+            }
+
+            Material rawCopy = NamerComputePipeline.RawCopyMaterial();
+            rawCopy.EnableKeyword(NamerComputePipeline.ReencodeSrgbKeyword);
+            Graphics.Blit(_liveResult.NormalizedBaseColor, _previewBaseRt, rawCopy);
+            rawCopy.DisableKeyword(NamerComputePipeline.ReencodeSrgbKeyword);
+            return _previewBaseRt;
+        }
+
         private void ReleaseLiveResult()
         {
+            if (_previewBaseRt != null)
+            {
+                _previewBaseRt.Release();
+                DestroyImmediate(_previewBaseRt);
+                _previewBaseRt = null;
+            }
+
             if (_liveResult == null)
             {
                 return;

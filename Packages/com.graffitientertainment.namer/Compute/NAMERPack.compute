@@ -40,7 +40,7 @@ float _Roughness;
 float _Emissive;
 float _SmoothnessTextureChannel;
 float _HasMetallicGlossMap;
-int2 _Size;
+uint2 _Size; // unsigned: compared against SV_DispatchThreadID (uint) in the kernel guards
 
 [numthreads(8,8,1)]
 void CSNormalize(uint3 id : SV_DispatchThreadID)

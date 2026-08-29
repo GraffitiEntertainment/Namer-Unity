@@ -82,6 +82,16 @@ namespace GraffitiEntertainment.Namer.Editor
             string destinationFolder = AssetGenerator.ComposeDestinationFolder(destination, selection.name);
             EnsureFolder(destinationFolder);
 
+            // D-04 idempotent reprocess: snapshot each scene renderer's per-slot source
+            // identity BEFORE generation, because overwriting the generated material in
+            // place invalidates the live renderer reference (the slot reads null after).
+            Dictionary<Renderer, int[]> slotSources = null;
+            if (selection is GameObject sceneObject
+                && string.IsNullOrEmpty(AssetDatabase.GetAssetPath(sceneObject)))
+            {
+                slotSources = CaptureSlotSources(sceneObject);
+            }
+
             NamerComputePipeline pipeline = null;
             try
             {
@@ -128,7 +138,7 @@ namespace GraffitiEntertainment.Namer.Editor
 
             if (string.IsNullOrEmpty(result.Error))
             {
-                BindGeneratedMaterials(selection, model, result);
+                BindGeneratedMaterials(selection, slotSources, model, result);
             }
 
             Debug.Log("[NAMER] Processed '" + selection.name + "': " + result.MaterialCount
@@ -144,7 +154,11 @@ namespace GraffitiEntertainment.Namer.Editor
         /// scene renderer's <c>sharedMaterials</c> array — no source material, texture,
         /// importer, FBX, or <c>.meta</c> is written, imported, or modified.
         /// </summary>
-        private static void BindGeneratedMaterials(UnityEngine.Object selection, NamerSourceModel model, NamerProcessResult result)
+        private static void BindGeneratedMaterials(
+            UnityEngine.Object selection,
+            Dictionary<Renderer, int[]> slotSources,
+            NamerSourceModel model,
+            NamerProcessResult result)
         {
             if (!(selection is GameObject gameObject))
             {
@@ -170,11 +184,17 @@ namespace GraffitiEntertainment.Namer.Editor
 
             foreach (Renderer renderer in gameObject.GetComponentsInChildren<Renderer>(true))
             {
+                if (slotSources == null || !slotSources.TryGetValue(renderer, out int[] sourceIds))
+                {
+                    continue;
+                }
+
                 Material[] shared = renderer.sharedMaterials;
                 bool changed = false;
-                for (int i = 0; i < shared.Length; i++)
+                for (int i = 0; i < sourceIds.Length && i < shared.Length; i++)
                 {
-                    if (shared[i] != null && generatedBySourceId.TryGetValue(shared[i].GetInstanceID(), out Material generated))
+                    int sourceId = sourceIds[i];
+                    if (sourceId != 0 && generatedBySourceId.TryGetValue(sourceId, out Material generated))
                     {
                         shared[i] = generated;
                         changed = true;
@@ -186,6 +206,49 @@ namespace GraffitiEntertainment.Namer.Editor
                     renderer.sharedMaterials = shared;
                 }
             }
+        }
+
+        /// <summary>
+        /// Captures each scene renderer's per-slot ORIGINAL source instance ID before
+        /// generation. A slot wearing a previous generated material resolves through its
+        /// <c>NamerSource</c> tag to the original source, so the post-generation bind swaps
+        /// it (and any slot whose live reference the in-place overwrite invalidated) to the
+        /// fresh generated material by index.
+        /// </summary>
+        private static Dictionary<Renderer, int[]> CaptureSlotSources(GameObject gameObject)
+        {
+            var slotSources = new Dictionary<Renderer, int[]>();
+            foreach (Renderer renderer in gameObject.GetComponentsInChildren<Renderer>(true))
+            {
+                Material[] shared = renderer.sharedMaterials;
+                int[] sourceIds = new int[shared.Length];
+                for (int i = 0; i < shared.Length; i++)
+                {
+                    sourceIds[i] = ResolveSourceInstanceId(shared[i]);
+                }
+
+                slotSources[renderer] = sourceIds;
+            }
+
+            return slotSources;
+        }
+
+        /// <summary>
+        /// Maps a renderer slot material to the instance ID of its ORIGINAL source so a
+        /// slot wearing a previous generated material (tagged <c>NamerSource</c>) swaps to
+        /// the fresh generated material bound to that same original — not just slots still
+        /// wearing the raw source instance (D-04 idempotent reprocess).
+        /// </summary>
+        private static int ResolveSourceInstanceId(Material material)
+        {
+            if (material == null)
+            {
+                return 0;
+            }
+
+            Material original = SourceInspector.ResolveOriginalFromSourceTag(
+                material.GetTag(NamerEditorConstants.SourceTag, false, string.Empty));
+            return original != null ? original.GetInstanceID() : material.GetInstanceID();
         }
 
         private static bool IsUnderProjectAssets(string destination)

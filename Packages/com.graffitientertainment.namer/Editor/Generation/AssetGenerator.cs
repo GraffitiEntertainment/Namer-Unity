@@ -404,8 +404,37 @@ namespace GraffitiEntertainment.Namer.Editor
                 material.SetOverrideTag("RenderType", "Transparent");
             }
 
+            string sourceIdentity = ResolveSourceIdentity(inspection);
+            if (!string.IsNullOrEmpty(sourceIdentity))
+            {
+                // D-04 idempotent reprocess: record the source identity so a later Process
+                // resolves back to the original. SetOverrideTag is serialized into the .mat
+                // stringTagMap by CreateAsset itself, so no SaveAssets is needed (which would
+                // re-serialize other dirty assets and break source immutability).
+                material.SetOverrideTag(NamerEditorConstants.SourceTag, sourceIdentity);
+            }
+
             AssetDatabase.CreateAsset(material, materialPath);
             Stamp(AssetDatabase.LoadAssetAtPath<Material>(materialPath));
+        }
+
+        /// <summary>
+        /// Records the source asset identity (<c>"&lt;guid&gt;|&lt;localFileId&gt;"</c>) of
+        /// the inspection's source material so a later re-process resolves back to the
+        /// original material (D-04 idempotent regeneration). Empty when the source is not a
+        /// persistent asset.
+        /// </summary>
+        private static string ResolveSourceIdentity(NamerMaterialInspection inspection)
+        {
+            Material source = inspection.Material;
+            if (source == null)
+            {
+                return string.Empty;
+            }
+
+            return AssetDatabase.TryGetGUIDAndLocalFileIdentifier(source, out string guid, out long localId)
+                ? guid + "|" + localId
+                : string.Empty;
         }
 
         /// <summary>

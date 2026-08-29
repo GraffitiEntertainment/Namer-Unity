@@ -12,6 +12,13 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>Asset label applied to every generated asset; the D-04 overwrite stamp.</summary>
         public const string GeneratedLabel = "NamerGenerated";
 
+        /// <summary>
+        /// Override tag stamped on generated materials recording the source asset identity
+        /// (<c>"&lt;guid&gt;|&lt;localFileId&gt;"</c>) so a re-process resolves back to the
+        /// original source material (D-04 idempotent regeneration).
+        /// </summary>
+        public const string SourceTag = "NamerSource";
+
         /// <summary>Default generated-output root under the project Assets/ folder (D-01).</summary>
         public const string DefaultDestination = "Assets/NAMERGenerated/";
 

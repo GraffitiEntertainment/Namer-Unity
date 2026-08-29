@@ -53,10 +53,120 @@ namespace GraffitiEntertainment.Namer.Editor
 
             foreach (Material material in materials)
             {
-                model.Materials.Add(InspectMaterial(material));
+                Material source = ResolveSourceMaterial(material, model.Warnings);
+                if (source == null)
+                {
+                    continue;
+                }
+
+                model.Materials.Add(InspectMaterial(source));
             }
 
             return model;
+        }
+
+        // ---------------------------------------------------------------------
+        // Generated-material source recovery (D-04 idempotent reprocess)
+        // ---------------------------------------------------------------------
+
+        /// <summary>
+        /// Resolves the ORIGINAL source for a collected material before inspection. A
+        /// material that is not generated (no <c>NamerGenerated</c> label and no
+        /// <c>NamerSource</c> tag) is returned as-is. A generated material resolves to the
+        /// source recorded in its <c>NamerSource</c> tag; a missing/unresolvable tag
+        /// (legacy generated asset) or a remap chain (the resolved source is itself
+        /// generated) yields null and a warning naming the skipped material.
+        /// </summary>
+        private static Material ResolveSourceMaterial(Material material, List<string> warnings)
+        {
+            if (material == null)
+            {
+                return null;
+            }
+
+            if (!HasGeneratedLabel(material) && !HasSourceTag(material))
+            {
+                return material;
+            }
+
+            Material original = ResolveOriginalFromSourceTag(
+                material.GetTag(NamerEditorConstants.SourceTag, false, string.Empty));
+            if (original == null)
+            {
+                warnings.Add("Skipping generated material '" + material.name
+                    + "': missing or unresolvable NamerSource tag (legacy generated asset?).");
+                return null;
+            }
+
+            if (HasGeneratedLabel(original) || HasSourceTag(original))
+            {
+                warnings.Add("Skipping generated material '" + material.name
+                    + "': its NamerSource tag resolves to another generated material (remap chain).");
+                return null;
+            }
+
+            return original;
+        }
+
+        /// <summary>
+        /// Resolves a <c>NamerSource</c> tag value (<c>"&lt;guid&gt;|&lt;localFileId&gt;"</c>)
+        /// to the recorded source material by loading the GUID's asset and matching the
+        /// local file identifier — works for FBX sub-asset materials as well as standalone
+        /// <c>.mat</c> assets. Returns null for a missing, malformed, or unresolvable tag.
+        /// </summary>
+        public static Material ResolveOriginalFromSourceTag(string tag)
+        {
+            if (string.IsNullOrEmpty(tag))
+            {
+                return null;
+            }
+
+            int separator = tag.IndexOf('|');
+            if (separator <= 0 || separator >= tag.Length - 1)
+            {
+                return null;
+            }
+
+            string guid = tag.Substring(0, separator);
+            if (!long.TryParse(tag.Substring(separator + 1), out long localId))
+            {
+                return null;
+            }
+
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            if (string.IsNullOrEmpty(path))
+            {
+                return null;
+            }
+
+            foreach (Object subAsset in AssetDatabase.LoadAllAssetsAtPath(path))
+            {
+                if (subAsset is Material candidate
+                    && AssetDatabase.TryGetGUIDAndLocalFileIdentifier(candidate, out _, out long candidateLocalId)
+                    && candidateLocalId == localId)
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
+        }
+
+        private static bool HasGeneratedLabel(Material material)
+        {
+            // GetLabels requires a persistent asset; a runtime-created material (empty
+            // asset path) is never a generated asset.
+            if (string.IsNullOrEmpty(AssetDatabase.GetAssetPath(material)))
+            {
+                return false;
+            }
+
+            return System.Array.IndexOf(AssetDatabase.GetLabels(material), NamerEditorConstants.GeneratedLabel) >= 0;
+        }
+
+        private static bool HasSourceTag(Material material)
+        {
+            return !string.IsNullOrEmpty(material.GetTag(NamerEditorConstants.SourceTag, false, string.Empty));
         }
 
         // ---------------------------------------------------------------------

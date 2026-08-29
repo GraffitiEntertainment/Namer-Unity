@@ -183,14 +183,16 @@ namespace GraffitiEntertainment.Namer.Editor
                 useAvgA = !useAvgA;
             }
 
-            return ReadBackLumaAverage(src);
+            return ReadBackLumaAverage(src, srcW, srcH);
         }
 
-        private static float ReadBackLumaAverage(RenderTexture src)
+        private static float ReadBackLumaAverage(RenderTexture src, int validWidth, int validHeight)
         {
-            // The reduced RT is tiny (<= 64 texels); a single blocking readback of a
-            // constant-bound buffer is the intended one-shot scalar reduction, not a
-            // per-pixel C# loop over the full-resolution texture (NORM-03).
+            // The reduced RT is tiny (<= 64 valid texels); a single blocking readback of
+            // a constant-bound buffer is the intended one-shot scalar reduction, not a
+            // per-pixel C# loop over the full-resolution texture (NORM-03). Only the
+            // top-left validWidth x validHeight region holds the reduction result — the
+            // over-allocated avg target's remaining texels are stale and must be ignored.
             AsyncGPUReadbackRequest request = AsyncGPUReadback.Request(src, 0, TextureFormat.RGBA32);
             request.WaitForCompletion();
             if (request.hasError)
@@ -199,13 +201,17 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             NativeArray<Color32> data = request.GetData<Color32>();
+            int rowStride = src.width;
             float sum = 0f;
-            for (int i = 0; i < data.Length; i++)
+            for (int y = 0; y < validHeight; y++)
             {
-                sum += data[i].r / 255.0f;
+                for (int x = 0; x < validWidth; x++)
+                {
+                    sum += data[y * rowStride + x].r / 255.0f;
+                }
             }
 
-            return sum / data.Length;
+            return sum / (validWidth * validHeight);
         }
 
         private void Dispatch(int kernel, int w, int h)

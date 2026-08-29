@@ -52,7 +52,6 @@ namespace GraffitiEntertainment.Namer.Editor
         // subsequent Process calls so the bake never re-runs on the debounce tick (D-07).
         private readonly Dictionary<(int low, int occ, int w, int h), Texture2D> _bakeCache =
             new Dictionary<(int, int, int, int), Texture2D>();
-        private bool _bakeInFlight;
 
         public NamerAOPipeline()
         {
@@ -294,9 +293,10 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Schedules an off-debounce geometry bake (via <c>EditorApplication.delayCall</c>),
-        /// caches the result, and invokes <paramref name="onComplete"/> on the main thread.
-        /// No-ops (and still invokes the callback) when a bake is already cached or in flight.
+        /// Bakes (or re-uses a cached bake) and caches the result, then invokes
+        /// <paramref name="onComplete"/>. Runs synchronously as an explicit one-time action —
+        /// never on the 300 ms debounce tick (the 03.1-03 window calls this off the recompute
+        /// path). No-ops (and still invokes the callback) when a bake is already cached.
         /// </summary>
         public void RequestBake(NamerMaterialInspection inspection, int w, int h, Action onComplete)
         {
@@ -310,29 +310,19 @@ namespace GraffitiEntertainment.Namer.Editor
             Mesh occluder = ResolveOccluder(low, inspection.OccluderMesh);
             (int low, int occ, int w, int h) key = MakeKey(low, occluder, w, h);
 
-            if (_bakeCache.ContainsKey(key) || _bakeInFlight)
+            if (_bakeCache.ContainsKey(key))
             {
                 onComplete?.Invoke();
                 return;
             }
 
-            _bakeInFlight = true;
-            EditorApplication.delayCall += () =>
+            RenderTexture baked = BakeAndUpload(inspection, w, h);
+            if (baked != null)
             {
-                try
-                {
-                    RenderTexture baked = BakeAndUpload(inspection, w, h);
-                    if (baked != null)
-                    {
-                        ReleaseAo(baked);
-                    }
-                }
-                finally
-                {
-                    _bakeInFlight = false;
-                    onComplete?.Invoke();
-                }
-            };
+                ReleaseAo(baked);
+            }
+
+            onComplete?.Invoke();
         }
 
         /// <summary>Drops every cached bake texture (used by tests and <see cref="Dispose"/>).</summary>

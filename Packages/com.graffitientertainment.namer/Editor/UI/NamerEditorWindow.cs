@@ -52,8 +52,6 @@ namespace GraffitiEntertainment.Namer.Editor
         private float _aoBlurRadius;
         private float _aoStrength = 1f;
         private float _aoContrast = 1f;
-        private Mesh _occluderMesh;
-        private string _occluderWarning = string.Empty;
         private int _debugChannel;
 
         private bool _dirty;
@@ -186,9 +184,6 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 _preview.Frame(_previewMesh);
             }
-
-            _occluderMesh = null;
-            _occluderWarning = string.Empty;
 
             _debugChannel = 0;
             _status = string.Empty;
@@ -645,25 +640,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 MarkDirty();
             }
 
-            Mesh newOccluder = EditorGUILayout.ObjectField(
-                new GUIContent(
-                    "High-res Occluder",
-                    "Optional high-res mesh used as the geometry-bake occluder; empty/invalid falls back to the selected mesh. Automatically recomputes the preview in memory "
-                        + NamerEditorConstants.DebounceSeconds + " s after the assignment — nothing is written to disk."),
-                _occluderMesh, typeof(Mesh), false) as Mesh;
-            if (newOccluder != _occluderMesh)
-            {
-                _occluderMesh = newOccluder;
-                _afterPanelState.MarkTweaking();
-                MarkDirty();
-            }
-
             EditorGUI.EndDisabledGroup();
-
-            if (!string.IsNullOrEmpty(_occluderWarning))
-            {
-                EditorGUILayout.HelpBox(_occluderWarning, MessageType.Warning);
-            }
 
             // Visible feedback for the otherwise-invisible debounced preview recompute:
             // pending/recomputing while dirty, settled once the compute finishes.

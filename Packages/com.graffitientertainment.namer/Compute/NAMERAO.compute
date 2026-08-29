@@ -1,0 +1,159 @@
+// NAMERAO.compute
+// GPU image-space AO extraction kernels (Phase 03.1, plan 01).
+//
+// Five staged kernels estimate ambient occlusion from the base color when no authored
+// _OcclusionMap exists (the Tripo case): luminance -> hierarchical block-average ->
+// separable gaussian low-pass -> AO remap. The extracted AO is written to the GREEN
+// channel (the _AoIn.g contract) and becomes both the CSNormalize un-multiply divisor
+// and the packed surface B channel (D-08).
+//
+// Base color is the only channel that receives sRGB -> linear conversion (mirroring
+// CSNormalize). The average reduction is HIERARCHICAL: every output texel is a MEAN in
+// [0,1], so it is overflow-free at any resolution and deterministic (no atomic
+// accumulation, no fixed-point accumulator).
+//
+// All write targets are LINEAR. _AoOut is R8G8B8A8_UNorm linear; intermediates are
+// R16G16B16A16_SFloat linear. Compute never writes sRGB.
+
+#include "NAMERAO.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
+
+#pragma kernel CSLuminance
+#pragma kernel CSAverage
+#pragma kernel CSBlurH
+#pragma kernel CSBlurV
+#pragma kernel CSAoRemap
+
+// Kernel-written outputs (linear, random-access).
+RWTexture2D<float4> _Luma;
+RWTexture2D<float4> _BlurA;
+RWTexture2D<float4> _BlurB;
+RWTexture2D<float4> _AoOut;
+RWTexture2D<float4> _AvgA;   // ping-pong downsample-average target
+RWTexture2D<float4> _AvgB;   // ping-pong downsample-average target
+RWTexture2D<float4> _DstAvg; // generic block-average write target (bound to _AvgA/_AvgB per pass)
+
+// Blit-uploaded inputs (never written by kernels).
+Texture2D<float4> _BaseColorIn; // linear/raw base map already uploaded by NamerComputePipeline
+Texture2D<float4> _SrcAvg;      // generic block-average read target (bound to _Luma/_AvgA/_AvgB per pass)
+
+// Separable-blur ping-pong source/target (the same kernel body serves both passes).
+Texture2D<float4> _Src;       // generic blur read target
+RWTexture2D<float4> _Dst;     // generic blur write target
+
+// Uniforms.
+uint2 _Size; // unsigned: compared against SV_DispatchThreadID (uint) in the kernel guards
+float _SourceIsSrgb;
+int _Radius;
+float _Sigma;
+float _AoStrength;
+float _AoContrast;
+float _LumaAverage;
+uint2 _AvgSrcSize;
+uint2 _AvgDstSize;
+
+[numthreads(8,8,1)]
+void CSLuminance(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float4 baseColorIn = _BaseColorIn[id.xy];
+    float3 base = (_SourceIsSrgb > 0.5) ? SRGBToLinear(baseColorIn.rgb) : baseColorIn.rgb;
+    float luma = dot(base, float3(NAMER_LUMA_R, NAMER_LUMA_G, NAMER_LUMA_B));
+    _Luma[id.xy] = float4(luma, 0.0, 0.0, 1.0);
+}
+
+// Hierarchical block-average: each thread writes the MEAN of the 8x8 input block it
+// covers. Every output texel is a mean in [0,1], so the reduction is overflow-free at
+// any resolution (2K/4K/4096^2). NOT a global accumulation: no atomics, no
+// structured-buffer accumulation, no fixed-point accumulator.
+[numthreads(8,8,1)]
+void CSAverage(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _AvgDstSize.x || id.y >= _AvgDstSize.y)
+    {
+        return;
+    }
+
+    float sum = 0.0;
+    float count = 0.0;
+    for (uint y = 0; y < 8; ++y)
+    {
+        for (uint x = 0; x < 8; ++x)
+        {
+            uint2 src = id.xy * uint2(8u, 8u) + uint2(x, y);
+            if (src.x < _AvgSrcSize.x && src.y < _AvgSrcSize.y)
+            {
+                sum += _SrcAvg[src].r;
+                count += 1.0;
+            }
+        }
+    }
+
+    float blockMean = (count > 0.0) ? (sum / count) : 0.0;
+    _DstAvg[id.xy] = float4(blockMean, 0.0, 0.0, 1.0);
+}
+
+// Separable gaussian low-pass: horizontal pass. Reads 2*radius+1 neighbors, no
+// groupshared apron (Metal/D3D11 groupshared budget is not required for correctness).
+[numthreads(8,8,1)]
+void CSBlurH(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float acc = 0.0;
+    float wsum = 0.0;
+    for (int x = -_Radius; x <= _Radius; ++x)
+    {
+        float w = exp(-(float)(x * x) / (2.0 * _Sigma * _Sigma));
+        int sx = clamp((int)id.x + x, 0, (int)_Size.x - 1);
+        acc += _Src[int2(sx, (int)id.y)].r * w;
+        wsum += w;
+    }
+
+    _Dst[id.xy] = float4(acc / wsum, 0.0, 0.0, 1.0);
+}
+
+// Separable gaussian low-pass: vertical pass.
+[numthreads(8,8,1)]
+void CSBlurV(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float acc = 0.0;
+    float wsum = 0.0;
+    for (int y = -_Radius; y <= _Radius; ++y)
+    {
+        float w = exp(-(float)(y * y) / (2.0 * _Sigma * _Sigma));
+        int sy = clamp((int)id.y + y, 0, (int)_Size.y - 1);
+        acc += _Src[int2((int)id.x, sy)].r * w;
+        wsum += w;
+    }
+
+    _Dst[id.xy] = float4(acc / wsum, 0.0, 0.0, 1.0);
+}
+
+[numthreads(8,8,1)]
+void CSAoRemap(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    // AO = low-frequency luminance normalized by the (hierarchically reduced) mean.
+    float ao = saturate(_Dst[id.xy].r / max(_LumaAverage, 1e-4));
+    ao = NamerAoRemap(ao, _AoStrength, _AoContrast);
+
+    // AO in the GREEN channel — the _AoIn.g contract (Pitfall 1).
+    _AoOut[id.xy] = float4(0.0, ao, 0.0, 1.0);
+}

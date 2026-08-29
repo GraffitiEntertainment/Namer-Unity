@@ -31,5 +31,8 @@ namespace GraffitiEntertainment.Namer.Core
 
         /// <summary>Numeric epsilon for divide guards shared by encode/decode.</summary>
         public const float Epsilon = 1e-6f;
+
+        /// <summary>Un-multiply divisor floor for extracted/baked AO (D-09); divisor-side only — the packed B stores the raw AO.</summary>
+        public const float AoFloor = 0.1f;
     }
 }

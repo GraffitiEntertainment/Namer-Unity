@@ -34,6 +34,7 @@ Texture2D<float4> _MetallicGlossIn;  // metallic/gloss map or neutral fill
 // Uniforms.
 float _SourceIsSrgb;
 float _AoUnmultiplyStrength;
+float _AoUnmultiplyFloor;
 float _Metallic;
 float _SmoothnessScalar;
 float _Roughness;
@@ -53,7 +54,7 @@ void CSNormalize(uint3 id : SV_DispatchThreadID)
     float4 baseColorIn = _BaseColorIn[id.xy];
     float3 base = (_SourceIsSrgb > 0.5) ? SRGBToLinear(baseColorIn.rgb) : baseColorIn.rgb;
     float ao = _AoIn[id.xy].g;
-    _BaseColorOut[id.xy] = float4(base / lerp(1.0, max(ao, NAMER_EPSILON), _AoUnmultiplyStrength), 1.0);
+    _BaseColorOut[id.xy] = float4(base / lerp(1.0, max(ao, _AoUnmultiplyFloor), _AoUnmultiplyStrength), 1.0);
 
     float metallic;
     float roughness;

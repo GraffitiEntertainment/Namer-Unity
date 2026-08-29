@@ -19,6 +19,7 @@ static const float NAMER_EMISSIVE_THRESHOLD  = 0.1;
 static const float NAMER_ROUGHNESS_LEVELS    = 63.0;
 static const float NAMER_ALPHA_BYTE_SCALE    = 255.0;
 static const float NAMER_EPSILON             = 1e-6;
+static const float NAMER_AO_FLOOR = 0.1;
 
 // ------------------------------------------------------------------
 // Mirrors NamerFormat.OctahedralEncode EXACTLY.

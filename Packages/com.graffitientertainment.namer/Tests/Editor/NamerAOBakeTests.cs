@@ -156,6 +156,110 @@ namespace GraffitiEntertainment.Namer.Tests
             }
         }
 
+        [Test]
+        public void Bvh_RayCast_HitsTriangleOutsideFirstLeaf()
+        {
+            // 4 quads = 8 triangles — beyond kLeafSize (4), forcing a median split.
+            const int quadCount = 4;
+            NativeArray<float3> verts = new NativeArray<float3>(quadCount * 4, Allocator.Temp);
+            NativeArray<int3> tris = new NativeArray<int3>(quadCount * 2, Allocator.Temp);
+            try
+            {
+                // Four quads side by side along X (y = 0, z in [0,1]). The centroid extent is
+                // largest on X, so the median split places the lowest-X quads in the FIRST-built
+                // (leftmost) leaf and the highest-X quad in a later leaf. A ray at the highest-X
+                // quad is therefore unreachable when traversal starts at node 0 (the pre-fix
+                // bug) and only hits once traversal starts at the post-order root.
+                for (int q = 0; q < quadCount; q++)
+                {
+                    float x0 = q;
+                    verts[q * 4 + 0] = new float3(x0, 0f, 0f);
+                    verts[q * 4 + 1] = new float3(x0 + 1f, 0f, 0f);
+                    verts[q * 4 + 2] = new float3(x0 + 1f, 0f, 1f);
+                    verts[q * 4 + 3] = new float3(x0, 0f, 1f);
+                    tris[q * 2 + 0] = new int3(q * 4 + 0, q * 4 + 2, q * 4 + 1);
+                    tris[q * 2 + 1] = new int3(q * 4 + 0, q * 4 + 3, q * 4 + 2);
+                }
+
+                NamerAOBvh bvh = NamerAOBvh.Build(verts, tris);
+                try
+                {
+                    float3 origin = new float3((quadCount - 1) + 0.5f, 1f, 0.5f);
+                    Assert.IsTrue(
+                        bvh.RayCast(origin, new float3(0f, -1f, 0f), 10f, out float t),
+                        "a ray at the highest-X quad must hit — traversal must reach the non-first leaf");
+                    Assert.Greater(t, 0f, "hit distance must be positive");
+                    Assert.Less(t, 1.5f, "hit distance must match the ray height above the y=0 quads");
+                }
+                finally
+                {
+                    bvh.Dispose();
+                }
+            }
+            finally
+            {
+                verts.Dispose();
+                tris.Dispose();
+            }
+        }
+
+        [Test]
+        public void Bake_RoofAboveSubdividedFloor_Darkens()
+        {
+            Mesh floor = CreateFlatQuad();
+            Mesh roof = CreateSubdividedRoof(4);
+            try
+            {
+                NamerAOBakeResult result = NamerAOBaker.Bake(
+                    floor, roof, BakeResolution, NamerAOBaker.kCageOffset, NamerAOBaker.kMaxDistanceFactor, NamerAOBaker.kRayCount);
+                try
+                {
+                    int center = (BakeResolution / 2) * BakeResolution + (BakeResolution / 2);
+                    Assert.GreaterOrEqual(result.Ao[center], 0f,
+                        "the central texel is UV-covered so its AO must not be the -1 empty sentinel");
+                    Assert.Less(result.Ao[center], 0.9f,
+                        "the central texel must be darkened by the >4-triangle roof occluder (traversal must reach every leaf)");
+                }
+                finally
+                {
+                    result.Ao.Dispose();
+                }
+            }
+            finally
+            {
+                Destroy(floor, roof);
+            }
+        }
+
+        [Test]
+        public void RequestBake_Cancelled_DoesNotCachePartialBake()
+        {
+            Mesh floor = CreateFlatQuad();
+            Mesh roof = CreateSubdividedRoof(4);
+            NamerAOPipeline pipeline = new NamerAOPipeline();
+            try
+            {
+                NamerMaterialInspection inspection = new NamerMaterialInspection
+                {
+                    BakeSourceMesh = floor,
+                    OccluderMesh = roof,
+                };
+
+                const int w = 64;
+                const int h = 64;
+
+                bool completed = pipeline.RequestBake(inspection, w, h, onComplete: null, shouldCancel: () => true);
+                Assert.IsFalse(completed, "a cancelled bake must report cancellation, not completion");
+                Assert.IsFalse(pipeline.HasCachedBake(floor, roof, w, h),
+                    "a cancelled bake must NOT cache a partial result — the AO gate must fall back to extraction next recompute");
+            }
+            finally
+            {
+                pipeline.Dispose();
+                Destroy(floor, roof);
+            }
+        }
+
         [UnityTest]
         public IEnumerator Process_WithCachedBake_RoutesBakedAoIntoPackedSurface()
         {
@@ -298,6 +402,57 @@ namespace GraffitiEntertainment.Namer.Tests
                 new Vector2(0f, 1f),
             };
             mesh.triangles = new[] { 0, 2, 1, 0, 3, 2 };
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private static Mesh CreateSubdividedRoof(int divisions)
+        {
+            Mesh mesh = new Mesh { name = "NamerAOBakeTestSubdividedRoof" };
+            int cellsPerAxis = divisions;
+            int vertexCount = (cellsPerAxis + 1) * (cellsPerAxis + 1);
+            Vector3[] verts = new Vector3[vertexCount];
+            Vector3[] normals = new Vector3[vertexCount];
+            Vector2[] uvs = new Vector2[vertexCount];
+            int[] tris = new int[cellsPerAxis * cellsPerAxis * 6];
+
+            float step = 1f / cellsPerAxis;
+            int vi = 0;
+            for (int z = 0; z <= cellsPerAxis; z++)
+            {
+                for (int x = 0; x <= cellsPerAxis; x++)
+                {
+                    verts[vi] = new Vector3(x * step, 0.05f, z * step);
+                    normals[vi] = Vector3.down;
+                    uvs[vi] = new Vector2(x * step, z * step);
+                    vi++;
+                }
+            }
+
+            int ti = 0;
+            for (int z = 0; z < cellsPerAxis; z++)
+            {
+                for (int x = 0; x < cellsPerAxis; x++)
+                {
+                    int a = z * (cellsPerAxis + 1) + x;
+                    int b = a + 1;
+                    int c = a + (cellsPerAxis + 1);
+                    int d = c + 1;
+
+                    tris[ti++] = a;
+                    tris[ti++] = c;
+                    tris[ti++] = b;
+
+                    tris[ti++] = b;
+                    tris[ti++] = c;
+                    tris[ti++] = d;
+                }
+            }
+
+            mesh.vertices = verts;
+            mesh.normals = normals;
+            mesh.uv = uvs;
+            mesh.triangles = tris;
             mesh.RecalculateBounds();
             return mesh;
         }

@@ -3,6 +3,7 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
+using UnityEditor;
 using UnityEngine;
 using static Unity.Mathematics.math;
 
@@ -20,11 +21,19 @@ namespace GraffitiEntertainment.Namer.Editor
         public readonly int Width;
         public readonly int Height;
 
-        public NamerAOBakeResult(NativeArray<float> ao, int width, int height)
+        /// <summary>
+        /// True when the bake was cancelled before completing. <see cref="Ao"/> is then
+        /// <c>default</c> (not created); the caller must not read it and must treat the
+        /// bake as never having run (no partial result may be cached).
+        /// </summary>
+        public readonly bool Cancelled;
+
+        public NamerAOBakeResult(NativeArray<float> ao, int width, int height, bool cancelled = false)
         {
             Ao = ao;
             Width = width;
             Height = height;
+            Cancelled = cancelled;
         }
     }
 
@@ -53,6 +62,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private const float kBarycentricInsideEps = 1e-4f;
         private const float kNormalBasisEps = 0.999f;
         private const int kInnerLoopBatchCount = 64;
+        private const int kRowsPerSlab = 16;
 
         /// <summary>
         /// Fixed 64 cosine-weighted hemisphere directions around +Z, built once with a
@@ -68,8 +78,13 @@ namespace GraffitiEntertainment.Namer.Editor
         /// directions from each UV-covered texel. <paramref name="resolution"/> is capped to
         /// <see cref="kBakeResolutionCap"/>. The returned <see cref="NamerAOBakeResult.Ao"/> is
         /// owned by the caller; every intermediate allocation is disposed here.
+        /// <paramref name="shouldCancel"/> is polled between row-slabs; when it returns
+        /// <c>true</c> the bake aborts and the returned result is marked
+        /// <see cref="NamerAOBakeResult.Cancelled"/>. When null (the interactive-editor path),
+        /// a <see cref="EditorUtility.DisplayCancelableProgressBar"/> is shown and its
+        /// cancel-return drives the same abort.
         /// </summary>
-        public static NamerAOBakeResult Bake(Mesh lowMesh, Mesh occluderMesh, int resolution, float cageOffset, float maxDistanceFactor, int rayCount)
+        public static NamerAOBakeResult Bake(Mesh lowMesh, Mesh occluderMesh, int resolution, float cageOffset, float maxDistanceFactor, int rayCount, Func<bool> shouldCancel = null)
         {
             if (lowMesh == null)
             {
@@ -130,24 +145,63 @@ namespace GraffitiEntertainment.Namer.Editor
                 NamerAOBvh bvh = NamerAOBvh.Build(occVerts, occTris);
                 try
                 {
-                    var job = new RayTriangleJob
+                    // Per-texel work is fully independent: the direction table is fixed and
+                    // each texel reads only its own UV/position/normal plus the shared
+                    // read-only BVH, so batching the monolithic dispatch into row-slabs is
+                    // deterministic (identical results to a single full dispatch) and lets a
+                    // progress bar + cancellation poll interleave between slabs.
+                    for (int rowStart = 0; rowStart < res; rowStart += kRowsPerSlab)
                     {
-                        LowVertices = lowVerts,
-                        LowNormals = lowNormals,
-                        LowUvs = lowUvs,
-                        LowTriangles = lowTris,
-                        BvhNodes = bvh.Nodes,
-                        BvhPrimitives = bvh.PrimitiveIndices,
-                        OccluderVertices = bvh.Vertices,
-                        OccluderTriangles = bvh.Triangles,
-                        Directions = directions,
-                        Resolution = res,
-                        CageOffset = cageOffset,
-                        MaxDistance = maxDistance,
-                        RayCount = clampedRays,
-                        AoOut = ao,
-                    };
-                    job.Schedule(res * res, kInnerLoopBatchCount).Complete();
+                        int rowCount = min(kRowsPerSlab, res - rowStart);
+                        int startIndex = rowStart * res;
+                        int indexCount = rowCount * res;
+
+                        var job = new RayTriangleJob
+                        {
+                            LowVertices = lowVerts,
+                            LowNormals = lowNormals,
+                            LowUvs = lowUvs,
+                            LowTriangles = lowTris,
+                            BvhNodes = bvh.Nodes,
+                            BvhPrimitives = bvh.PrimitiveIndices,
+                            OccluderVertices = bvh.Vertices,
+                            OccluderTriangles = bvh.Triangles,
+                            Directions = directions,
+                            Resolution = res,
+                            CageOffset = cageOffset,
+                            MaxDistance = maxDistance,
+                            RayCount = clampedRays,
+                            StartIndex = startIndex,
+                            AoOut = ao,
+                        };
+                        job.Schedule(indexCount, kInnerLoopBatchCount).Complete();
+
+                        float progress = (float)(rowStart + rowCount) / res;
+                        bool cancelled;
+                        if (shouldCancel != null)
+                        {
+                            // Injectable headless path (tests): no editor UI.
+                            cancelled = shouldCancel();
+                        }
+                        else
+                        {
+                            // Interactive-editor path: visible, cancellable progress.
+                            cancelled = EditorUtility.DisplayCancelableProgressBar(
+                                "Baking NAMER AO",
+                                "Casting occlusion rays — row " + (rowStart + rowCount) + "/" + res,
+                                progress);
+                        }
+
+                        if (cancelled)
+                        {
+                            if (ao.IsCreated)
+                            {
+                                ao.Dispose();
+                            }
+
+                            return new NamerAOBakeResult(default, res, res, cancelled: true);
+                        }
+                    }
                 }
                 finally
                 {
@@ -158,6 +212,7 @@ namespace GraffitiEntertainment.Namer.Editor
             }
             finally
             {
+                EditorUtility.ClearProgressBar();
                 if (lowVerts.IsCreated) lowVerts.Dispose();
                 if (lowNormals.IsCreated) lowNormals.Dispose();
                 if (lowUvs.IsCreated) lowUvs.Dispose();
@@ -255,17 +310,24 @@ namespace GraffitiEntertainment.Namer.Editor
             public float CageOffset;
             public float MaxDistance;
             public int RayCount;
-            [WriteOnly] public NativeArray<float> AoOut;
+            public int StartIndex;
+            // Slab scheduling writes AoOut[i] for i = index + StartIndex (disjoint per
+            // slab, each completed before the next), so the parallel-for index restriction
+            // is lifted — no two in-flight jobs ever touch the same element.
+            [WriteOnly]
+            [NativeDisableParallelForRestriction]
+            public NativeArray<float> AoOut;
 
             public void Execute(int index)
             {
-                int x = index % Resolution;
-                int y = index / Resolution;
+                int i = index + StartIndex;
+                int x = i % Resolution;
+                int y = i / Resolution;
                 float2 uv = new float2((x + 0.5f) / Resolution, (y + 0.5f) / Resolution);
 
                 if (!TryReconstruct(uv, out float3 worldPos, out float3 normal))
                 {
-                    AoOut[index] = -1f; // empty texel — filled later by jump-flood dilation.
+                    AoOut[i] = -1f; // empty texel — filled later by jump-flood dilation.
                     return;
                 }
 
@@ -277,9 +339,9 @@ namespace GraffitiEntertainment.Namer.Editor
                 float3 bitangent = cross(normal, tangent);
 
                 int unoccluded = 0;
-                for (int i = 0; i < RayCount; i++)
+                for (int r = 0; r < RayCount; r++)
                 {
-                    float3 d = Directions[i];
+                    float3 d = Directions[r];
                     float3 worldDir = tangent * d.x + bitangent * d.y + normal * d.z;
                     if (!NamerAOBvh.TraceBvh(BvhNodes, BvhPrimitives, OccluderVertices, OccluderTriangles, origin, worldDir, MaxDistance, out float _))
                     {
@@ -287,7 +349,7 @@ namespace GraffitiEntertainment.Namer.Editor
                     }
                 }
 
-                AoOut[index] = (float)unoccluded / RayCount;
+                AoOut[i] = (float)unoccluded / RayCount;
             }
 
             private bool TryReconstruct(float2 uv, out float3 pos, out float3 normal)

@@ -198,7 +198,7 @@ namespace GraffitiEntertainment.Namer.Editor
         /// mesh when null/invalid (D-06) and never throws. Returns null when no bake source
         /// exists. The caller releases the returned target via <see cref="ReleaseAo"/>.
         /// </summary>
-        public RenderTexture BakeAndUpload(NamerMaterialInspection inspection, int w, int h)
+        public RenderTexture BakeAndUpload(NamerMaterialInspection inspection, int w, int h, Func<bool> shouldCancel = null)
         {
             if (inspection == null || inspection.BakeSourceMesh == null)
             {
@@ -224,7 +224,20 @@ namespace GraffitiEntertainment.Namer.Editor
                 bakeRes,
                 NamerAOBaker.kCageOffset,
                 NamerAOBaker.kMaxDistanceFactor,
-                NamerAOBaker.kRayCount);
+                NamerAOBaker.kRayCount,
+                shouldCancel);
+
+            if (baked.Cancelled)
+            {
+                // A cancelled bake must never be cached: return null so the caller does not
+                // StoreBake and the D-07 gate falls back to image-space extraction next recompute.
+                if (baked.Ao.IsCreated)
+                {
+                    baked.Ao.Dispose();
+                }
+
+                return null;
+            }
 
             RenderTexture seed = null;
             RenderTexture jfaA = null;
@@ -309,13 +322,15 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <paramref name="onComplete"/>. Runs synchronously as an explicit one-time action —
         /// never on the 300 ms debounce tick (the 03.1-03 window calls this off the recompute
         /// path). No-ops (and still invokes the callback) when a bake is already cached.
+        /// Returns <c>false</c> (and does NOT cache or invoke <paramref name="onComplete"/>)
+        /// when the bake is cancelled via <paramref name="shouldCancel"/>.
         /// </summary>
-        public void RequestBake(NamerMaterialInspection inspection, int w, int h, Action onComplete)
+        public bool RequestBake(NamerMaterialInspection inspection, int w, int h, Action onComplete, Func<bool> shouldCancel = null)
         {
             if (inspection == null || inspection.BakeSourceMesh == null)
             {
                 onComplete?.Invoke();
-                return;
+                return true;
             }
 
             Mesh low = inspection.BakeSourceMesh;
@@ -325,16 +340,20 @@ namespace GraffitiEntertainment.Namer.Editor
             if (_bakeCache.ContainsKey(key))
             {
                 onComplete?.Invoke();
-                return;
+                return true;
             }
 
-            RenderTexture baked = BakeAndUpload(inspection, w, h);
-            if (baked != null)
+            RenderTexture baked = BakeAndUpload(inspection, w, h, shouldCancel);
+            if (baked == null)
             {
-                ReleaseAo(baked);
+                // Cancelled (a missing bake source is already handled above): no cache,
+                // no completion callback, so the D-07 gate falls back to extraction.
+                return false;
             }
 
+            ReleaseAo(baked);
             onComplete?.Invoke();
+            return true;
         }
 
         /// <summary>Drops every cached bake texture (used by tests and <see cref="Dispose"/>).</summary>

@@ -218,11 +218,12 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>
         /// Thin forwarder to <see cref="NamerAOPipeline.RequestBake"/> — schedules an
-        /// off-debounce geometry bake (called by the 03.1-03 window).
+        /// off-debounce geometry bake (called by the 03.1-03 window). Returns
+        /// <c>false</c> when the bake was cancelled.
         /// </summary>
-        public void RequestBake(NamerMaterialInspection inspection, int w, int h, Action onComplete)
+        public bool RequestBake(NamerMaterialInspection inspection, int w, int h, Action onComplete, Func<bool> shouldCancel = null)
         {
-            EnsureAoPipeline().RequestBake(inspection, w, h, onComplete);
+            return EnsureAoPipeline().RequestBake(inspection, w, h, onComplete, shouldCancel);
         }
 
         private void BindAndDispatch(

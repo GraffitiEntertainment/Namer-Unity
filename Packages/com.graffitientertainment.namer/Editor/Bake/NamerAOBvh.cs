@@ -281,7 +281,10 @@ namespace GraffitiEntertainment.Namer.Editor
 
             Span<int> stack = stackalloc int[kMaxTraversalStack];
             int sp = 0;
-            stack[sp++] = 0;
+            // Build constructs the hierarchy post-order (children are appended before
+            // their parent), so the root is the LAST node — not node 0. The empty-tree
+            // case is already guarded by the nodes.Length == 0 early return above.
+            stack[sp++] = nodes.Length - 1;
 
             float bestT = maxDistance;
             bool hit = false;

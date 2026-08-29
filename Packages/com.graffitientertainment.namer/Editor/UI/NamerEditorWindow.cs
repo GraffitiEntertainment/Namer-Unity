@@ -330,7 +330,14 @@ namespace GraffitiEntertainment.Namer.Editor
                 return;
             }
 
-            _pipeline.RequestBake(inspection, _liveResult.Width, _liveResult.Height, () => MarkDirty());
+            bool completed = _pipeline.RequestBake(inspection, _liveResult.Width, _liveResult.Height, () => MarkDirty());
+            if (!completed)
+            {
+                // Cancelled: leave the extraction result on screen and tell the user. No
+                // re-dirty — the bake is intentionally not retried until the next change.
+                _status = "AO bake cancelled — showing image-space extraction.";
+                _statusIsError = false;
+            }
         }
 
         private void EnsurePipeline()

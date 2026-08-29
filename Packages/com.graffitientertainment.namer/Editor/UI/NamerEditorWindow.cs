@@ -37,6 +37,10 @@ namespace GraffitiEntertainment.Namer.Editor
 
         private Material _namerMaterial;
         private Material _debugMaterial;
+        private NamerAfterPanelState _afterPanelState = new NamerAfterPanelState();
+        private Material _generatedMaterial;
+        private Texture2D _generatedSurface;
+        private Texture2D _generatedBase;
         private NamerComputeResult _liveResult;
         private RenderTexture _previewBaseRt;
 
@@ -196,7 +200,50 @@ namespace GraffitiEntertainment.Namer.Editor
             _status = string.Empty;
             _statusIsError = false;
 
+            ResolveGeneratedPreview();
+
             MarkDirty();
+        }
+
+        /// <summary>
+        /// Resolves whether generated assets exist for the current selection and, when they
+        /// do, binds the generated surface/base textures to the debug material. Loaded
+        /// generated materials/textures are persistent <c>AssetDatabase</c> assets and are
+        /// never destroyed here (including in <c>OnDisable</c>).
+        /// </summary>
+        private void ResolveGeneratedPreview()
+        {
+            _afterPanelState.Reset();
+            _afterPanelState.GeneratedAvailable = false;
+            _generatedMaterial = null;
+            _generatedSurface = null;
+            _generatedBase = null;
+
+            NamerMaterialInspection inspection = PrimaryInspection;
+            if (inspection == null || _selection == null)
+            {
+                return;
+            }
+
+            string folder = AssetGenerator.ComposeDestinationFolder(_settings.Destination, _selection.name);
+            _generatedMaterial = AssetDatabase.LoadAssetAtPath<Material>(
+                AssetGenerator.ComposePath(inspection, _settings, folder, ".mat"));
+            _generatedSurface = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                AssetGenerator.ComposePath(inspection, _settings, folder, "_Surface.png"));
+            _generatedBase = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                AssetGenerator.ComposePath(inspection, _settings, folder, "_Base.png"));
+
+            if (_generatedMaterial == null)
+            {
+                return;
+            }
+
+            _afterPanelState.GeneratedAvailable = true;
+
+            if (_debugMaterial != null)
+            {
+                _debugMaterialFactory.SetTextures(_debugMaterial, _generatedSurface, _generatedBase);
+            }
         }
 
         private void Tick()
@@ -283,7 +330,14 @@ namespace GraffitiEntertainment.Namer.Editor
                     _namerMaterial.DisableKeyword("_EMISSION");
                 }
 
-                _debugMaterialFactory.SetTextures(_debugMaterial, _liveResult.PackedSurface, previewBaseMap);
+                if (_afterPanelState.PreferGenerated && _generatedSurface != null && _generatedBase != null)
+                {
+                    _debugMaterialFactory.SetTextures(_debugMaterial, _generatedSurface, _generatedBase);
+                }
+                else
+                {
+                    _debugMaterialFactory.SetTextures(_debugMaterial, _liveResult.PackedSurface, previewBaseMap);
+                }
                 _debugMaterialFactory.SetChannel(_debugMaterial, Mathf.Max(0, _debugChannel - 1));
                 _debugMaterial.SetFloat(OcclusionStrengthId, inspection.OcclusionStrength);
 
@@ -518,7 +572,18 @@ namespace GraffitiEntertainment.Namer.Editor
             HandlePreviewCameraInput(previewRect);
 
             Material beforeMaterial = inspection.Material;
-            Material afterMaterial = _debugChannel == 0 ? _namerMaterial : _debugMaterial;
+            Material afterMaterial;
+            if (_debugChannel == 0)
+            {
+                afterMaterial = (_afterPanelState.PreferGenerated && _generatedMaterial != null)
+                    ? _generatedMaterial
+                    : _namerMaterial;
+            }
+            else
+            {
+                afterMaterial = _debugMaterial;
+            }
+
             if (afterMaterial == null)
             {
                 afterMaterial = beforeMaterial;
@@ -596,6 +661,7 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 _aoUnmultiplyStrength = newAo;
                 _settings.AoUnmultiplyStrength = newAo;
+                _afterPanelState.MarkTweaking();
                 MarkDirty();
             }
 
@@ -609,6 +675,7 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 _aoBlurRadius = newAoBlur;
                 _settings.AoBlurRadius = newAoBlur;
+                _afterPanelState.MarkTweaking();
                 MarkDirty();
             }
 
@@ -622,6 +689,7 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 _aoStrength = newAoStrength;
                 _settings.AoStrength = newAoStrength;
+                _afterPanelState.MarkTweaking();
                 MarkDirty();
             }
 
@@ -635,6 +703,7 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 _aoContrast = newAoContrast;
                 _settings.AoContrast = newAoContrast;
+                _afterPanelState.MarkTweaking();
                 MarkDirty();
             }
 
@@ -647,6 +716,7 @@ namespace GraffitiEntertainment.Namer.Editor
             if (newOccluder != _occluderMesh)
             {
                 _occluderMesh = newOccluder;
+                _afterPanelState.MarkTweaking();
                 MarkDirty();
             }
 
@@ -745,6 +815,10 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 _status = DescribeResult(result);
                 _statusIsError = !string.IsNullOrEmpty(result.Error);
+                if (string.IsNullOrEmpty(result.Error))
+                {
+                    ResolveGeneratedPreview();
+                }
             }
             catch (Exception ex)
             {

@@ -187,12 +187,6 @@ namespace GraffitiEntertainment.Namer.Editor
                 _preview.Frame(_previewMesh);
             }
 
-            NamerMaterialInspection inspection = PrimaryInspection;
-            if (inspection != null)
-            {
-                inspection.BakeSourceMesh = _previewMesh;
-            }
-
             _occluderMesh = null;
             _occluderWarning = string.Empty;
 
@@ -291,25 +285,6 @@ namespace GraffitiEntertainment.Namer.Editor
                 inspection.AoBlurRadius = _aoBlurRadius;
                 inspection.AoStrength = _aoStrength;
                 inspection.AoContrast = _aoContrast;
-                if (inspection.BakeSourceMesh == null)
-                {
-                    inspection.BakeSourceMesh = _previewMesh;
-                }
-
-                // D-06: an invalid high-res occluder (empty, or the same mesh as the bake
-                // source) warns visibly and falls back to the selected mesh — never a hard
-                // failure.
-                if (_occluderMesh != null && (_occluderMesh.vertexCount == 0 || _occluderMesh == inspection.BakeSourceMesh))
-                {
-                    _occluderWarning = "High-res occluder is empty or the same as the bake source — falling back to the selected mesh.";
-                    _occluderMesh = null;
-                }
-                else
-                {
-                    _occluderWarning = string.Empty;
-                }
-
-                inspection.OccluderMesh = _occluderMesh;
 
                 _liveResult = _pipeline.Process(inspection);
 
@@ -354,44 +329,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 _recomputing = false;
             }
 
-            TriggerAutomaticBake(inspection);
-
             Repaint();
-        }
-
-        /// <summary>
-        /// Automatic geometry-bake trigger (D-07): after a successful recompute, when the
-        /// source has no authored <c>_OcclusionMap</c>, a bake-capable mesh, and no cached
-        /// bake, prime the bake via the synchronous, idempotent <see cref="NamerComputePipeline.RequestBake"/>
-        /// and re-dirty the preview so the next recompute routes the cached bake through the
-        /// 03.1-02 three-way gate. The bake runs off the debounce tick (after the recompute
-        /// completes) and is cached once per mesh/occluder/resolution.
-        /// </summary>
-        private void TriggerAutomaticBake(NamerMaterialInspection inspection)
-        {
-            if (inspection == null || _liveResult == null || inspection.OcclusionMap != null)
-            {
-                return;
-            }
-
-            if (inspection.BakeSourceMesh == null)
-            {
-                return;
-            }
-
-            if (_pipeline.HasCachedBake(inspection, _liveResult.Width, _liveResult.Height))
-            {
-                return;
-            }
-
-            bool completed = _pipeline.RequestBake(inspection, _liveResult.Width, _liveResult.Height, () => MarkDirty());
-            if (!completed)
-            {
-                // Cancelled: leave the extraction result on screen and tell the user. No
-                // re-dirty — the bake is intentionally not retried until the next change.
-                _status = "AO bake cancelled — showing image-space extraction.";
-                _statusIsError = false;
-            }
         }
 
         private void EnsurePipeline()

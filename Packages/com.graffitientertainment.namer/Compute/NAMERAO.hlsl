@@ -32,4 +32,20 @@ float NamerAoRemap(float ao, float strength, float contrast)
     return ao;
 }
 
+// ------------------------------------------------------------------
+// Separable-blur channel selection (D-11 user blur). The SAME CSBlurH/CSBlurV kernel
+// bodies serve two passes: channel 0 blurs the RED luminance (the extraction's internal
+// low-pass), channel 1 blurs the GREEN AO (the post-tweak user blur). The AO is always
+// the green channel (the _AoIn.g contract), so the user blur must read/write .g.
+// ------------------------------------------------------------------
+float NamerBlurSample(float4 v, float channel)
+{
+    return lerp(v.r, v.g, channel);
+}
+
+float4 NamerBlurWrite(float value, float channel)
+{
+    return float4(value * (1.0 - channel), value * channel, 0.0, 1.0);
+}
+
 #endif // GRAFFITI_ENTERTAINMENT_NAMER_AO_INCLUDED

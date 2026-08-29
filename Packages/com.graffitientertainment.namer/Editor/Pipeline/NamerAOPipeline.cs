@@ -33,8 +33,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private const int MaxLowPassRadius = 64;
         private const int LowPassRadiusDivisor = 32;
         private const float LowPassSigmaDivisor = 3.0f;
-        private const float IdentityAoStrength = 1.0f;
-        private const float IdentityAoContrast = 1.0f;
+        private const float MinBlurSigma = 1e-3f;
         private const int kSeamDilatePx = 16;
 
         private readonly ComputeTexturePool _pool = new ComputeTexturePool();
@@ -125,11 +124,10 @@ namespace GraffitiEntertainment.Namer.Editor
                 // 2. Hierarchical block-average -> scalar mean of a tiny (<= 64 texel) RT.
                 float lumaAverage = ReduceToScalarMean(luma, w, h, avgA, avgB);
 
-                // 3. Separable gaussian low-pass over the luminance.
+                // 3. Separable gaussian low-pass over the luminance (red channel).
                 _compute.SetInt("_Radius", radius);
                 _compute.SetFloat("_Sigma", sigma);
-                _compute.SetFloat("_AoStrength", IdentityAoStrength);
-                _compute.SetFloat("_AoContrast", IdentityAoContrast);
+                _compute.SetFloat("_BlurChannel", 0f);
 
                 _compute.SetTexture(_kernelBlurH, "_Src", luma);
                 _compute.SetTexture(_kernelBlurH, "_Dst", blurA);
@@ -139,13 +137,18 @@ namespace GraffitiEntertainment.Namer.Editor
                 _compute.SetTexture(_kernelBlurV, "_Dst", blurB);
                 Dispatch(_kernelBlurV, w, h);
 
-                // 4. AO remap -> green-channel output (the _AoIn.g contract).
+                // 4. AO remap (luminance-relative) -> green-channel output, with the user's
+                //    strength/contrast applied inside NamerAoRemap (D-11). The user blur is
+                //    a second, distinct pass applied AFTER the internal low-pass (A5).
                 _compute.SetFloat("_LumaAverage", lumaAverage);
+                _compute.SetFloat("_AoDirect", 0f);
+                _compute.SetFloat("_AoStrength", inspection.AoStrength);
+                _compute.SetFloat("_AoContrast", inspection.AoContrast);
                 _compute.SetTexture(_kernelAoRemap, "_Dst", blurB);
                 _compute.SetTexture(_kernelAoRemap, "_AoOut", aoOut);
                 Dispatch(_kernelAoRemap, w, h);
 
-                return aoOut;
+                return ApplyUserBlur(aoOut, inspection, w, h);
             }
             finally
             {
@@ -210,7 +213,8 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 RenderTexture cachedRt = _pool.Lease(NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm));
                 NamerComputePipeline.Upload(cached, cachedRt, null);
-                return cachedRt;
+                RenderTexture tweaked = ApplyStrengthContrastDirect(cachedRt, inspection, w, h);
+                return ApplyUserBlur(tweaked, inspection, w, h);
             }
 
             int bakeRes = Mathf.Min(Mathf.Min(w, h), NamerAOBaker.kBakeResolutionCap);
@@ -269,8 +273,16 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 result = src;
 
+                // Cache the RAW dilated bake (pre-tweak) so slider changes re-shape the
+                // same bake without re-running the raycast (D-07 cache stays keyed by
+                // mesh/occluder/resolution only).
                 StoreBake(key, ReadBackToTexture(result, w, h));
-                return result;
+
+                // Apply the source-agnostic tweak stage (strength -> contrast -> blur) on
+                // top of the raw dilated bake (D-11). Both helpers consume their input
+                // (release it back to the pool) only when they produce a new target.
+                RenderTexture tweaked = ApplyStrengthContrastDirect(result, inspection, w, h);
+                return ApplyUserBlur(tweaked, inspection, w, h);
             }
             finally
             {
@@ -342,6 +354,67 @@ namespace GraffitiEntertainment.Namer.Editor
         private static Mesh ResolveOccluder(Mesh low, Mesh occluder)
         {
             return occluder != null && occluder.vertexCount > 0 ? occluder : low;
+        }
+
+        /// <summary>
+        /// Applies the user's strength/contrast to a green-channel AO target via the
+        /// <c>CSAoRemap</c> direct mode (D-11). When strength and contrast are identity
+        /// (1/1) this returns <paramref name="aoIn"/> unchanged; otherwise it returns a new
+        /// pool-leased remapped target and releases <paramref name="aoIn"/> back to the pool.
+        /// </summary>
+        private RenderTexture ApplyStrengthContrastDirect(RenderTexture aoIn, NamerMaterialInspection inspection, int w, int h)
+        {
+            if (Mathf.Approximately(inspection.AoStrength, 1f) && Mathf.Approximately(inspection.AoContrast, 1f))
+            {
+                return aoIn;
+            }
+
+            RenderTexture remapped = _pool.Lease(NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm));
+            _compute.SetInts("_Size", new[] { w, h });
+            _compute.SetFloat("_AoDirect", 1f);
+            _compute.SetFloat("_AoStrength", inspection.AoStrength);
+            _compute.SetFloat("_AoContrast", inspection.AoContrast);
+            _compute.SetTexture(_kernelAoRemap, "_Dst", aoIn);
+            _compute.SetTexture(_kernelAoRemap, "_AoOut", remapped);
+            Dispatch(_kernelAoRemap, w, h);
+            Release(aoIn);
+            return remapped;
+        }
+
+        /// <summary>
+        /// Applies the user's blur radius as a second separable gaussian over the GREEN AO
+        /// channel (D-11), distinct from the extraction's internal red-channel low-pass (A5).
+        /// Returns <paramref name="aoIn"/> unchanged when the radius is 0; otherwise returns a
+        /// new pool-leased blurred target and releases <paramref name="aoIn"/> back to the pool.
+        /// </summary>
+        private RenderTexture ApplyUserBlur(RenderTexture aoIn, NamerMaterialInspection inspection, int w, int h)
+        {
+            int radius = Mathf.Max(0, Mathf.RoundToInt(inspection.AoBlurRadius));
+            if (radius <= 0)
+            {
+                return aoIn;
+            }
+
+            float sigma = Mathf.Max((float)radius, MinBlurSigma);
+            RenderTexture blurA = _pool.Lease(NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm));
+            RenderTexture blurB = _pool.Lease(NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm));
+
+            _compute.SetInts("_Size", new[] { w, h });
+            _compute.SetInt("_Radius", radius);
+            _compute.SetFloat("_Sigma", sigma);
+            _compute.SetFloat("_BlurChannel", 1f);
+
+            _compute.SetTexture(_kernelBlurH, "_Src", aoIn);
+            _compute.SetTexture(_kernelBlurH, "_Dst", blurA);
+            Dispatch(_kernelBlurH, w, h);
+
+            _compute.SetTexture(_kernelBlurV, "_Src", blurA);
+            _compute.SetTexture(_kernelBlurV, "_Dst", blurB);
+            Dispatch(_kernelBlurV, w, h);
+
+            Release(blurA);
+            Release(aoIn);
+            return blurB;
         }
 
         private static (int low, int occ, int w, int h) MakeKey(Mesh low, Mesh occluder, int w, int h)

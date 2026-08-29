@@ -57,6 +57,8 @@ int _Radius;
 float _Sigma;
 float _AoStrength;
 float _AoContrast;
+float _AoDirect;    // 0 = luminance-relative extract remap; 1 = direct green-AO remap (bake)
+float _BlurChannel; // 0 = red (luminance low-pass); 1 = green (AO user blur)
 float _LumaAverage;
 uint2 _AvgSrcSize;
 uint2 _AvgDstSize;
@@ -124,11 +126,11 @@ void CSBlurH(uint3 id : SV_DispatchThreadID)
     {
         float w = exp(-(float)(x * x) / (2.0 * _Sigma * _Sigma));
         int sx = clamp((int)id.x + x, 0, (int)_Size.x - 1);
-        acc += _Src[int2(sx, (int)id.y)].r * w;
+        acc += NamerBlurSample(_Src[int2(sx, (int)id.y)], _BlurChannel) * w;
         wsum += w;
     }
 
-    _Dst[id.xy] = float4(acc / wsum, 0.0, 0.0, 1.0);
+    _Dst[id.xy] = NamerBlurWrite(acc / wsum, _BlurChannel);
 }
 
 // Separable gaussian low-pass: vertical pass.
@@ -146,11 +148,11 @@ void CSBlurV(uint3 id : SV_DispatchThreadID)
     {
         float w = exp(-(float)(y * y) / (2.0 * _Sigma * _Sigma));
         int sy = clamp((int)id.y + y, 0, (int)_Size.y - 1);
-        acc += _Src[int2((int)id.x, sy)].r * w;
+        acc += NamerBlurSample(_Src[int2((int)id.x, sy)], _BlurChannel) * w;
         wsum += w;
     }
 
-    _Dst[id.xy] = float4(acc / wsum, 0.0, 0.0, 1.0);
+    _Dst[id.xy] = NamerBlurWrite(acc / wsum, _BlurChannel);
 }
 
 [numthreads(8,8,1)]
@@ -161,8 +163,19 @@ void CSAoRemap(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    // AO = low-frequency luminance normalized by the (hierarchically reduced) mean.
-    float ao = saturate(_Dst[id.xy].r / max(_LumaAverage, 1e-4));
+    float ao;
+    if (_AoDirect > 0.5)
+    {
+        // Direct mode (geometry bake): the AO already lives in the green channel.
+        ao = saturate(_Dst[id.xy].g);
+    }
+    else
+    {
+        // Extraction mode: AO = low-frequency luminance normalized by the (hierarchically
+        // reduced) mean.
+        ao = saturate(_Dst[id.xy].r / max(_LumaAverage, 1e-4));
+    }
+
     ao = NamerAoRemap(ao, _AoStrength, _AoContrast);
 
     // AO in the GREEN channel — the _AoIn.g contract (Pitfall 1).

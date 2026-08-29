@@ -16,6 +16,9 @@ namespace GraffitiEntertainment.Namer.Editor
         private const string SuffixKey = "NamerProcessor.Suffix";
         private const string OverwriteGeneratedKey = "NamerProcessor.OverwriteGenerated";
         private const string AoUnmultiplyStrengthKey = "NamerProcessor.AoUnmultiplyStrength";
+        private const string AoBlurRadiusKey = "NamerProcessor.AoBlurRadius";
+        private const string AoStrengthKey = "NamerProcessor.AoStrength";
+        private const string AoContrastKey = "NamerProcessor.AoContrast";
 
         /// <summary>Generated-output root folder (D-01 default: Assets/NAMERGenerated/).</summary>
         public string Destination
@@ -50,6 +53,27 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             get { return EditorPrefs.GetFloat(AoUnmultiplyStrengthKey, NamerEditorConstants.DefaultAoUnmultiplyStrength); }
             set { EditorPrefs.SetFloat(AoUnmultiplyStrengthKey, value); }
+        }
+
+        /// <summary>AO blur radius in texels (D-11; 0 = off — the user blur pass).</summary>
+        public float AoBlurRadius
+        {
+            get { return EditorPrefs.GetFloat(AoBlurRadiusKey, NamerEditorConstants.DefaultAoBlurRadius); }
+            set { EditorPrefs.SetFloat(AoBlurRadiusKey, value); }
+        }
+
+        /// <summary>AO strength (D-11; 1 = full AO, 0 = white/no AO).</summary>
+        public float AoStrength
+        {
+            get { return EditorPrefs.GetFloat(AoStrengthKey, NamerEditorConstants.DefaultAoStrength); }
+            set { EditorPrefs.SetFloat(AoStrengthKey, value); }
+        }
+
+        /// <summary>AO contrast (D-11; 1 = identity, pivot 0.5).</summary>
+        public float AoContrast
+        {
+            get { return EditorPrefs.GetFloat(AoContrastKey, NamerEditorConstants.DefaultAoContrast); }
+            set { EditorPrefs.SetFloat(AoContrastKey, value); }
         }
     }
 }

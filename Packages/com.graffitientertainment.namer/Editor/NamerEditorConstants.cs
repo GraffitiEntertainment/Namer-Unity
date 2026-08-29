@@ -26,5 +26,14 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>Default AO un-multiply strength (D-08; persisted in <see cref="NamerProcessorSettings"/>).</summary>
         public const float DefaultAoUnmultiplyStrength = 1f;
+
+        /// <summary>Default AO blur radius in texels (D-11; 0 = off — a second separable pass distinct from the internal low-pass).</summary>
+        public const float DefaultAoBlurRadius = 0f;
+
+        /// <summary>Default AO strength (D-11; 1 = full AO, 0 = white/no AO).</summary>
+        public const float DefaultAoStrength = 1f;
+
+        /// <summary>Default AO contrast (D-11; 1 = identity, pivot 0.5).</summary>
+        public const float DefaultAoContrast = 1f;
     }
 }

@@ -94,6 +94,9 @@ namespace GraffitiEntertainment.Namer.Editor
                 foreach (NamerMaterialInspection inspection in model.Materials)
                 {
                     inspection.AoUnmultiplyStrength = settings.AoUnmultiplyStrength;
+                    inspection.AoBlurRadius = settings.AoBlurRadius;
+                    inspection.AoStrength = settings.AoStrength;
+                    inspection.AoContrast = settings.AoContrast;
                     NamerComputeResult computeResult = pipeline.Process(inspection);
                     try
                     {

@@ -59,6 +59,15 @@ namespace GraffitiEntertainment.Namer.Editor
         public Mesh BakeSourceMesh; // default geometry-bake source = selected mesh (D-03); null = no bake possible
         public Mesh OccluderMesh;   // optional high-res occluder (D-04); null/invalid falls back to BakeSourceMesh (D-06)
 
+        // Processing-time AO tweak controls (D-11). These shape the AO output regardless of
+        // source (extracted or baked) and are DISTINCT from the decode-time OcclusionStrength
+        // metadata (RESEARCH Pitfall 6 — the strength here is not the runtime _OcclusionStrength).
+        // Inline identity defaults keep every construction path (window, NamerProcessor, tests)
+        // behavior-identical until a caller overrides them.
+        public float AoBlurRadius = 0f; // texels; 0 = off (the user blur is a second pass distinct from the internal low-pass)
+        public float AoStrength = 1f;   // 1 = full AO, 0 = white/no AO
+        public float AoContrast = 1f;   // 1 = identity, pivot 0.5
+
         public Texture2D EmissionMap;
         public Color EmissionColor;
         public float Emissive;

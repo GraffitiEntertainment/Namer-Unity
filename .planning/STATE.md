@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03.1-01-PLAN.md
-last_updated: "2026-08-29T00:28:28.176Z"
-last_activity: 2026-08-29 -- Phase 03.1 plan 01 complete
+stopped_at: Completed 03.1-ao-extraction-un-multiply-baked-ao-from-the-base-texture-wit-02-PLAN.md
+last_updated: "2026-08-29T01:24:28.670Z"
+last_activity: 2026-08-29
 progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 12
-  completed_plans: 10
+  completed_plans: 11
   percent: 50
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 ## Current Position
 
 Phase: 03.1
-Plan: 02 of 3
+Plan: 3 of 3
 Status: Ready to execute
-Last activity: 2026-08-29 -- Phase 03.1 plan 01 complete
+Last activity: 2026-08-29
 
-Progress: [████████░░] 83%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -63,6 +63,7 @@ Progress: [████████░░] 83%
 | Phase 03-asset-generation-editor-workflow-preview P02 | 44min | 2 tasks | 9 files |
 | Phase 03-asset-generation-editor-workflow-preview P03 | 27min | 3 tasks | 7 files |
 | Phase 03.1-ao-extraction-un-multiply-baked-ao-from-the-base-texture-wit P01 | 22min | 3 tasks | 8 files |
+| Phase 03.1-ao-extraction-un-multiply-baked-ao-from-the-base-texture-wit P02 | 29min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -103,6 +104,9 @@ Recent decisions affecting current work:
 - [Phase 03-asset-generation-editor-workflow-preview]: UI-03/UI-04/UI-05 recorded as phase-scoped partial delivery — the Phase-3 slice (D-14 controls, D-09 preview, six D-11 debug channels) ships, while vertex-color/residual/reconstruction-error views and Phase-4/5 stylization/palette/smoothing/normal-detail/roughness-simplification controls remain open.
 - [Phase 03.1]: Image-space AO extraction auto-runs (D-07) only when _OcclusionMap is absent; the authored path stays byte-identical with the epsilon floor
 - [Phase 03.1]: The SAME extracted AO is the CSNormalize divisor AND the packed B channel (D-08 round-trip); divisor floor is 0.1 extracted / 1e-6 authored, divisor-side only (D-09)
+- [Phase 03.1]: Geometry bake is a deterministic CPU Burst raycast (median-split BVH + Möller–Trumbore), not GPU depth-projection — headless-testable (64 dirs, cage 0.01, 10%-bounds distance, 512 cap)
+- [Phase 03.1]: RequestBake runs synchronously as an explicit one-time action off the debounce — EditorApplication.delayCall does not fire during headless EditMode tests
+- [Phase 03.1]: Unity.Burst + Unity.Mathematics added to the Editor asmdef — Collections 2.6.8 no longer pulls Unity.Mathematics transitively
 
 ### Pending Todos
 
@@ -126,6 +130,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-29T00:28:20.543Z
-Stopped at: Completed 03.1-01-PLAN.md
+Last session: 2026-08-29T01:24:28.660Z
+Stopped at: Completed 03.1-ao-extraction-un-multiply-baked-ao-from-the-base-texture-wit-02-PLAN.md
 Resume file: None

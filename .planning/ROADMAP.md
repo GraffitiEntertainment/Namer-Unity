@@ -114,7 +114,7 @@ Plans:
 **Goal:** Deliver real AO to the packed surface B channel and un-multiply baked AO out of the base color via two sources — image-space extraction (fixes the always-white-AO live pain) and a high-to-low geometry bake (64-direction visibility, cage offset 0.01, 10%-bounds ray distance, 16 px seam dilation) — with AO blur/strength/contrast tweaks
 **Requirements**: NORM-02, ENCD-03, UI-03 (boundary-aware IDs strengthened by this phase; no dedicated IDs — success criteria derived from CONTEXT.md D-01..D-13)
 **Depends on:** Phase 3
-**Plans:** 1/3 plans executed
+**Plans:** 2/3 plans executed
 
 Plans:
 
@@ -124,7 +124,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 03.1-02: Geometry bake subsystem (BVH + Burst baker + JFA dilation + fallback D-06 + three-way Process gate + tests)
+- [x] 03.1-02: Geometry bake subsystem (BVH + Burst baker + JFA dilation + fallback D-06 + three-way Process gate + tests)
 
 **Wave 3** *(blocked on Waves 1-2 completion)*
 

@@ -44,7 +44,12 @@ namespace GraffitiEntertainment.Namer.Editor
         private NamerSourceModel _model;
         private Mesh _previewMesh;
 
+        private float _aoUnmultiplyStrength = 1f;
+        private float _aoBlurRadius;
         private float _aoStrength = 1f;
+        private float _aoContrast = 1f;
+        private Mesh _occluderMesh;
+        private string _occluderWarning = string.Empty;
         private int _debugChannel;
 
         private bool _dirty;
@@ -167,13 +172,25 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             _model = SourceInspector.Inspect(_selection);
 
-            _aoStrength = _settings.AoUnmultiplyStrength;
+            _aoUnmultiplyStrength = _settings.AoUnmultiplyStrength;
+            _aoBlurRadius = _settings.AoBlurRadius;
+            _aoStrength = _settings.AoStrength;
+            _aoContrast = _settings.AoContrast;
 
             _previewMesh = ResolvePreviewMesh(_selection);
             if (_previewMesh != null)
             {
                 _preview.Frame(_previewMesh);
             }
+
+            NamerMaterialInspection inspection = PrimaryInspection;
+            if (inspection != null)
+            {
+                inspection.BakeSourceMesh = _previewMesh;
+            }
+
+            _occluderMesh = null;
+            _occluderWarning = string.Empty;
 
             _debugChannel = 0;
             _status = string.Empty;
@@ -223,7 +240,30 @@ namespace GraffitiEntertainment.Namer.Editor
                 ReleaseLiveResult();
                 EnsureMaterials();
 
-                inspection.AoUnmultiplyStrength = _aoStrength;
+                inspection.AoUnmultiplyStrength = _aoUnmultiplyStrength;
+                inspection.AoBlurRadius = _aoBlurRadius;
+                inspection.AoStrength = _aoStrength;
+                inspection.AoContrast = _aoContrast;
+                if (inspection.BakeSourceMesh == null)
+                {
+                    inspection.BakeSourceMesh = _previewMesh;
+                }
+
+                // D-06: an invalid high-res occluder (empty, or the same mesh as the bake
+                // source) warns visibly and falls back to the selected mesh — never a hard
+                // failure.
+                if (_occluderMesh != null && (_occluderMesh.vertexCount == 0 || _occluderMesh == inspection.BakeSourceMesh))
+                {
+                    _occluderWarning = "High-res occluder is empty or the same as the bake source — falling back to the selected mesh.";
+                    _occluderMesh = null;
+                }
+                else
+                {
+                    _occluderWarning = string.Empty;
+                }
+
+                inspection.OccluderMesh = _occluderMesh;
+
                 _liveResult = _pipeline.Process(inspection);
 
                 RenderTexture previewBaseMap = ResolvePreviewBaseMap();
@@ -260,7 +300,37 @@ namespace GraffitiEntertainment.Namer.Editor
                 _recomputing = false;
             }
 
+            TriggerAutomaticBake(inspection);
+
             Repaint();
+        }
+
+        /// <summary>
+        /// Automatic geometry-bake trigger (D-07): after a successful recompute, when the
+        /// source has no authored <c>_OcclusionMap</c>, a bake-capable mesh, and no cached
+        /// bake, prime the bake via the synchronous, idempotent <see cref="NamerComputePipeline.RequestBake"/>
+        /// and re-dirty the preview so the next recompute routes the cached bake through the
+        /// 03.1-02 three-way gate. The bake runs off the debounce tick (after the recompute
+        /// completes) and is cached once per mesh/occluder/resolution.
+        /// </summary>
+        private void TriggerAutomaticBake(NamerMaterialInspection inspection)
+        {
+            if (inspection == null || _liveResult == null || inspection.OcclusionMap != null)
+            {
+                return;
+            }
+
+            if (inspection.BakeSourceMesh == null)
+            {
+                return;
+            }
+
+            if (_pipeline.HasCachedBake(inspection, _liveResult.Width, _liveResult.Height))
+            {
+                return;
+            }
+
+            _pipeline.RequestBake(inspection, _liveResult.Width, _liveResult.Height, () => MarkDirty());
         }
 
         private void EnsurePipeline()
@@ -508,20 +578,77 @@ namespace GraffitiEntertainment.Namer.Editor
             EditorGUILayout.LabelField("Processing", EditorStyles.boldLabel);
 
             EditorGUI.BeginDisabledGroup(inspection == null || _busy);
+
             float newAo = EditorGUILayout.Slider(
                 new GUIContent(
                     "AO Un-multiply Strength",
                     "Automatically recomputes the preview in memory " + NamerEditorConstants.DebounceSeconds
                         + " s after the slider stops — nothing is written to disk."),
-                _aoStrength, 0f, 1f);
-            if (!Mathf.Approximately(newAo, _aoStrength))
+                _aoUnmultiplyStrength, 0f, 1f);
+            if (!Mathf.Approximately(newAo, _aoUnmultiplyStrength))
             {
-                _aoStrength = newAo;
+                _aoUnmultiplyStrength = newAo;
                 _settings.AoUnmultiplyStrength = newAo;
                 MarkDirty();
             }
 
+            float newAoBlur = EditorGUILayout.Slider(
+                new GUIContent(
+                    "AO Blur Radius",
+                    "Blurs the AO output in texels (0 = off). Automatically recomputes the preview in memory "
+                        + NamerEditorConstants.DebounceSeconds + " s after the slider stops — nothing is written to disk."),
+                _aoBlurRadius, 0f, 16f);
+            if (!Mathf.Approximately(newAoBlur, _aoBlurRadius))
+            {
+                _aoBlurRadius = newAoBlur;
+                _settings.AoBlurRadius = newAoBlur;
+                MarkDirty();
+            }
+
+            float newAoStrength = EditorGUILayout.Slider(
+                new GUIContent(
+                    "AO Strength",
+                    "AO strength (1 = full AO, 0 = white/no AO). Automatically recomputes the preview in memory "
+                        + NamerEditorConstants.DebounceSeconds + " s after the slider stops — nothing is written to disk."),
+                _aoStrength, 0f, 1f);
+            if (!Mathf.Approximately(newAoStrength, _aoStrength))
+            {
+                _aoStrength = newAoStrength;
+                _settings.AoStrength = newAoStrength;
+                MarkDirty();
+            }
+
+            float newAoContrast = EditorGUILayout.Slider(
+                new GUIContent(
+                    "AO Contrast",
+                    "AO contrast (1 = identity, pivot 0.5). Automatically recomputes the preview in memory "
+                        + NamerEditorConstants.DebounceSeconds + " s after the slider stops — nothing is written to disk."),
+                _aoContrast, 0f, 4f);
+            if (!Mathf.Approximately(newAoContrast, _aoContrast))
+            {
+                _aoContrast = newAoContrast;
+                _settings.AoContrast = newAoContrast;
+                MarkDirty();
+            }
+
+            Mesh newOccluder = EditorGUILayout.ObjectField(
+                new GUIContent(
+                    "High-res Occluder",
+                    "Optional high-res mesh used as the geometry-bake occluder; empty/invalid falls back to the selected mesh. Automatically recomputes the preview in memory "
+                        + NamerEditorConstants.DebounceSeconds + " s after the assignment — nothing is written to disk."),
+                _occluderMesh, typeof(Mesh), false) as Mesh;
+            if (newOccluder != _occluderMesh)
+            {
+                _occluderMesh = newOccluder;
+                MarkDirty();
+            }
+
             EditorGUI.EndDisabledGroup();
+
+            if (!string.IsNullOrEmpty(_occluderWarning))
+            {
+                EditorGUILayout.HelpBox(_occluderWarning, MessageType.Warning);
+            }
 
             // Visible feedback for the otherwise-invisible debounced preview recompute:
             // pending/recomputing while dirty, settled once the compute finishes.

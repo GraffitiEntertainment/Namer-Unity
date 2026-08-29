@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 Phase: 03.1
 Plan: 3 of 3
 Status: Phase complete — ready for verification
-Last activity: 2026-08-29
+Last activity: 2026-08-29 - Completed quick task 260829-isy: Bind generated NAMER materials to renderers; After panel and debug views prefer generated material/textures (flip to live on AO slider tweak)
 
 Progress: [██████████] 100%
 
@@ -120,6 +120,12 @@ None yet.
 - [Phase 4]: Vertex-color barycentric least-squares + seam-splitting is the highest algorithmic risk; no single authoritative reference.
 - [Phase 5]: Palette extraction and edge-preserving filter specifics are sparse in Unity docs.
 - [Phase 01]: Interactive Unity Editor (PID 11637) holds the project lock, blocking the headless PlayMode smoke test (-batchmode) — close the editor or run the PlayMode test in-editor to unblock 01-02 Task 3
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260829-isy | Bind generated NAMER materials to renderers; After panel and debug views prefer generated material/textures (flip to live on AO slider tweak) | 2026-08-29 | c4445d5 | [260829-isy-bind-generated-namer-materials-to-render](./quick/260829-isy-bind-generated-namer-materials-to-render/) |
 
 ## Deferred Items
 

@@ -185,7 +185,7 @@ namespace GraffitiEntertainment.Namer.Editor
         /// Composes one generated-asset path from the configured destination, the
         /// sanitized material name, and the validated prefix/suffix (D-02).
         /// </summary>
-        private static string ComposePath(
+        public static string ComposePath(
             NamerMaterialInspection inspection,
             NamerProcessorSettings settings,
             string destinationFolder,
@@ -195,6 +195,17 @@ namespace GraffitiEntertainment.Namer.Editor
             string prefix = settings.Prefix ?? string.Empty;
             string suffix = settings.Suffix ?? string.Empty;
             return destinationFolder + prefix + safeName + suffix + extension;
+        }
+
+        /// <summary>
+        /// Composes the per-selection destination subfolder where generated assets live.
+        /// Shared by <see cref="NamerProcessor"/> and the processor window so both agree on
+        /// where generated assets are written and read back (D-01/D-02). Reuses
+        /// <see cref="SanitizeFileName"/> for the selection name.
+        /// </summary>
+        public static string ComposeDestinationFolder(string destination, string selectionName)
+        {
+            return destination.TrimEnd('/', '\\') + "/" + SanitizeFileName(selectionName) + "/";
         }
 
         /// <summary>

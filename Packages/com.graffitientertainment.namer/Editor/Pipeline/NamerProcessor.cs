@@ -79,8 +79,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 return result;
             }
 
-            string destinationFolder = destination.TrimEnd('/', '\\') + "/"
-                + AssetGenerator.SanitizeFileName(selection.name) + "/";
+            string destinationFolder = AssetGenerator.ComposeDestinationFolder(destination, selection.name);
             EnsureFolder(destinationFolder);
 
             NamerComputePipeline pipeline = null;
@@ -127,11 +126,66 @@ namespace GraffitiEntertainment.Namer.Editor
                 }
             }
 
+            if (string.IsNullOrEmpty(result.Error))
+            {
+                BindGeneratedMaterials(selection, model, result);
+            }
+
             Debug.Log("[NAMER] Processed '" + selection.name + "': " + result.MaterialCount
                 + " material(s) generated in '" + destinationFolder + "'"
                 + (result.Warnings.Count > 0 ? " (" + result.Warnings.Count + " warning(s))" : string.Empty));
 
             return result;
+        }
+
+        /// <summary>
+        /// Swaps each scene renderer's per-sub-mesh material slot to its index-aligned
+        /// generated material after a successful Process. The only mutation is the live
+        /// scene renderer's <c>sharedMaterials</c> array — no source material, texture,
+        /// importer, FBX, or <c>.meta</c> is written, imported, or modified.
+        /// </summary>
+        private static void BindGeneratedMaterials(UnityEngine.Object selection, NamerSourceModel model, NamerProcessResult result)
+        {
+            if (!(selection is GameObject gameObject))
+            {
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(AssetDatabase.GetAssetPath(gameObject)))
+            {
+                return;
+            }
+
+            var generatedBySourceId = new Dictionary<int, Material>();
+            int count = Math.Min(model.Materials.Count, result.GeneratedAssets.Count);
+            for (int i = 0; i < count; i++)
+            {
+                Material source = model.Materials[i].Material;
+                Material generated = AssetDatabase.LoadAssetAtPath<Material>(result.GeneratedAssets[i].MaterialPath);
+                if (source != null && generated != null)
+                {
+                    generatedBySourceId[source.GetInstanceID()] = generated;
+                }
+            }
+
+            foreach (Renderer renderer in gameObject.GetComponentsInChildren<Renderer>(true))
+            {
+                Material[] shared = renderer.sharedMaterials;
+                bool changed = false;
+                for (int i = 0; i < shared.Length; i++)
+                {
+                    if (shared[i] != null && generatedBySourceId.TryGetValue(shared[i].GetInstanceID(), out Material generated))
+                    {
+                        shared[i] = generated;
+                        changed = true;
+                    }
+                }
+
+                if (changed)
+                {
+                    renderer.sharedMaterials = shared;
+                }
+            }
         }
 
         private static bool IsUnderProjectAssets(string destination)

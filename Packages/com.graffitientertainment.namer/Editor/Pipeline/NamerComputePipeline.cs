@@ -1,3 +1,4 @@
+using GraffitiEntertainment.Namer.Core;
 using System;
 using UnityEditor;
 using UnityEngine;
@@ -37,6 +38,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private readonly int _kernelNormalize;
         private readonly int _kernelOctahedralEncode;
         private readonly int _kernelSurfacePack;
+        private NamerAOPipeline _aoPipeline;
 
         private static Texture2D _whiteFill;
         private static Texture2D _neutralNormalTexture;
@@ -96,11 +98,12 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture packInputs = null;
             RenderTexture surfaceOut = null;
 
+            bool usesExtractedAo = false;
+
             try
             {
                 baseColorIn = _pool.Lease(unorm8);
                 normalTexel = _pool.Lease(unorm8);
-                aoIn = _pool.Lease(unorm8);
                 metallicGlossIn = _pool.Lease(unorm8);
                 baseColorOut = _pool.Lease(intermediate);
                 octahedral = _pool.Lease(intermediate);
@@ -109,11 +112,24 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 Upload(inspection.BaseMap, baseColorIn, WhiteFill());
                 Upload(inspection.NormalMap, normalTexel, NeutralNormalTexture());
-                Upload(inspection.OcclusionMap, aoIn, WhiteFill());
+
+                if (inspection.OcclusionMap != null)
+                {
+                    aoIn = _pool.Lease(unorm8);
+                    Upload(inspection.OcclusionMap, aoIn, WhiteFill());
+                    usesExtractedAo = false;
+                }
+                else
+                {
+                    // D-07 gate: no authored _OcclusionMap -> extract AO from the base.
+                    aoIn = EnsureAoPipeline().Extract(inspection, baseColorIn, w, h);
+                    usesExtractedAo = true;
+                }
+
                 Upload(inspection.MetallicGlossMap, metallicGlossIn, NeutralMetallicGlossTexture());
 
                 BindAndDispatch(inspection, baseColorIn, normalTexel, aoIn, metallicGlossIn,
-                    baseColorOut, octahedral, packInputs, surfaceOut, w, h);
+                    baseColorOut, octahedral, packInputs, surfaceOut, w, h, usesExtractedAo);
 
                 return new NamerComputeResult
                 {
@@ -127,7 +143,14 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 Release(baseColorIn);
                 Release(normalTexel);
-                Release(aoIn);
+                if (usesExtractedAo)
+                {
+                    _aoPipeline.ReleaseAo(aoIn);
+                }
+                else
+                {
+                    Release(aoIn);
+                }
                 Release(metallicGlossIn);
                 Release(octahedral);
                 Release(packInputs);
@@ -162,7 +185,18 @@ namespace GraffitiEntertainment.Namer.Editor
 
         public void Dispose()
         {
+            _aoPipeline?.Dispose();
             _pool.Dispose();
+        }
+
+        private NamerAOPipeline EnsureAoPipeline()
+        {
+            if (_aoPipeline == null)
+            {
+                _aoPipeline = new NamerAOPipeline();
+            }
+
+            return _aoPipeline;
         }
 
         private void BindAndDispatch(
@@ -176,12 +210,14 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture packInputs,
             RenderTexture surfaceOut,
             int w,
-            int h)
+            int h,
+            bool usesExtractedAo)
         {
             _compute.SetInts("_Size", new[] { w, h });
 
             _compute.SetFloat("_SourceIsSrgb", inspection.BaseMapIsSrgb ? 1f : 0f);
             _compute.SetFloat("_AoUnmultiplyStrength", inspection.AoUnmultiplyStrength);
+            _compute.SetFloat("_AoUnmultiplyFloor", usesExtractedAo ? NamerConstants.AoFloor : NamerConstants.Epsilon);
             _compute.SetFloat("_Metallic", inspection.Metallic);
             _compute.SetFloat("_SmoothnessScalar", inspection.Smoothness);
             _compute.SetFloat("_Roughness", inspection.Roughness);

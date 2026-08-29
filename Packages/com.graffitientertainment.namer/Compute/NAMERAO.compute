@@ -23,6 +23,8 @@
 #pragma kernel CSBlurH
 #pragma kernel CSBlurV
 #pragma kernel CSAoRemap
+#pragma kernel CSJumpFloodInit
+#pragma kernel CSJumpFloodStep
 
 // Kernel-written outputs (linear, random-access).
 RWTexture2D<float4> _Luma;
@@ -41,6 +43,13 @@ Texture2D<float4> _SrcAvg;      // generic block-average read target (bound to _
 Texture2D<float4> _Src;       // generic blur read target
 RWTexture2D<float4> _Dst;     // generic blur write target
 
+// Jump-flood seam-dilation (Phase 03.1, plan 02). _Seed is the bilinearly-upsampled
+// bake (g = AO, a = valid flag); _Jfa/_JfaOut are the ping-pong dilation buffers
+// (r = filled flag, g = AO, a = normalized distance to the nearest seed).
+Texture2D<float4> _Seed;
+RWTexture2D<float4> _Jfa;
+RWTexture2D<float4> _JfaOut;
+
 // Uniforms.
 uint2 _Size; // unsigned: compared against SV_DispatchThreadID (uint) in the kernel guards
 float _SourceIsSrgb;
@@ -51,6 +60,8 @@ float _AoContrast;
 float _LumaAverage;
 uint2 _AvgSrcSize;
 uint2 _AvgDstSize;
+int _Step;      // current jump-flood step (halves each pass)
+int _MaxDilate; // dilation cap in pixels (16)
 
 [numthreads(8,8,1)]
 void CSLuminance(uint3 id : SV_DispatchThreadID)
@@ -156,4 +167,80 @@ void CSAoRemap(uint3 id : SV_DispatchThreadID)
 
     // AO in the GREEN channel — the _AoIn.g contract (Pitfall 1).
     _AoOut[id.xy] = float4(0.0, ao, 0.0, 1.0);
+}
+
+// Seeds the jump-flood field from the upsampled bake: covered texels become valid seeds
+// (AO in .g, distance 0); empty texels stay unfilled with a white AO fallback so unfilled
+// padding reads as "no occlusion" rather than black.
+[numthreads(8,8,1)]
+void CSJumpFloodInit(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float4 seed = _Seed[id.xy];
+    if (seed.a > 0.5)
+    {
+        _Jfa[id.xy] = float4(1.0, seed.g, 0.0, 0.0);
+    }
+    else
+    {
+        _Jfa[id.xy] = float4(0.0, 1.0, 0.0, 1.0);
+    }
+}
+
+// One jump-flood pass: propagate the nearest valid seed's AO into empty texels within the
+// 16 px dilation cap. The step halves each pass (log2(max dimension) passes). Covered
+// texels keep their own seed; empty texels adopt the closest filled neighbor's AO.
+[numthreads(8,8,1)]
+void CSJumpFloodStep(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float4 self = _Jfa[id.xy];
+    float bestDist = self.r > 0.5 ? self.a : 1.0;
+    float bestAo = self.g;
+
+    for (int dy = -1; dy <= 1; dy++)
+    {
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            if (dx == 0 && dy == 0)
+            {
+                continue;
+            }
+
+            int2 p = int2((int)id.x + dx * _Step, (int)id.y + dy * _Step);
+            if (p.x < 0 || p.y < 0 || p.x >= (int)_Size.x || p.y >= (int)_Size.y)
+            {
+                continue;
+            }
+
+            float4 n = _Jfa[p];
+            if (n.r <= 0.5)
+            {
+                continue;
+            }
+
+            float dist = n.a * (float)_MaxDilate + (float)_Step;
+            if (dist > (float)_MaxDilate)
+            {
+                continue;
+            }
+
+            float distNorm = dist / (float)_MaxDilate;
+            if (distNorm < bestDist)
+            {
+                bestDist = distNorm;
+                bestAo = n.g;
+            }
+        }
+    }
+
+    _JfaOut[id.xy] = float4(bestDist < 1.0 ? 1.0 : 0.0, bestAo, 0.0, bestDist);
 }

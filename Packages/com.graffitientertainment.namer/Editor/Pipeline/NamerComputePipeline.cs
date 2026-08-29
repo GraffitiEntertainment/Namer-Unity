@@ -99,6 +99,7 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture surfaceOut = null;
 
             bool usesExtractedAo = false;
+            bool usesBakedAo = false;
 
             try
             {
@@ -118,10 +119,17 @@ namespace GraffitiEntertainment.Namer.Editor
                     aoIn = _pool.Lease(unorm8);
                     Upload(inspection.OcclusionMap, aoIn, WhiteFill());
                     usesExtractedAo = false;
+                    usesBakedAo = false;
+                }
+                else if (EnsureAoPipeline().HasCachedBake(inspection.BakeSourceMesh, inspection.OccluderMesh, w, h))
+                {
+                    // D-07 three-way gate: a cached geometry bake supersedes image-space extraction.
+                    aoIn = EnsureAoPipeline().BakeAndUpload(inspection, w, h);
+                    usesBakedAo = true;
                 }
                 else
                 {
-                    // D-07 gate: no authored _OcclusionMap -> extract AO from the base.
+                    // D-07 three-way gate: no authored map and no cached bake -> extract AO.
                     aoIn = EnsureAoPipeline().Extract(inspection, baseColorIn, w, h);
                     usesExtractedAo = true;
                 }
@@ -129,7 +137,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 Upload(inspection.MetallicGlossMap, metallicGlossIn, NeutralMetallicGlossTexture());
 
                 BindAndDispatch(inspection, baseColorIn, normalTexel, aoIn, metallicGlossIn,
-                    baseColorOut, octahedral, packInputs, surfaceOut, w, h, usesExtractedAo);
+                    baseColorOut, octahedral, packInputs, surfaceOut, w, h, usesExtractedAo || usesBakedAo);
 
                 return new NamerComputeResult
                 {
@@ -143,7 +151,7 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 Release(baseColorIn);
                 Release(normalTexel);
-                if (usesExtractedAo)
+                if (usesExtractedAo || usesBakedAo)
                 {
                     _aoPipeline.ReleaseAo(aoIn);
                 }
@@ -199,6 +207,24 @@ namespace GraffitiEntertainment.Namer.Editor
             return _aoPipeline;
         }
 
+        /// <summary>
+        /// Thin forwarder to <see cref="NamerAOPipeline.HasCachedBake"/> — true when a
+        /// geometry bake for this inspection's meshes is already cached (D-07).
+        /// </summary>
+        public bool HasCachedBake(NamerMaterialInspection inspection, int w, int h)
+        {
+            return EnsureAoPipeline().HasCachedBake(inspection.BakeSourceMesh, inspection.OccluderMesh, w, h);
+        }
+
+        /// <summary>
+        /// Thin forwarder to <see cref="NamerAOPipeline.RequestBake"/> — schedules an
+        /// off-debounce geometry bake (called by the 03.1-03 window).
+        /// </summary>
+        public void RequestBake(NamerMaterialInspection inspection, int w, int h, Action onComplete)
+        {
+            EnsureAoPipeline().RequestBake(inspection, w, h, onComplete);
+        }
+
         private void BindAndDispatch(
             NamerMaterialInspection inspection,
             RenderTexture baseColorIn,
@@ -211,13 +237,13 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture surfaceOut,
             int w,
             int h,
-            bool usesExtractedAo)
+            bool usesSyntheticAo)
         {
             _compute.SetInts("_Size", new[] { w, h });
 
             _compute.SetFloat("_SourceIsSrgb", inspection.BaseMapIsSrgb ? 1f : 0f);
             _compute.SetFloat("_AoUnmultiplyStrength", inspection.AoUnmultiplyStrength);
-            _compute.SetFloat("_AoUnmultiplyFloor", usesExtractedAo ? NamerConstants.AoFloor : NamerConstants.Epsilon);
+            _compute.SetFloat("_AoUnmultiplyFloor", usesSyntheticAo ? NamerConstants.AoFloor : NamerConstants.Epsilon);
             _compute.SetFloat("_Metallic", inspection.Metallic);
             _compute.SetFloat("_SmoothnessScalar", inspection.Smoothness);
             _compute.SetFloat("_Roughness", inspection.Roughness);
@@ -254,7 +280,7 @@ namespace GraffitiEntertainment.Namer.Editor
             _pool.Release(rt);
         }
 
-        private static void Upload(Texture source, RenderTexture target, Texture2D fallback)
+        internal static void Upload(Texture source, RenderTexture target, Texture2D fallback)
         {
             Texture upload = source != null ? source : fallback;
 

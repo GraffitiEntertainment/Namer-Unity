@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
@@ -34,6 +35,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private const float LowPassSigmaDivisor = 3.0f;
         private const float IdentityAoStrength = 1.0f;
         private const float IdentityAoContrast = 1.0f;
+        private const int kSeamDilatePx = 16;
 
         private readonly ComputeTexturePool _pool = new ComputeTexturePool();
         private readonly ComputeShader _compute;
@@ -42,6 +44,15 @@ namespace GraffitiEntertainment.Namer.Editor
         private readonly int _kernelBlurH;
         private readonly int _kernelBlurV;
         private readonly int _kernelAoRemap;
+        private readonly int _kernelJumpFloodInit;
+        private readonly int _kernelJumpFloodStep;
+
+        // In-memory bake cache keyed by (low mesh id, resolved occluder id, w, h). The
+        // cached Texture2D holds the dilated AO in the green channel (linear), reused on
+        // subsequent Process calls so the bake never re-runs on the debounce tick (D-07).
+        private readonly Dictionary<(int low, int occ, int w, int h), Texture2D> _bakeCache =
+            new Dictionary<(int, int, int, int), Texture2D>();
+        private bool _bakeInFlight;
 
         public NamerAOPipeline()
         {
@@ -56,6 +67,8 @@ namespace GraffitiEntertainment.Namer.Editor
             _kernelBlurH = _compute.FindKernel("CSBlurH");
             _kernelBlurV = _compute.FindKernel("CSBlurV");
             _kernelAoRemap = _compute.FindKernel("CSAoRemap");
+            _kernelJumpFloodInit = _compute.FindKernel("CSJumpFloodInit");
+            _kernelJumpFloodStep = _compute.FindKernel("CSJumpFloodStep");
         }
 
         /// <summary>
@@ -155,7 +168,265 @@ namespace GraffitiEntertainment.Namer.Editor
 
         public void Dispose()
         {
+            ClearBakeCache();
             _pool.Dispose();
+        }
+
+        /// <summary>
+        /// True when a geometry bake for <paramref name="lowMesh"/>/<paramref name="occluder"/>
+        /// at <paramref name="w"/>×<paramref name="h"/> is already cached (D-07). A null
+        /// <paramref name="lowMesh"/> always reports false (no bake possible).
+        /// </summary>
+        public bool HasCachedBake(Mesh lowMesh, Mesh occluder, int w, int h)
+        {
+            if (lowMesh == null)
+            {
+                return false;
+            }
+
+            Mesh resolved = ResolveOccluder(lowMesh, occluder);
+            return _bakeCache.ContainsKey(MakeKey(lowMesh, resolved, w, h));
+        }
+
+        /// <summary>
+        /// Returns a pool-leased linear RT with the geometry-baked AO in the green channel,
+        /// upsampled to <paramref name="w"/>×<paramref name="h"/> and dilated 16 px at UV
+        /// seams (D-05). A cached bake is re-uploaded through the raw-copy path; otherwise a
+        /// fresh bake runs at <c>min(w, h, 512)</c>. The occluder falls back to the selected
+        /// mesh when null/invalid (D-06) and never throws. Returns null when no bake source
+        /// exists. The caller releases the returned target via <see cref="ReleaseAo"/>.
+        /// </summary>
+        public RenderTexture BakeAndUpload(NamerMaterialInspection inspection, int w, int h)
+        {
+            if (inspection == null || inspection.BakeSourceMesh == null)
+            {
+                return null;
+            }
+
+            Mesh low = inspection.BakeSourceMesh;
+            Mesh occluder = ResolveOccluder(low, inspection.OccluderMesh);
+            (int low, int occ, int w, int h) key = MakeKey(low, occluder, w, h);
+
+            if (_bakeCache.TryGetValue(key, out Texture2D cached))
+            {
+                RenderTexture cachedRt = _pool.Lease(NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm));
+                NamerComputePipeline.Upload(cached, cachedRt, null);
+                return cachedRt;
+            }
+
+            int bakeRes = Mathf.Min(Mathf.Min(w, h), NamerAOBaker.kBakeResolutionCap);
+            NamerAOBakeResult baked = NamerAOBaker.Bake(
+                low,
+                occluder,
+                bakeRes,
+                NamerAOBaker.kCageOffset,
+                NamerAOBaker.kMaxDistanceFactor,
+                NamerAOBaker.kRayCount);
+
+            RenderTexture seed = null;
+            RenderTexture jfaA = null;
+            RenderTexture jfaB = null;
+            RenderTexture result = null;
+            Texture2D lowResTex = null;
+
+            try
+            {
+                lowResTex = BakeResultToTexture(baked, bakeRes);
+                baked.Ao.Dispose();
+
+                seed = _pool.Lease(NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm));
+                jfaA = _pool.Lease(NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm));
+                jfaB = _pool.Lease(NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm));
+
+                // Bilinear upsample low-res bake -> full-res seed (Graphics.Blit resamples).
+                NamerComputePipeline.Upload(lowResTex, seed, null);
+
+                _compute.SetInts("_Size", new[] { w, h });
+                _compute.SetInt("_MaxDilate", kSeamDilatePx);
+
+                _compute.SetTexture(_kernelJumpFloodInit, "_Seed", seed);
+                _compute.SetTexture(_kernelJumpFloodInit, "_Jfa", jfaA);
+                Dispatch(_kernelJumpFloodInit, w, h);
+
+                RenderTexture src = jfaA;
+                RenderTexture dst = jfaB;
+                int maxDim = Mathf.Max(w, h);
+                if (maxDim > 1)
+                {
+                    int passes = Mathf.CeilToInt(Mathf.Log(maxDim, 2f));
+                    int step = 1 << (passes - 1);
+                    for (; step >= 1; step >>= 1)
+                    {
+                        _compute.SetInt("_Step", step);
+                        _compute.SetTexture(_kernelJumpFloodStep, "_Jfa", src);
+                        _compute.SetTexture(_kernelJumpFloodStep, "_JfaOut", dst);
+                        Dispatch(_kernelJumpFloodStep, w, h);
+
+                        RenderTexture tmp = src;
+                        src = dst;
+                        dst = tmp;
+                    }
+                }
+
+                result = src;
+
+                StoreBake(key, ReadBackToTexture(result, w, h));
+                return result;
+            }
+            finally
+            {
+                if (lowResTex != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(lowResTex);
+                }
+
+                _pool.Release(seed);
+                if (jfaA != null && jfaA != result)
+                {
+                    _pool.Release(jfaA);
+                }
+
+                if (jfaB != null && jfaB != result)
+                {
+                    _pool.Release(jfaB);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Schedules an off-debounce geometry bake (via <c>EditorApplication.delayCall</c>),
+        /// caches the result, and invokes <paramref name="onComplete"/> on the main thread.
+        /// No-ops (and still invokes the callback) when a bake is already cached or in flight.
+        /// </summary>
+        public void RequestBake(NamerMaterialInspection inspection, int w, int h, Action onComplete)
+        {
+            if (inspection == null || inspection.BakeSourceMesh == null)
+            {
+                onComplete?.Invoke();
+                return;
+            }
+
+            Mesh low = inspection.BakeSourceMesh;
+            Mesh occluder = ResolveOccluder(low, inspection.OccluderMesh);
+            (int low, int occ, int w, int h) key = MakeKey(low, occluder, w, h);
+
+            if (_bakeCache.ContainsKey(key) || _bakeInFlight)
+            {
+                onComplete?.Invoke();
+                return;
+            }
+
+            _bakeInFlight = true;
+            EditorApplication.delayCall += () =>
+            {
+                try
+                {
+                    RenderTexture baked = BakeAndUpload(inspection, w, h);
+                    if (baked != null)
+                    {
+                        ReleaseAo(baked);
+                    }
+                }
+                finally
+                {
+                    _bakeInFlight = false;
+                    onComplete?.Invoke();
+                }
+            };
+        }
+
+        /// <summary>Drops every cached bake texture (used by tests and <see cref="Dispose"/>).</summary>
+        public void ClearBakeCache()
+        {
+            foreach (Texture2D tex in _bakeCache.Values)
+            {
+                if (tex != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(tex);
+                }
+            }
+
+            _bakeCache.Clear();
+        }
+
+        private static Mesh ResolveOccluder(Mesh low, Mesh occluder)
+        {
+            return occluder != null && occluder.vertexCount > 0 ? occluder : low;
+        }
+
+        private static (int low, int occ, int w, int h) MakeKey(Mesh low, Mesh occluder, int w, int h)
+        {
+            return (low.GetInstanceID(), occluder.GetInstanceID(), w, h);
+        }
+
+        private void StoreBake((int low, int occ, int w, int h) key, Texture2D texture)
+        {
+            if (_bakeCache.TryGetValue(key, out Texture2D old) && old != null)
+            {
+                UnityEngine.Object.DestroyImmediate(old);
+            }
+
+            _bakeCache[key] = texture;
+        }
+
+        private static Texture2D BakeResultToTexture(NamerAOBakeResult baked, int size)
+        {
+            NativeArray<Color32> pixels = new NativeArray<Color32>(size * size, Allocator.Temp);
+            try
+            {
+                for (int i = 0; i < size * size; i++)
+                {
+                    float ao = baked.Ao[i];
+                    if (ao >= 0f)
+                    {
+                        byte g = (byte)Mathf.Clamp(Mathf.RoundToInt(ao * 255f), 0, 255);
+                        pixels[i] = new Color32(0, g, 0, 255);
+                    }
+                    else
+                    {
+                        // Uncovered texel: white AO (no occlusion), marked invalid for JFA.
+                        pixels[i] = new Color32(0, 255, 0, 0);
+                    }
+                }
+
+                Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false, true)
+                {
+                    hideFlags = HideFlags.HideAndDontSave,
+                };
+                tex.LoadRawTextureData(pixels);
+                tex.Apply(false, false);
+                return tex;
+            }
+            finally
+            {
+                pixels.Dispose();
+            }
+        }
+
+        private static Texture2D ReadBackToTexture(RenderTexture rt, int w, int h)
+        {
+            AsyncGPUReadbackRequest request = AsyncGPUReadback.Request(rt, 0, TextureFormat.RGBA32);
+            request.WaitForCompletion();
+            if (request.hasError)
+            {
+                throw new InvalidOperationException("NAMER AO bake readback failed.");
+            }
+
+            NativeArray<Color32> data = request.GetData<Color32>();
+            try
+            {
+                Texture2D tex = new Texture2D(w, h, TextureFormat.RGBA32, false, true)
+                {
+                    hideFlags = HideFlags.HideAndDontSave,
+                };
+                tex.LoadRawTextureData(data);
+                tex.Apply(false, false);
+                return tex;
+            }
+            finally
+            {
+                data.Dispose();
+            }
         }
 
         private float ReduceToScalarMean(RenderTexture luma, int w, int h, RenderTexture avgA, RenderTexture avgB)

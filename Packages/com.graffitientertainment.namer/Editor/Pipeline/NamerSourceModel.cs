@@ -56,6 +56,9 @@ namespace GraffitiEntertainment.Namer.Editor
         public bool OcclusionMapIsSrgb;
         public float OcclusionStrength;
 
+        public Mesh BakeSourceMesh; // default geometry-bake source = selected mesh (D-03); null = no bake possible
+        public Mesh OccluderMesh;   // optional high-res occluder (D-04); null/invalid falls back to BakeSourceMesh (D-06)
+
         public Texture2D EmissionMap;
         public Color EmissionColor;
         public float Emissive;

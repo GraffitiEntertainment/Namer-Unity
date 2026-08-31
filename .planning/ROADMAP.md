@@ -147,9 +147,17 @@ Plans:
 
 Plans:
 
-- [ ] 04-01: VertexColorFitter (Burst-compiled per-triangle LSQ) + ResidualProcessor
-- [ ] 04-02: MeshVertexSplitter (seam-safe, attribute-preserving) + error metrics + adaptive residual resolution
-- [ ] 04-03: Fitting/residual/UV-seam automated tests
+**Wave 1**
+
+- [ ] 04-01: MeshVertexSplitter + VertexColorFitter (Burst per-triangle LSQ + Color32 quantize) — the CPU algorithmic core
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 04-02: Residual quotient + error stats + adaptive resolution (NAMERDecomp.compute + NamerDecompPipeline)
+
+**Wave 3** *(blocked on Waves 1-2 completion)*
+
+- [ ] 04-03: Asset generation (EXR + mesh) + Process wiring + editor window UI + automated tests
 
 ### Phase 5: Stylization
 

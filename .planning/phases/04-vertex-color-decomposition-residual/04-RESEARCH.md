@@ -392,17 +392,22 @@ The same `err(x)` drives the stats block (D-09), the heatmap (D-11), and the ada
 
 ## Open Questions
 
-1. **Coverage gate vs max-error gate for the adaptive search (A5)**
+> RESOLVED at planning (2026-08-31), adopted in plans 04-01/04-02/04-03:
+> 1. Adaptive gate = strict `maxErr <= threshold` (max-error, not a coverage percentile).
+> 2. Blend shapes / skinned meshes = preserve `boneWeights`/`bindposes`; emit a warning and skip blend shapes for MVP.
+> 3. D-14 switch depth = preview-pane flip via `NamerAfterPanelState` (`PreferGenerated`/`MarkTweaking`) per UI-SPEC Auto-Selection #2; the scene object is re-bound by Process and stays decomposed until reprocessed.
+
+1. **Coverage gate vs max-error gate for the adaptive search (A5) — RESOLVED: strict `maxErr <= threshold`**
    - What we know: threshold is "maximum acceptable reconstruction error"; D-16 wants "never worse than full-res".
    - What's unclear: whether to gate on 100% coverage (strict) or a high percentile (practical for noisy textures).
    - Recommendation: default to `maxErr ≤ threshold` (strict, matches "never worse"); expose a named `kCoverageTarget` constant the planner can relax to 99% if real assets show single-texel outliers.
 
-2. **Blend shapes / skinned meshes in the splitter**
+2. **Blend shapes / skinned meshes in the splitter — RESOLVED: warn + skip blend shapes, preserve boneWeights/bindposes**
    - What we know: `boneWeights`/`bindposes` must be preserved for skinned renderers; blend shapes reference vertex indices and are hard to re-map.
    - What's unclear: whether any v1 source assets use blend shapes.
    - Recommendation: preserve bone weights + bindposes; emit a warning (not a hard failure) and skip blend shapes for MVP.
 
-3. **D-14 switch depth (preview-only vs scene-object rebind)**
+3. **D-14 switch depth (preview-only vs scene-object rebind) — RESOLVED: preview-pane flip; scene object stays decomposed until reprocess**
    - What we know: UI-SPEC specifies the toggle doubles as the switch and re-binds the after pane via `NamerAfterPanelState`; D-14 says "instant, no reprocessing".
    - What's unclear: whether the scene object must also flip between original/split mesh on toggle (or only the preview pane).
    - Recommendation: preview pane flips instantly (reuse `PreferGenerated`/`MarkTweaking`); the scene object is re-bound by Process (split mesh + residual) and stays decomposed until reprocessed — document this MVP boundary.

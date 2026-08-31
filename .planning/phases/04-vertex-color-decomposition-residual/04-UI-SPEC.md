@@ -1,7 +1,8 @@
 ---
 phase: 4
 slug: vertex-color-decomposition-residual
-status: draft
+status: approved
+reviewed_at: 2026-08-31
 shadcn_initialized: false
 preset: none
 created: 2026-08-31
@@ -124,7 +125,7 @@ Existing components (#1–#11) are unchanged from Phase 3. New components (#12�
 | **14** | **Residual Resolution** | `EditorGUILayout.Popup` ladder: Auto (default) · 2048 · 1024 · 512 · 256 · 128 (D-17) | **enabled-while-on / disabled-while-off / disabled-while-busy** |
 | **15** | **Statistics block** | 5 read-only `EditorGUILayout.LabelField` rows (D-09) | **hidden-while-off / visible-while-on** (values "—" until first fit) |
 
-Settings #12–#14 persist user-scoped via `EditorPrefs` in `NamerProcessorSettings` (the D-03/AO-controls pattern); never a ScriptableObject asset.
+Settings #12–#14 persist user-scoped via `EditorPrefs` in `NamerProcessorSettings` (the Phase-03.1 AO-controls pattern); never a ScriptableObject asset.
 
 ---
 
@@ -228,7 +229,7 @@ Phase-3 copy is inherited (Primary CTA "Process with NAMER", busy "Processing…
 | Statistics: Residual | `Residual` → `not required` (D-13) \| `required` |
 | Statistics: Residual Resolution | `Residual Resolution` → `{n}px` \| `—` when not required |
 | Statistics placeholder (toggle ON, first fit pending) | each value renders `—` until the first fit completes |
-| Destructive confirmation | n/a — no irreversible destructive action this phase. Overwrite remains limited to `NamerGenerated`-stamped assets (D-04) and is a blocking error, not a dialog. |
+| Destructive confirmation | n/a — no irreversible destructive action this phase. Overwrite remains limited to `NamerGenerated`-stamped assets (Phase-03 D-04) and is a blocking error, not a dialog. |
 
 Fit failures surface through the existing error HelpBox pattern ("Processing failed: {message}"); no new error copy is introduced this phase.
 
@@ -268,11 +269,11 @@ Recorded because this run is non-interactive; each choice is grounded in 04-CONT
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: PASS
 
-**Approval:** pending
+**Approval:** approved 2026-08-31 — 6/6 dimensions PASS (gsd-ui-checker); advisory note resolved: unqualified D-03/D-04 citations phase-qualified

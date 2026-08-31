@@ -1,5 +1,7 @@
 using GraffitiEntertainment.Namer.Editor;
 using NUnit.Framework;
+using Unity.Collections;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace GraffitiEntertainment.Namer.Tests
@@ -127,6 +129,165 @@ namespace GraffitiEntertainment.Namer.Tests
             finally
             {
                 Destroy(mesh);
+            }
+        }
+
+        [Test]
+        public void Fit_ConstantColor_RecoversColorWithinTolerance()
+        {
+            Mesh quad = CreateWeldedQuad();
+            try
+            {
+                NamerSplitResult split = MeshVertexSplitter.Split(quad);
+                const int width = 8;
+                const int height = 8;
+                Color32 constant = new Color32(200, 100, 50, 255);
+                NativeArray<Color32> baseTexels = CreateConstantBase(width, height, constant);
+                try
+                {
+                    VertexColorFitResult result = VertexColorFitter.Fit(split, baseTexels, width, height);
+                    try
+                    {
+                        float3 expected = new float3(constant.r / 255f, constant.g / 255f, constant.b / 255f);
+                        Assert.AreEqual(split.VertexCount, result.VertexCount);
+                        for (int i = 0; i < result.VertexCount; i++)
+                        {
+                            Assert.LessOrEqual(math.length(result.Colors[i] - expected), 1e-3f,
+                                "a constant base color must fit to itself within 1e-3 (linear)");
+                        }
+                    }
+                    finally
+                    {
+                        result.Dispose();
+                    }
+                }
+                finally
+                {
+                    baseTexels.Dispose();
+                }
+            }
+            finally
+            {
+                Destroy(quad);
+            }
+        }
+
+        [Test]
+        public void Fit_IsDeterministic()
+        {
+            Mesh quad = CreateWeldedQuad();
+            try
+            {
+                NamerSplitResult split = MeshVertexSplitter.Split(quad);
+                NativeArray<Color32> baseTexels = CreateConstantBase(8, 8, new Color32(90, 150, 210, 255));
+                try
+                {
+                    VertexColorFitResult first = VertexColorFitter.Fit(split, baseTexels, 8, 8);
+                    VertexColorFitResult second = VertexColorFitter.Fit(split, baseTexels, 8, 8);
+                    try
+                    {
+                        Assert.AreEqual(first.VertexCount, second.VertexCount);
+                        for (int i = 0; i < first.VertexCount; i++)
+                        {
+                            Assert.AreEqual(first.Colors[i], second.Colors[i],
+                                "two fits must produce element-wise identical colors");
+                            Assert.AreEqual(first.FitQuality[i], second.FitQuality[i],
+                                "two fits must produce element-wise identical fit quality");
+                        }
+                    }
+                    finally
+                    {
+                        first.Dispose();
+                        second.Dispose();
+                    }
+                }
+                finally
+                {
+                    baseTexels.Dispose();
+                }
+            }
+            finally
+            {
+                Destroy(quad);
+            }
+        }
+
+        [Test]
+        public void ToColor32Array_QuantizeRoundtrip()
+        {
+            Mesh quad = CreateWeldedQuad();
+            try
+            {
+                NamerSplitResult split = MeshVertexSplitter.Split(quad);
+                NativeArray<Color32> baseTexels = CreateConstantBase(8, 8, new Color32(120, 160, 200, 255));
+                try
+                {
+                    VertexColorFitResult result = VertexColorFitter.Fit(split, baseTexels, 8, 8);
+                    try
+                    {
+                        Color32[] quantized = result.ToColor32Array();
+                        Assert.AreEqual(result.VertexCount, quantized.Length);
+                        const float tolerance = 0.5f / 255f + 1e-4f;
+                        for (int i = 0; i < result.VertexCount; i++)
+                        {
+                            float3 c = math.saturate(result.Colors[i]);
+                            Assert.LessOrEqual(math.abs(quantized[i].r / 255f - c.x), tolerance, "red quantize roundtrip within 1/255");
+                            Assert.LessOrEqual(math.abs(quantized[i].g / 255f - c.y), tolerance, "green quantize roundtrip within 1/255");
+                            Assert.LessOrEqual(math.abs(quantized[i].b / 255f - c.z), tolerance, "blue quantize roundtrip within 1/255");
+                            Assert.GreaterOrEqual(quantized[i].a, 0, "alpha must be a byte in [0,255]");
+                            Assert.LessOrEqual(quantized[i].a, 255, "alpha must be a byte in [0,255]");
+                        }
+                    }
+                    finally
+                    {
+                        result.Dispose();
+                    }
+                }
+                finally
+                {
+                    baseTexels.Dispose();
+                }
+            }
+            finally
+            {
+                Destroy(quad);
+            }
+        }
+
+        [Test]
+        public void FitQuality_IsInUnitRange_AndOneForPerfectFit()
+        {
+            Mesh quad = CreateWeldedQuad();
+            try
+            {
+                NamerSplitResult split = MeshVertexSplitter.Split(quad);
+                NativeArray<Color32> baseTexels = CreateConstantBase(8, 8, new Color32(64, 128, 192, 255));
+                try
+                {
+                    VertexColorFitResult result = VertexColorFitter.Fit(split, baseTexels, 8, 8);
+                    try
+                    {
+                        for (int i = 0; i < result.VertexCount; i++)
+                        {
+                            Assert.GreaterOrEqual(result.FitQuality[i], 0f, "fit quality must be >= 0");
+                            Assert.LessOrEqual(result.FitQuality[i], 1f, "fit quality must be <= 1");
+                            Assert.AreEqual(1f, result.FitQuality[i], 1e-3f,
+                                "a perfect constant-color fit must have fit-quality 1");
+                        }
+                    }
+                    finally
+                    {
+                        result.Dispose();
+                    }
+                }
+                finally
+                {
+                    baseTexels.Dispose();
+                }
+            }
+            finally
+            {
+                Destroy(quad);
             }
         }
 
@@ -263,6 +424,17 @@ namespace GraffitiEntertainment.Namer.Tests
             };
             mesh.bindposes = new[] { Matrix4x4.identity };
             return mesh;
+        }
+
+        private static NativeArray<Color32> CreateConstantBase(int width, int height, Color32 color)
+        {
+            var texels = new NativeArray<Color32>(width * height, Allocator.TempJob);
+            for (int i = 0; i < texels.Length; i++)
+            {
+                texels[i] = color;
+            }
+
+            return texels;
         }
 
         private static void Destroy(params Object[] objects)

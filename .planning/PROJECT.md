@@ -70,6 +70,7 @@ A user can select a textured FBX in Unity, run `Process with NAMER`, and get a c
 | Explicit `Process with NAMER` command (no auto-import processing in v1) | Predictability; automation added later | Phase 3: `Assets/` + `GameObject/` context menus and the window button all route through `NamerProcessor.Process`; destination/prefix/suffix configurable, overwrite gated to `NamerGenerated`-stamped assets (path traversal rejected — review CR-01) |
 | Stylization via reusable NAMERStyleProfile ScriptableObject | Profiles reusable across unrelated assets; no hard-coded styles | — Pending (Phase 5) |
 | Authored-sRGB detection reads `TextureImporter.sRGBTexture`, not `Texture2D.graphicsFormat` | Unity 6000.0.82f1/Metal normalizes graphicsFormat to linear variants — sRGB imports report `R8G8B8A8_UNorm`, so graphicsFormat checks never return true | Phase 2 (code-review WR-04 root cause): `SourceInspector.IsSrgb` is importer-first via `AssetDatabase.GetAssetPath`; runtime-created textures fall back to graphicsFormat. Fixed real false-negatives that would have skipped sRGB decode on user assets |
+| Geometry bake / high-res occluder stay preview-scope; generated assets always use extraction/authored AO | User decision at Phase 03.1 close-out (verification W1): the generated material is a separate asset the user can swap/adjust manually after generation | Phase 03.1: accepted divergence; bake-to-generation wiring not planned for v1 |
 
 ## Evolution
 
@@ -89,4 +90,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-27 after Phase 3 completion*
+*Last updated: 2026-08-31 after Phase 03.1 completion*

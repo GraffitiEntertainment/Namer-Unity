@@ -109,7 +109,7 @@ Plans:
 
 **UI hint**: yes
 
-### Phase 03.1: AO extraction: un-multiply baked AO from the base texture, with bake tweaks (cubemap light from high-res model, blur, etc.) (INSERTED)
+### Phase 03.1: AO extraction: un-multiply baked AO from the base texture, with bake tweaks (cubemap light from high-res model, blur, etc.) (INSERTED) (completed 2026-08-31)
 
 **Goal:** Deliver real AO to the packed surface B channel and un-multiply baked AO out of the base color via two sources — image-space extraction (fixes the always-white-AO live pain) and a high-to-low geometry bake (64-direction visibility, cage offset 0.01, 10%-bounds ray distance, 16 px seam dilation) — with AO blur/strength/contrast tweaks
 **Requirements**: NORM-02, ENCD-03, UI-03 (boundary-aware IDs strengthened by this phase; no dedicated IDs — success criteria derived from CONTEXT.md D-01..D-13)
@@ -183,5 +183,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 1. Core Format Contract + Runtime Decode | 3/3 | Complete   | 2026-08-26 |
 | 2. Source Inspection + GPU Compute Pipeline | 3/3 | Complete   | 2026-08-27 |
 | 3. Asset Generation + Editor Workflow + Preview | 3/3 | Complete    | 2026-08-28 |
+| 03.1. AO Extraction (INSERTED) | 3/3 | Complete | 2026-08-31 |
 | 4. Vertex-Color Decomposition + Residual | 0/3 | Not started | - |
 | 5. Stylization | 0/3 | Not started | - |

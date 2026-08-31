@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Completed 03.1-ao-extraction-un-multiply-baked-ao-from-the-base-texture-wit-03-PLAN.md
-last_updated: "2026-08-29T02:07:19.675Z"
+status: ready_to_plan
+stopped_at: Phase 03.1 complete (3/3) — ready to discuss Phase 4
+last_updated: 2026-08-31T18:58:17.371Z
 last_activity: 2026-08-29
 progress:
   total_phases: 6
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-25)
 
 **Core value:** A user can select a textured FBX in Unity, run `Process with NAMER`, and get a correctly rendering, source-compatible NAMER material without ever modifying the imported source assets or leaving the Unity Editor.
-**Current focus:** Phase 03.1 — AO extraction: un-multiply baked AO from the base texture, with bake tweaks
+**Current focus:** Phase 4 — vertex color decomposition + residual
 
 ## Current Position
 
-Phase: 03.1
-Plan: 3 of 3
-Status: Phase complete — ready for verification
-Last activity: 2026-08-29 - Completed quick task 260829-n6x: Remove silent geometry-bake override from NAMER window so AO slider updates reshape the extracted AO live, matching Process output
+Phase: 4
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-31
 
 Progress: [██████████] 100%
 
@@ -36,7 +36,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 6
+- Total plans completed: 9
 - Average duration: - min
 - Total execution time: 0.0 hours
 
@@ -46,6 +46,7 @@ Progress: [██████████] 100%
 |-------|-------|-------|----------|
 | 02 | 3 | - | - |
 | 3 | 3 | - | - |
+| 03.1 | 3 | - | - |
 
 **Recent Trend:**
 
@@ -108,6 +109,7 @@ Recent decisions affecting current work:
 - [Phase 03.1]: Geometry bake is a deterministic CPU Burst raycast (median-split BVH + Möller–Trumbore), not GPU depth-projection — headless-testable (64 dirs, cage 0.01, 10%-bounds distance, 512 cap)
 - [Phase 03.1]: RequestBake runs synchronously as an explicit one-time action off the debounce — EditorApplication.delayCall does not fire during headless EditMode tests
 - [Phase 03.1]: Unity.Burst + Unity.Mathematics added to the Editor asmdef — Collections 2.6.8 no longer pulls Unity.Mathematics transitively
+- [Phase 03.1 close-out]: W1 accepted — bake/occluder stay preview-scope (generated assets use extraction/authored AO); W2 accepted — synchronous first bake with cancellable progress bar; UAT 4/4 pass 2026-08-31
 
 ### Pending Todos
 

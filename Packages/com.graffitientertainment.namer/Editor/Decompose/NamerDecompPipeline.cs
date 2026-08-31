@@ -4,6 +4,7 @@ using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
 
 namespace GraffitiEntertainment.Namer.Editor
 {
@@ -201,15 +202,15 @@ namespace GraffitiEntertainment.Namer.Editor
                 _compute.SetFloat("_MaxObservedErr", Mathf.Max(errorThreshold, kMaxObservedErrFloor));
 
                 // 2. Fit-only error (residual == identity) + base opacity for the D-13 gate.
-                RunErrorHeatmap(vcInterp, fullResidual, baseLinear, heatmap, errorStat, coverageStat, 1f);
-                ReduceStats fitStats = ReduceStats(errorStat, w, h, avgA, avgB);
+                RunErrorHeatmap(vcInterp, fullResidual, baseLinear, heatmap, errorStat, coverageStat, 1f, w, h);
+                ReduceStats fitStats = ReduceToStats(errorStat, w, h, avgA, avgB);
 
                 // 3. D-13 residual-required gate: drop only for a within-threshold fit on a
                 //    fully opaque base (Pitfall 5 — transparent/cutout always keep a residual).
                 bool opaque = fitStats.MinAlpha >= kOpaqueAlphaThreshold;
                 if (fitStats.MaxError <= errorThreshold && opaque)
                 {
-                    ReduceStats coverage = ReduceStats(coverageStat, w, h, avgA, avgB);
+                    ReduceStats coverage = ReduceToStats(coverageStat, w, h, avgA, avgB);
                     return new NamerDecompOutput(null, BuildStats(fitStats, coverage, required: false, chosenResolution: 0), this);
                 }
 
@@ -247,9 +248,9 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 try
                 {
-                    RunErrorHeatmap(vcInterp, eval, baseLinear, heatmap, errorStat, coverageStat, 0f);
-                    ReduceStats errorStats = ReduceStats(errorStat, w, h, avgA, avgB);
-                    ReduceStats covStats = ReduceStats(coverageStat, w, h, avgA, avgB);
+                    RunErrorHeatmap(vcInterp, eval, baseLinear, heatmap, errorStat, coverageStat, 0f, w, h);
+                    ReduceStats errorStats = ReduceToStats(errorStat, w, h, avgA, avgB);
+                    ReduceStats covStats = ReduceToStats(coverageStat, w, h, avgA, avgB);
                     return new NamerDecompOutput(returnedResidual, BuildStats(errorStats, covStats, required: true, chosenResolution), this);
                 }
                 finally
@@ -348,8 +349,8 @@ namespace GraffitiEntertainment.Namer.Editor
 
             try
             {
-                RunErrorHeatmap(vcInterp, up, baseLinear, heatmap, errorStat, coverageStat, 0f);
-                ReduceStats stats = ReduceStats(errorStat, w, h, avgA, avgB);
+                RunErrorHeatmap(vcInterp, up, baseLinear, heatmap, errorStat, coverageStat, 0f, w, h);
+                ReduceStats stats = ReduceToStats(errorStat, w, h, avgA, avgB);
                 return stats.MaxError;
             }
             finally
@@ -365,7 +366,9 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture heatmap,
             RenderTexture errorStat,
             RenderTexture coverageStat,
-            float fitOnly)
+            float fitOnly,
+            int w,
+            int h)
         {
             _compute.SetFloat("_FitOnly", fitOnly);
             _compute.SetTexture(_kernelErrorHeatmap, "_VcInterp", vcInterp);
@@ -374,9 +377,10 @@ namespace GraffitiEntertainment.Namer.Editor
             _compute.SetTexture(_kernelErrorHeatmap, "_ErrorHeatmap", heatmap);
             _compute.SetTexture(_kernelErrorHeatmap, "_ErrorStat", errorStat);
             _compute.SetTexture(_kernelErrorHeatmap, "_CoverageStat", coverageStat);
+            Dispatch(_kernelErrorHeatmap, w, h);
         }
 
-        private ReduceStats ReduceStats(RenderTexture src, int srcW, int srcH, RenderTexture avgA, RenderTexture avgB)
+        private ReduceStats ReduceToStats(RenderTexture src, int srcW, int srcH, RenderTexture avgA, RenderTexture avgB)
         {
             RenderTexture current = src;
             int curW = srcW;
@@ -483,7 +487,7 @@ namespace GraffitiEntertainment.Namer.Editor
             _compute.Dispatch(kernel, (w + 7) / 8, (h + 7) / 8, 1);
         }
 
-        private void Release(RenderTexture rt)
+        internal void Release(RenderTexture rt)
         {
             _pool.Release(rt);
         }

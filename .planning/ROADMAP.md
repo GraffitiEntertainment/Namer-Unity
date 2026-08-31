@@ -149,7 +149,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 04-01: MeshVertexSplitter + VertexColorFitter (Burst per-triangle LSQ + Color32 quantize) — the CPU algorithmic core
+- [x] 04-01: MeshVertexSplitter + VertexColorFitter (Burst per-triangle LSQ + Color32 quantize) — the CPU algorithmic core
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -192,5 +192,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Source Inspection + GPU Compute Pipeline | 3/3 | Complete   | 2026-08-27 |
 | 3. Asset Generation + Editor Workflow + Preview | 3/3 | Complete    | 2026-08-28 |
 | 03.1. AO Extraction (INSERTED) | 3/3 | Complete | 2026-08-31 |
-| 4. Vertex-Color Decomposition + Residual | 0/3 | Not started | - |
+| 4. Vertex-Color Decomposition + Residual | 1/3 | In Progress|  |
 | 5. Stylization | 0/3 | Not started | - |

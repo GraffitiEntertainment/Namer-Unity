@@ -38,8 +38,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Vertex Color Decomposition
 
-- [ ] **VCOL-01**: Processor fits low-frequency base color into mesh vertex colors via per-triangle multi-sample barycentric least-squares (not simple averaging)
-- [ ] **VCOL-02**: Generated mesh splits vertices where UV seams, hard color boundaries, or discontinuities require different colors, preserving mesh attributes
+- [x] **VCOL-01**: Processor fits low-frequency base color into mesh vertex colors via per-triangle multi-sample barycentric least-squares (not simple averaging)
+- [x] **VCOL-02**: Generated mesh splits vertices where UV seams, hard color boundaries, or discontinuities require different colors, preserving mesh attributes
 - [ ] **VCOL-03**: Processor computes a residual texture from the difference between fitted interpolation and source texture
 - [ ] **VCOL-04**: Processor reports reconstruction-error statistics (coverage, average/max error, estimated residual requirement) with optional debug visualization
 - [ ] **VCOL-05**: Residual texture resolution is reduced adaptively based on measured reconstruction error, with manual override
@@ -130,8 +130,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | NORM-01 | Phase 2 | Complete |
 | NORM-02 | Phase 2 | Complete |
 | NORM-03 | Phase 2 | Complete |
-| VCOL-01 | Phase 4 | Pending |
-| VCOL-02 | Phase 4 | Pending |
+| VCOL-01 | Phase 4 | Complete |
+| VCOL-02 | Phase 4 | Complete |
 | VCOL-03 | Phase 4 | Pending |
 | VCOL-04 | Phase 4 | Pending |
 | VCOL-05 | Phase 4 | Pending |

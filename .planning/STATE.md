@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 4 UI-SPEC approved
-last_updated: "2026-08-31T21:16:00.535Z"
-last_activity: 2026-08-31 -- Phase 4 planning complete
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-08-31T22:31:45.364Z"
+last_activity: 2026-08-31
 progress:
   total_phases: 6
   completed_phases: 4
   total_plans: 15
-  completed_plans: 12
+  completed_plans: 13
   percent: 67
 ---
 
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-25)
 
 **Core value:** A user can select a textured FBX in Unity, run `Process with NAMER`, and get a correctly rendering, source-compatible NAMER material without ever modifying the imported source assets or leaving the Unity Editor.
-**Current focus:** Phase 4 — vertex color decomposition + residual
+**Current focus:** Phase 4 — vertex-color-decomposition-residual
 
 ## Current Position
 
-Phase: 4
-Plan: Not started
+Phase: 4 (vertex-color-decomposition-residual) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-08-31 -- Phase 4 planning complete
+Last activity: 2026-08-31
 
-Progress: [██████████] 100%
+Progress: [█████████░] 87%
 
 ## Performance Metrics
 
@@ -66,6 +66,7 @@ Progress: [██████████] 100%
 | Phase 03.1-ao-extraction-un-multiply-baked-ao-from-the-base-texture-wit P01 | 22min | 3 tasks | 8 files |
 | Phase 03.1-ao-extraction-un-multiply-baked-ao-from-the-base-texture-wit P02 | 29min | 3 tasks | 12 files |
 | Phase 03.1-ao-extraction-un-multiply-baked-ao-from-the-base-texture-wit P03 | 20min | 3 tasks | 6 files |
+| Phase 04-vertex-color-decomposition-residual P04-01 | 33 | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -110,6 +111,10 @@ Recent decisions affecting current work:
 - [Phase 03.1]: RequestBake runs synchronously as an explicit one-time action off the debounce — EditorApplication.delayCall does not fire during headless EditMode tests
 - [Phase 03.1]: Unity.Burst + Unity.Mathematics added to the Editor asmdef — Collections 2.6.8 no longer pulls Unity.Mathematics transitively
 - [Phase 03.1 close-out]: W1 accepted — bake/occluder stay preview-scope (generated assets use extraction/authored AO); W2 accepted — synchronous first bake with cancellable progress bar; UAT 4/4 pass 2026-08-31
+- [Phase 04]: Phase 04-01: MeshVertexSplitter welds by a quantized (position, normal, tangent, uv) integer key (never floating-point equality), so near-equal shared-edge attributes weld while UV seams / hard normals / tangent breaks split.
+- [Phase 04]: Phase 04-01: VertexColorFitter's 'per-vertex 3x3 Gram' is a per-triangle 3x3 normal-equations solve accumulated per-vertex by incident-triangle count; the diagonal-only per-vertex approximation over-shoots constant colors, so the full 3-corner barycentric solve is load-bearing.
+- [Phase 04]: Phase 04-01: the vertex-color fit is UV-space only (positions/normals/tangents are not sampled), so only Uvs plus flattened sub-mesh triangles are converted to NativeArrays.
+- [Phase 04]: Phase 04-01: per-vertex reconstruction error is accumulated on the main thread from per-triangle job output, avoiding a cross-thread read-modify-write race on shared vertices.
 
 ### Pending Todos
 
@@ -140,6 +145,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-31T20:28:46.012Z
-Stopped at: Phase 4 UI-SPEC approved
-Resume file: .planning/phases/04-vertex-color-decomposition-residual/04-UI-SPEC.md
+Last session: 2026-08-31T22:31:45.355Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: .planning/phases/04-vertex-color-decomposition-residual/04-01-SUMMARY.md

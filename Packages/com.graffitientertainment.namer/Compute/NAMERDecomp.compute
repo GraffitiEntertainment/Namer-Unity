@@ -1,0 +1,216 @@
+// NAMERDecomp.compute
+// GPU vertex-color decomposition + residual kernels (Phase 4, plan 02).
+//
+// Four staged kernels turn the already-uploaded linear base color and the quantized
+// Color32 vertex colors (plan 04-01) into the multiplicative quotient residual:
+//   CSRasterizeVertexColors  -> barycentric UV-space rasterize of quantized colors
+//                               (_VcInterp RGB = interp color, A = coverage mask)
+//   CSResidual               -> residual = base / max(vcInterp, _VcFloor)
+//                               (uncovered texels take the identity branch, Pitfall 1)
+//   CSErrorHeatmap           -> reconstruction error (one consistent MAE) mapped through
+//                               the viridis ramp, plus the raw stat textures the reduce
+//                               consumes
+//   CSReduce                 -> hierarchical 4-channel block reduce (overflow-free, no
+//                               atomics): .r = mean error, .g = max error,
+//                               .b = mean coverage, .a = min covered base alpha
+//
+// The residual is the QUOTIENT base / max(vcInterp, _VcFloor) — NOT a subtractive
+// difference — because the runtime shader multiplies (albedo = baseResidual * vertexColor,
+// NamerSurface.hlsl). It is derived from the QUANTIZED Color32 (what the runtime actually
+// interpolates), never the float fit (Pitfall 2).
+//
+// All write targets are LINEAR. _VcInterp/_ErrorHeatmap are R8G8B8A8_UNorm linear;
+// _ResidualOut/_ErrorStat are R16G16B16A16_SFloat linear. Compute never writes sRGB.
+
+#include "NAMERDecomp.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
+
+#pragma kernel CSRasterizeVertexColors
+#pragma kernel CSResidual
+#pragma kernel CSErrorHeatmap
+#pragma kernel CSReduce
+
+// Barycentric epsilons (mirror NamerAOBaker.TryReconstruct / VertexColorFitter).
+static const float NAMER_DECOMP_AREA_EPS = 1e-8;
+static const float NAMER_DECOMP_INSIDE_EPS = 1e-4;
+
+// Kernel-written outputs (linear, random-access).
+RWTexture2D<float4> _VcInterp;      // R8G8B8A8_UNorm linear; rgb = interp color, a = coverage
+RWTexture2D<float4> _ResidualOut;   // R16G16B16A16_SFloat linear (quotient residual)
+RWTexture2D<float4> _ErrorHeatmap;  // R8G8B8A8_UNorm viridis ramp
+RWTexture2D<float4> _ErrorStat;     // R16G16B16A16_SFloat: r=err, g=err, b=coverage, a=minAlpha
+RWTexture2D<float4> _CoverageStat;  // R8G8B8A8_UNorm: r = within-threshold flag (0/1)
+RWTexture2D<float4> _AvgA;          // reduce ping-pong target
+RWTexture2D<float4> _AvgB;          // reduce ping-pong target
+RWTexture2D<float4> _DstAvg;        // generic reduce write target (bound to _AvgA/_AvgB per pass)
+
+// Blit-uploaded / kernel-read inputs.
+Texture2D<float4> _BaseLinear;      // normalized linear base map (already uploaded)
+Texture2D<float4> _SrcAvg;          // generic reduce read target (bound to _ErrorStat/_AvgA/_AvgB/_CoverageStat)
+
+// Split-mesh vertex data (plan 04-01): UV-space only; _Verts is carried for the
+// documented interface but the rasterize is position-independent (like the fitter).
+StructuredBuffer<float3> _Verts;
+StructuredBuffer<float2> _Uvs;
+StructuredBuffer<int3> _Tris;
+StructuredBuffer<float4> _Colors;   // quantized Color32 as float4 (RGB = color, A = fit quality)
+
+// Uniforms.
+uint2 _Size;              // unsigned: compared against SV_DispatchThreadID (uint)
+float _VcFloor;           // divisor floor (mirrors NamerConstants.VcFloor, Pitfall 1)
+float _Threshold;         // error threshold for coverage + residual-required gate
+float _MaxObservedErr;    // heatmap normalization bound (>= threshold, ramp scale)
+float _FitOnly;           // 1 = residual is identity (fit-only error), 0 = full residual error
+uint _TriCount;
+uint2 _AvgSrcSize;
+uint2 _AvgDstSize;
+
+// Rasterize the quantized Color32 colors into UV space. One thread per texel walks every
+// triangle, runs a barycentric point-in-triangle test (the exact math of
+// NamerAOBaker.RayTriangleJob.TryReconstruct with the same epsilons), interpolates the
+// quantized colors, and writes (interpColor, 1). Uncovered texels stay (0,0,0,0) — the
+// alpha-0 coverage mask (Pitfall 1 / T-04-05).
+[numthreads(8,8,1)]
+void CSRasterizeVertexColors(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float2 uv = (float2(id.xy) + 0.5) / float2(_Size);
+    for (uint t = 0; t < _TriCount; ++t)
+    {
+        int3 tri = _Tris[t];
+        float2 a = _Uvs[tri.x];
+        float2 b = _Uvs[tri.y];
+        float2 c = _Uvs[tri.z];
+
+        float2 v0 = b - a;
+        float2 v1 = c - a;
+        float2 v2 = uv - a;
+        float d00 = dot(v0, v0);
+        float d01 = dot(v0, v1);
+        float d11 = dot(v1, v1);
+        float d20 = dot(v2, v0);
+        float d21 = dot(v2, v1);
+        float denom = d00 * d11 - d01 * d01;
+        if (abs(denom) < NAMER_DECOMP_AREA_EPS)
+        {
+            continue;
+        }
+
+        float v = (d11 * d20 - d01 * d21) / denom;
+        float w = (d00 * d21 - d01 * d20) / denom;
+        float u = 1.0 - v - w;
+        if (u < -NAMER_DECOMP_INSIDE_EPS || v < -NAMER_DECOMP_INSIDE_EPS || w < -NAMER_DECOMP_INSIDE_EPS)
+        {
+            continue;
+        }
+
+        float3 color = _Colors[tri.x].rgb * u + _Colors[tri.y].rgb * v + _Colors[tri.z].rgb * w;
+        _VcInterp[id.xy] = float4(color, 1.0);
+        return;
+    }
+
+    _VcInterp[id.xy] = float4(0.0, 0.0, 0.0, 0.0);
+}
+
+// Multiplicative quotient residual (Pitfall 1 floor guard). Uncovered texels take the
+// identity residual (1,1,1, baseAlpha) so no divide runs on empty texels and the base
+// alpha is preserved (Pitfall 5). Covered texels divide base by max(vcInterp, _VcFloor).
+[numthreads(8,8,1)]
+void CSResidual(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float4 vc = _VcInterp[id.xy];
+    float baseA = _BaseLinear[id.xy].a;
+    if (vc.a < 0.5)
+    {
+        _ResidualOut[id.xy] = float4(1.0, 1.0, 1.0, baseA);
+        return;
+    }
+
+    float3 b = _BaseLinear[id.xy].rgb;
+    float3 v = max(vc.rgb, _VcFloor);
+    _ResidualOut[id.xy] = float4(b / v, baseA);
+}
+
+// Reconstruction error (one consistent mean-channel MAE) + viridis heatmap + the raw stat
+// textures consumed by CSReduce. rec = vcInterp * residual (fit-only: residual == 1). The
+// heatmap is normalized by a fixed _MaxObservedErr bound (>= threshold) so the ramp is
+// well-scaled; uncovered texels write the low violet anchor (D-11).
+[numthreads(8,8,1)]
+void CSErrorHeatmap(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float4 vc = _VcInterp[id.xy];
+    float baseA = _BaseLinear[id.xy].a;
+    if (vc.a < 0.5)
+    {
+        _ErrorHeatmap[id.xy] = float4(NAMER_DECOMP_HEATMAP(0.0), 1.0);
+        _ErrorStat[id.xy] = float4(0.0, 0.0, 0.0, 1.0);
+        _CoverageStat[id.xy] = float4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
+
+    float3 b = _BaseLinear[id.xy].rgb;
+    float3 rec = (_FitOnly > 0.5) ? vc.rgb : (vc.rgb * _ResidualOut[id.xy].rgb);
+    float err = (abs(rec.r - b.r) + abs(rec.g - b.g) + abs(rec.b - b.b)) / 3.0;
+    float within = (err <= _Threshold) ? 1.0 : 0.0;
+
+    _ErrorHeatmap[id.xy] = float4(NAMER_DECOMP_HEATMAP(err / max(_MaxObservedErr, 1e-6)), 1.0);
+    _ErrorStat[id.xy] = float4(err, err, 1.0, baseA);
+    _CoverageStat[id.xy] = float4(within, 0.0, 0.0, 1.0);
+}
+
+// Hierarchical 4-channel block reduce (the CSAverage SHAPE — overflow-free, no atomics,
+// no structured-buffer accumulation). Each channel carries its own reduction: .r = mean
+// (error), .g = max (error), .b = mean (coverage flag), .a = min (covered base alpha).
+// Every output texel stays in [0,1], so the reduction is overflow-free at any resolution
+// and the CPU reads all stats from a single tiny RT.
+[numthreads(8,8,1)]
+void CSReduce(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _AvgDstSize.x || id.y >= _AvgDstSize.y)
+    {
+        return;
+    }
+
+    float sumR = 0.0;
+    float maxG = 0.0;
+    float sumB = 0.0;
+    float minA = 1.0;
+    float count = 0.0;
+
+    for (uint y = 0; y < 8; ++y)
+    {
+        for (uint x = 0; x < 8; ++x)
+        {
+            uint2 src = id.xy * uint2(8u, 8u) + uint2(x, y);
+            if (src.x < _AvgSrcSize.x && src.y < _AvgSrcSize.y)
+            {
+                float4 s = _SrcAvg[src];
+                sumR += s.r;
+                maxG = max(maxG, s.g);
+                sumB += s.b;
+                minA = min(minA, s.a);
+                count += 1.0;
+            }
+        }
+    }
+
+    _DstAvg[id.xy] = float4(
+        count > 0.0 ? sumR / count : 0.0,
+        maxG,
+        count > 0.0 ? sumB / count : 0.0,
+        minA);
+}

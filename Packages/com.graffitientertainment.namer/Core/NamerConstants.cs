@@ -34,5 +34,8 @@ namespace GraffitiEntertainment.Namer.Core
 
         /// <summary>Un-multiply divisor floor for extracted/baked AO (D-09); divisor-side only — the packed B stores the raw AO.</summary>
         public const float AoFloor = 0.1f;
+
+        /// <summary>Vertex-color interpolation floor for the residual quotient (D-01); prevents divide blow-up at near-zero vcInterp. Mirrored manually in HLSL (NAMERDecomp.hlsl).</summary>
+        public const float VcFloor = 1e-3f;
     }
 }

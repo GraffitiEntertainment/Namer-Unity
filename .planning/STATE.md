@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-08-31T22:31:45.364Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-08-31T23:41:06.230Z"
 last_activity: 2026-08-31
 progress:
   total_phases: 6
   completed_phases: 4
   total_plans: 15
-  completed_plans: 13
+  completed_plans: 14
   percent: 67
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 ## Current Position
 
 Phase: 4 (vertex-color-decomposition-residual) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-08-31
 
-Progress: [█████████░] 87%
+Progress: [█████████░] 93%
 
 ## Performance Metrics
 
@@ -67,6 +67,7 @@ Progress: [█████████░] 87%
 | Phase 03.1-ao-extraction-un-multiply-baked-ao-from-the-base-texture-wit P02 | 29min | 3 tasks | 12 files |
 | Phase 03.1-ao-extraction-un-multiply-baked-ao-from-the-base-texture-wit P03 | 20min | 3 tasks | 6 files |
 | Phase 04-vertex-color-decomposition-residual P04-01 | 33 | 2 tasks | 7 files |
+| Phase 04-vertex-color-decomposition-residual P04-02 | 32min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -115,6 +116,9 @@ Recent decisions affecting current work:
 - [Phase 04]: Phase 04-01: VertexColorFitter's 'per-vertex 3x3 Gram' is a per-triangle 3x3 normal-equations solve accumulated per-vertex by incident-triangle count; the diagonal-only per-vertex approximation over-shoots constant colors, so the full 3-corner barycentric solve is load-bearing.
 - [Phase 04]: Phase 04-01: the vertex-color fit is UV-space only (positions/normals/tangents are not sampled), so only Uvs plus flattened sub-mesh triangles are converted to NativeArrays.
 - [Phase 04]: Phase 04-01: per-vertex reconstruction error is accumulated on the main thread from per-triangle job output, avoiding a cross-thread read-modify-write race on shared vertices.
+- [Phase 04]: Phase 04-02: The residual is the multiplicative quotient base / max(vcInterp, VcFloor) derived from the QUANTIZED Color32 colors, with a coverage mask and base-alpha preservation (Pitfall 1/2/5)
+- [Phase 04]: Phase 04-02: The reduce keeps every channel in [0,1] (mean/max/mean/min) — not raw sums — so it stays overflow-free at any resolution; Coverage and AvgError are derived as fraction ratios on the CPU
+- [Phase 04]: Phase 04-02: Coverage needs a within-threshold count that does not fit the 4-channel reduce, so it is a second reduce over a dedicated _CoverageStat texture
 
 ### Pending Todos
 
@@ -145,6 +149,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-31T22:31:45.355Z
-Stopped at: Completed 04-01-PLAN.md
-Resume file: .planning/phases/04-vertex-color-decomposition-residual/04-01-SUMMARY.md
+Last session: 2026-08-31T23:41:06.218Z
+Stopped at: Completed 04-02-PLAN.md
+Resume file: .planning/phases/04-vertex-color-decomposition-residual/04-02-SUMMARY.md

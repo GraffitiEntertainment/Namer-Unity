@@ -153,7 +153,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 04-02: Residual quotient + error stats + adaptive resolution (NAMERDecomp.compute + NamerDecompPipeline)
+- [x] 04-02: Residual quotient + error stats + adaptive resolution (NAMERDecomp.compute + NamerDecompPipeline)
 
 **Wave 3** *(blocked on Waves 1-2 completion)*
 
@@ -192,5 +192,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Source Inspection + GPU Compute Pipeline | 3/3 | Complete   | 2026-08-27 |
 | 3. Asset Generation + Editor Workflow + Preview | 3/3 | Complete    | 2026-08-28 |
 | 03.1. AO Extraction (INSERTED) | 3/3 | Complete | 2026-08-31 |
-| 4. Vertex-Color Decomposition + Residual | 1/3 | In Progress|  |
+| 4. Vertex-Color Decomposition + Residual | 2/3 | In Progress|  |
 | 5. Stylization | 0/3 | Not started | - |

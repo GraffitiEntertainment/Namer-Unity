@@ -429,12 +429,15 @@ namespace GraffitiEntertainment.Namer.Editor
                 throw new InvalidOperationException("No TextureImporter found for generated residual texture '" + path + "'.");
             }
 
-            // D-02: the residual is always a 16-bit-half HDR EXR — linear, uncompressed,
-            // point-filtered, no mips (mirror WriteSurfaceTexture but EXR + linear).
+            // D-02 / CR-02: the residual is a plain float map sampled with hardware
+            // bilinear at runtime (NamerDecompOutput contract), while FilterMode.Point is
+            // only correct for the bit-packed surface texture. Bilinear keeps the saved
+            // reduced-resolution asset consistent with the bilinear-resampled MaxError the
+            // adaptive search reports. Still linear, uncompressed, no mips, Repeat (D-02).
             importer.textureType = TextureImporterType.Default;
             importer.sRGBTexture = false;
             importer.textureCompression = TextureImporterCompression.Uncompressed;
-            importer.filterMode = FilterMode.Point;
+            importer.filterMode = FilterMode.Bilinear;
             importer.mipmapEnabled = false;
             importer.wrapMode = TextureWrapMode.Repeat;
             importer.SaveAndReimport();

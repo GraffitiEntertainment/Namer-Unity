@@ -193,6 +193,177 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         [UnityTest]
+        public IEnumerator Process_MultiMaterialSelection_FallsBackToPhase3WithWarning()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU decomposition integration test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            EnsureTempFolder();
+            PrefsSnapshot prefs = CapturePrefs();
+            GameObject gameObject = null;
+            try
+            {
+                Mesh sourceMesh = CreateTwoSubMeshQuadAsset(TempFolder + "/SourceTwoSubMeshQuad.asset");
+                Texture2D baseMapA = CreateImportedBaseMap(TempFolder + "/SourceBaseA.png", 64, 64, Checkerboard);
+                Texture2D baseMapB = CreateImportedBaseMap(TempFolder + "/SourceBaseB.png", 64, 64, (x, y) => new Color(0.3f, 0.6f, 0.9f, 1f));
+                Material matA = CreateSourceMaterial(TempFolder, "SourceMatA", baseMapA);
+                Material matB = CreateSourceMaterial(TempFolder, "SourceMatB", baseMapB);
+                gameObject = CreateSceneObject(sourceMesh, new[] { matA, matB }, "MultiMaterialTarget");
+
+                var settings = NewSettings(decompositionEnabled: true);
+
+                NamerProcessResult result = NamerProcessor.Process(gameObject, settings);
+
+                Assert.IsNull(result.Error, "Process should succeed: " + result.Error);
+                Assert.AreEqual(2, result.GeneratedAssets.Count, "two material sets expected (one per material slot)");
+
+                Assert.IsTrue(result.Warnings.Exists(w => w.Contains("Vertex-color decomposition skipped")),
+                    "multi-material selection must warn that decomposition was skipped");
+
+                for (int i = 0; i < result.GeneratedAssets.Count; i++)
+                {
+                    NamerGeneratedAsset asset = result.GeneratedAssets[i];
+                    Assert.IsTrue(string.IsNullOrEmpty(asset.MeshPath), "fallback must not write a split mesh");
+                    Assert.IsTrue(string.IsNullOrEmpty(asset.ResidualTexturePath), "fallback must not write a residual");
+
+                    Material generatedMaterial = AssetDatabase.LoadAssetAtPath<Material>(asset.MaterialPath);
+                    Assert.IsNotNull(generatedMaterial, "generated material must load");
+                    Texture2D expectedBase = i == 0 ? baseMapA : baseMapB;
+                    Assert.AreEqual(expectedBase, generatedMaterial.GetTexture("_BaseResidualMap"),
+                        "fallback must bind the base PNG at _BaseResidualMap");
+                }
+
+                MeshFilter filter = gameObject.GetComponent<MeshFilter>();
+                Assert.AreEqual(sourceMesh, filter.sharedMesh,
+                    "fallback must leave the renderer mesh unchanged (no swap)");
+            }
+            finally
+            {
+                Destroy(gameObject);
+                RestorePrefs(prefs);
+                AssetDatabase.DeleteAsset(TempFolder);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Process_SharedMaterialMultiMesh_FallsBackToPhase3WithWarning()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU decomposition integration test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            EnsureTempFolder();
+            PrefsSnapshot prefs = CapturePrefs();
+            GameObject gameObject = null;
+            try
+            {
+                Mesh sourceMeshA = CreateQuadMeshAsset(TempFolder + "/SourceQuadA.asset");
+                Mesh sourceMeshB = CreateQuadMeshAsset(TempFolder + "/SourceQuadB.asset");
+                Texture2D baseMap = CreateImportedBaseMap(TempFolder + "/SourceBase.png", 64, 64, Checkerboard);
+                Material shared = CreateSourceMaterial(TempFolder, "SharedMat", baseMap);
+                gameObject = CreateMultiMeshSceneObject(sourceMeshA, sourceMeshB, shared, "SharedMaterialMultiMeshTarget");
+
+                Assert.AreNotEqual(sourceMeshA.GetInstanceID(), sourceMeshB.GetInstanceID(),
+                    "the two meshes must be distinct assets so the fixture is genuinely multi-mesh");
+
+                var settings = NewSettings(decompositionEnabled: true);
+
+                NamerProcessResult result = NamerProcessor.Process(gameObject, settings);
+
+                Assert.IsNull(result.Error, "Process should succeed: " + result.Error);
+                Assert.AreEqual(1, result.GeneratedAssets.Count, "shared material dedupes to one material set");
+
+                Assert.IsTrue(result.Warnings.Exists(w => w.Contains("Vertex-color decomposition skipped")),
+                    "shared-material multi-mesh selection must warn that decomposition was skipped");
+
+                NamerGeneratedAsset generated = result.GeneratedAssets[0];
+                Assert.IsTrue(string.IsNullOrEmpty(generated.MeshPath), "fallback must not write a split mesh");
+                Assert.IsTrue(string.IsNullOrEmpty(generated.ResidualTexturePath), "fallback must not write a residual");
+
+                Material generatedMaterial = AssetDatabase.LoadAssetAtPath<Material>(generated.MaterialPath);
+                Assert.IsNotNull(generatedMaterial, "generated material must load");
+                Assert.AreEqual(baseMap, generatedMaterial.GetTexture("_BaseResidualMap"),
+                    "fallback must bind the base PNG (not residual) at _BaseResidualMap");
+
+                MeshFilter filterA = gameObject.transform.GetChild(0).GetComponent<MeshFilter>();
+                MeshFilter filterB = gameObject.transform.GetChild(1).GetComponent<MeshFilter>();
+                Assert.AreEqual(sourceMeshA, filterA.sharedMesh, "renderer A must keep its source mesh (no swap)");
+                Assert.AreEqual(sourceMeshB, filterB.sharedMesh, "renderer B must keep its source mesh (no swap)");
+            }
+            finally
+            {
+                Destroy(gameObject);
+                RestorePrefs(prefs);
+                AssetDatabase.DeleteAsset(TempFolder);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Process_ReducedResolutionResidual_StampsBilinearImporter()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU decomposition integration test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            EnsureTempFolder();
+            PrefsSnapshot prefs = CapturePrefs();
+            GameObject gameObject = null;
+            try
+            {
+                Mesh sourceMesh = CreateQuadMeshAsset(TempFolder + "/SourceQuad.asset");
+                Texture2D baseMap = CreateImportedBaseMap(TempFolder + "/SourceBase.png", 256, 256, Checkerboard);
+                Material source = CreateSourceMaterial(TempFolder, "SourceMat", baseMap);
+                gameObject = CreateSceneObject(sourceMesh, source, "ReducedResidualTarget");
+
+                var settings = NewSettings(decompositionEnabled: true);
+                settings.ResidualResolution = 5; // popup index 5 -> ResolutionLadder[4] = 128 px (< 256 source)
+
+                NamerProcessResult result = NamerProcessor.Process(gameObject, settings);
+
+                Assert.IsNull(result.Error, "Process should succeed: " + result.Error);
+                Assert.AreEqual(1, result.GeneratedAssets.Count, "one material set expected");
+
+                NamerGeneratedAsset generated = result.GeneratedAssets[0];
+                Assert.IsFalse(string.IsNullOrEmpty(generated.ResidualTexturePath),
+                    "a checkerboard base must require a residual");
+
+                Texture2D generatedResidual = AssetDatabase.LoadAssetAtPath<Texture2D>(generated.ResidualTexturePath);
+                Assert.IsNotNull(generatedResidual, "generated residual EXR must load: " + generated.ResidualTexturePath);
+                Assert.AreEqual(128, generatedResidual.width,
+                    "residual must be written at the reduced 128px resolution (ResidualResolution=5)");
+
+                TextureImporter importer = (TextureImporter)AssetImporter.GetAtPath(generated.ResidualTexturePath);
+                Assert.IsNotNull(importer, "residual EXR must have a TextureImporter");
+                Assert.AreEqual(FilterMode.Bilinear, importer.filterMode,
+                    "residual EXR must import bilinear (CR-02)");
+                Assert.IsFalse(importer.mipmapEnabled, "residual EXR must stay no-mips (D-02)");
+                Assert.AreEqual(TextureWrapMode.Repeat, importer.wrapMode, "residual EXR must stay Repeat (D-02)");
+                Assert.IsFalse(importer.sRGBTexture, "residual EXR must stay linear (D-02)");
+                Assert.AreEqual(TextureImporterCompression.Uncompressed, importer.textureCompression,
+                    "residual EXR must stay uncompressed (D-02)");
+            }
+            finally
+            {
+                Destroy(gameObject);
+                RestorePrefs(prefs);
+                AssetDatabase.DeleteAsset(TempFolder);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
         public IEnumerator SourceImmutability_WithDecomposition()
         {
             if (!ComputeAvailable)
@@ -294,6 +465,32 @@ namespace GraffitiEntertainment.Namer.Tests
             return AssetDatabase.LoadAssetAtPath<Mesh>(path);
         }
 
+        private static Mesh CreateTwoSubMeshQuadAsset(string path)
+        {
+            Mesh mesh = new Mesh { name = "SourceTwoSubMeshQuad" };
+            mesh.vertices = new[]
+            {
+                new Vector3(0f, 0f, 0f),
+                new Vector3(1f, 0f, 0f),
+                new Vector3(1f, 0f, 1f),
+                new Vector3(0f, 0f, 1f),
+            };
+            mesh.normals = new[] { Vector3.up, Vector3.up, Vector3.up, Vector3.up };
+            mesh.uv = new[]
+            {
+                new Vector2(0f, 0f),
+                new Vector2(1f, 0f),
+                new Vector2(1f, 1f),
+                new Vector2(0f, 1f),
+            };
+            mesh.subMeshCount = 2;
+            mesh.SetTriangles(new[] { 0, 2, 1 }, 0);
+            mesh.SetTriangles(new[] { 0, 3, 2 }, 1);
+            mesh.RecalculateBounds();
+            AssetDatabase.CreateAsset(mesh, path);
+            return AssetDatabase.LoadAssetAtPath<Mesh>(path);
+        }
+
         private static Material CreateSourceMaterial(string folder, string name, Texture2D baseMap)
         {
             Shader shader = Shader.Find("Universal Render Pipeline/Lit");
@@ -337,6 +534,26 @@ namespace GraffitiEntertainment.Namer.Tests
             MeshRenderer renderer = go.AddComponent<MeshRenderer>();
             renderer.sharedMaterial = material;
             return go;
+        }
+
+        private static GameObject CreateSceneObject(Mesh mesh, Material[] materials, string name)
+        {
+            GameObject go = new GameObject(name);
+            MeshFilter filter = go.AddComponent<MeshFilter>();
+            filter.sharedMesh = mesh;
+            MeshRenderer renderer = go.AddComponent<MeshRenderer>();
+            renderer.sharedMaterials = materials;
+            return go;
+        }
+
+        private static GameObject CreateMultiMeshSceneObject(Mesh meshA, Mesh meshB, Material sharedMaterial, string name)
+        {
+            GameObject parent = new GameObject(name);
+            GameObject childA = CreateSceneObject(meshA, sharedMaterial, "MeshA");
+            childA.transform.SetParent(parent.transform, false);
+            GameObject childB = CreateSceneObject(meshB, sharedMaterial, "MeshB");
+            childB.transform.SetParent(parent.transform, false);
+            return parent;
         }
 
         private static byte[] ComputeFileHash(string path)

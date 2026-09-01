@@ -104,6 +104,25 @@ namespace GraffitiEntertainment.Namer.Editor
                 // the later renderer sharedMesh swap agree on the same source.
                 Mesh decomposeSourceMesh = settings.DecompositionEnabled ? ResolveSourceMesh(selection) : null;
 
+                // CR-01: one vertex-color stream per source mesh cannot carry N materials'
+                // fits simultaneously, and a multi-mesh selection resolves only its FIRST
+                // mesh (FindMeshInObject/FindMeshSubAsset) while BindGeneratedMaterials swaps
+                // each renderer by its OWN mesh (ResolveRendererMesh) — so the un-resolved
+                // second mesh stays un-split yet its material slot still binds the residual,
+                // silently rendering wrong colors even though model.Materials.Count == 1
+                // (SourceInspector.AddUnique dedupes the shared material by instance ID).
+                // Setting decomposeSourceMesh = null makes every material take the existing
+                // decomp == null Phase-3 path below, so both disjuncts produce correct
+                // non-decomposed output plus a warning instead of silent garbage.
+                int distinctSourceMeshes = decomposeSourceMesh != null ? CountDistinctSourceMeshes(selection) : 0;
+                if (decomposeSourceMesh != null && (model.Materials.Count > 1 || distinctSourceMeshes > 1))
+                {
+                    result.Warnings.Add("Vertex-color decomposition skipped for '" + selection.name
+                        + "': the selection maps " + model.Materials.Count + " material(s) to "
+                        + distinctSourceMeshes + " source mesh(es) — generating the non-decomposed Phase-3 shape instead.");
+                    decomposeSourceMesh = null;
+                }
+
                 pipeline = new NamerComputePipeline();
                 AssetGenerator generator = new AssetGenerator();
 
@@ -498,6 +517,93 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Counts the DISTINCT source meshes a selection resolves to, mirroring
+        /// <see cref="ResolveSourceMesh"/>'s per-case resolution but collecting a
+        /// <see cref="HashSet{T}"/> of mesh instance IDs instead of stopping at the first
+        /// mesh (CR-01 guard input). Scene renderers, then prefab contents, then model/FBX
+        /// sub-assets — the same order the single-mesh resolution uses.
+        /// </summary>
+        private static int CountDistinctSourceMeshes(UnityEngine.Object selection)
+        {
+            if (selection == null)
+            {
+                return 0;
+            }
+
+            var distinctIds = new HashSet<int>();
+
+            if (selection is GameObject gameObject)
+            {
+                string assetPath = AssetDatabase.GetAssetPath(gameObject);
+                if (string.IsNullOrEmpty(assetPath))
+                {
+                    foreach (Renderer renderer in gameObject.GetComponentsInChildren<Renderer>(true))
+                    {
+                        Mesh mesh = ResolveRendererMesh(renderer);
+                        if (mesh != null)
+                        {
+                            distinctIds.Add(mesh.GetInstanceID());
+                        }
+                    }
+
+                    return distinctIds.Count;
+                }
+
+                PrefabAssetType prefabType = PrefabUtility.GetPrefabAssetType(gameObject);
+                if (prefabType == PrefabAssetType.Regular || prefabType == PrefabAssetType.Variant)
+                {
+                    GameObject contents = PrefabUtility.LoadPrefabContents(assetPath);
+                    try
+                    {
+                        if (contents != null)
+                        {
+                            foreach (Renderer renderer in contents.GetComponentsInChildren<Renderer>(true))
+                            {
+                                Mesh mesh = ResolveRendererMesh(renderer);
+                                if (mesh != null)
+                                {
+                                    distinctIds.Add(mesh.GetInstanceID());
+                                }
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        PrefabUtility.UnloadPrefabContents(contents);
+                    }
+
+                    return distinctIds.Count;
+                }
+
+                foreach (UnityEngine.Object subAsset in AssetDatabase.LoadAllAssetsAtPath(assetPath))
+                {
+                    if (subAsset is Mesh mesh)
+                    {
+                        distinctIds.Add(mesh.GetInstanceID());
+                    }
+                }
+
+                return distinctIds.Count;
+            }
+
+            string path = AssetDatabase.GetAssetPath(selection);
+            if (string.IsNullOrEmpty(path))
+            {
+                return 0;
+            }
+
+            foreach (UnityEngine.Object subAsset in AssetDatabase.LoadAllAssetsAtPath(path))
+            {
+                if (subAsset is Mesh mesh)
+                {
+                    distinctIds.Add(mesh.GetInstanceID());
+                }
+            }
+
+            return distinctIds.Count;
         }
     }
 }

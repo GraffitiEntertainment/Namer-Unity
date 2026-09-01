@@ -3,7 +3,22 @@ guid: 8291cccf4cabd47d986922bf355d8427
 ModelImporter:
   serializedVersion: 24000
   internalIDToNameTable: []
-  externalObjects: {}
+  externalObjects:
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: tripo_mat_d83278e6
+    second: {fileID: 2100000, guid: d0691ba7e72264bfe9112baabba16338, type: 2}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: neo-character_glb_basecolor
+    second: {fileID: 2800000, guid: 185221a368f9e45bb930aa07519fa638, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: neo-character_glb_normal
+    second: {fileID: 2800000, guid: a9d4e48f67e714c6b8871fa5bd986647, type: 3}
   materials:
     materialImportMode: 2
     materialName: 0
@@ -60,7 +75,7 @@ ModelImporter:
       maskType: 3
       maskSource: {instanceID: 0}
       additiveReferencePoseFrame: 0
-    isReadable: 0
+    isReadable: 1
   meshes:
     lODScreenPercentages: []
     globalScale: 1
@@ -71,8 +86,8 @@ ModelImporter:
     importPhysicalCameras: 1
     importVisibility: 1
     importBlendShapes: 1
-    importCameras: 1
-    importLights: 1
+    importCameras: 0
+    importLights: 0
     nodeNameCollisionStrategy: 1
     fileIdsGeneration: 2
     swapUVChannels: 0

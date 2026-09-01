@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-09-01T02:58:46.077Z"
-last_activity: 2026-09-01 -- Phase 4 planning complete
+last_updated: "2026-09-01T18:16:54.201Z"
+last_activity: 2026-09-01 -- Phase 04 execution started
 progress:
   total_phases: 7
   completed_phases: 4
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-25)
 
 **Core value:** A user can select a textured FBX in Unity, run `Process with NAMER`, and get a correctly rendering, source-compatible NAMER material without ever modifying the imported source assets or leaving the Unity Editor.
-**Current focus:** Phase 4 gap closure (3 verification gaps), then Phase 04.1 — baked-response roughness extraction
+**Current focus:** Phase 04 — vertex-color-decomposition-residual
 
 ## Current Position
 
-Phase: 4 (vertex-color-decomposition-residual) — EXECUTING
-Plan: 3 of 3
-Status: Ready to execute
-Last activity: 2026-09-01 -- Phase 4 planning complete
+Phase: 04 (vertex-color-decomposition-residual) — EXECUTING
+Plan: 1 of 5
+Status: Executing Phase 04
+Last activity: 2026-09-01 -- Phase 04 execution started
 
 Progress: [██████████] 100%
 

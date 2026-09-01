@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-08-31T23:41:06.230Z"
-last_activity: 2026-08-31
+status: verifying
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-09-01T00:21:50.082Z"
+last_activity: 2026-09-01
 progress:
   total_phases: 6
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 15
-  completed_plans: 14
-  percent: 67
+  completed_plans: 15
+  percent: 83
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 
 Phase: 4 (vertex-color-decomposition-residual) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
-Last activity: 2026-08-31
+Status: Phase complete — ready for verification
+Last activity: 2026-09-01
 
-Progress: [█████████░] 93%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -68,6 +68,7 @@ Progress: [█████████░] 93%
 | Phase 03.1-ao-extraction-un-multiply-baked-ao-from-the-base-texture-wit P03 | 20min | 3 tasks | 6 files |
 | Phase 04-vertex-color-decomposition-residual P04-01 | 33 | 2 tasks | 7 files |
 | Phase 04-vertex-color-decomposition-residual P04-02 | 32min | 3 tasks | 9 files |
+| Phase 04-vertex-color-decomposition-residual P04-03 | 14min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -119,6 +120,9 @@ Recent decisions affecting current work:
 - [Phase 04]: Phase 04-02: The residual is the multiplicative quotient base / max(vcInterp, VcFloor) derived from the QUANTIZED Color32 colors, with a coverage mask and base-alpha preservation (Pitfall 1/2/5)
 - [Phase 04]: Phase 04-02: The reduce keeps every channel in [0,1] (mean/max/mean/min) — not raw sums — so it stays overflow-free at any resolution; Coverage and AvgError are derived as fraction ratios on the CPU
 - [Phase 04]: Phase 04-02: Coverage needs a within-threshold count that does not fit the 4-channel reduce, so it is a second reduce over a dedicated _CoverageStat texture
+- [Phase 04]: Phase 04-03: the decomposition source mesh is resolved inside NamerProcessor.Process (ResolveSourceMesh) because SourceInspector never populates NamerMaterialInspection.BakeSourceMesh in production — BakeSourceMesh was only assigned in tests; without it the decomposition stage would always fall back to the Phase-3 shape
+- [Phase 04]: Phase 04-03: the scene sharedMesh swap reads MeshFilter via renderer.GetComponent<MeshFilter>() (a Component sibling of Renderer), not a 'renderer is MeshFilter' pattern match — MeshFilter is not a Renderer subclass; the plan's literal example does not compile
+- [Phase 04]: Phase 04-03: the live preview keeps the pool-leased residual render target bound to the preview material (no readback) until the next recompute — Matches the Phase-3 'assign render targets directly to preview materials' convention
 
 ### Pending Todos
 
@@ -149,6 +153,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-31T23:41:06.218Z
-Stopped at: Completed 04-02-PLAN.md
-Resume file: .planning/phases/04-vertex-color-decomposition-residual/04-02-SUMMARY.md
+Last session: 2026-09-01T00:21:50.063Z
+Stopped at: Completed 04-03-PLAN.md
+Resume file: None

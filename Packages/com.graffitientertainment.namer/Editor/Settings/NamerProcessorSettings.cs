@@ -19,6 +19,9 @@ namespace GraffitiEntertainment.Namer.Editor
         private const string AoBlurRadiusKey = "NamerProcessor.AoBlurRadius";
         private const string AoStrengthKey = "NamerProcessor.AoStrength";
         private const string AoContrastKey = "NamerProcessor.AoContrast";
+        private const string DecompositionEnabledKey = "NamerProcessor.DecompositionEnabled";
+        private const string ErrorThresholdKey = "NamerProcessor.ErrorThreshold";
+        private const string ResidualResolutionKey = "NamerProcessor.ResidualResolution";
 
         /// <summary>Generated-output root folder (D-01 default: Assets/NAMERGenerated/).</summary>
         public string Destination
@@ -74,6 +77,27 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             get { return EditorPrefs.GetFloat(AoContrastKey, NamerEditorConstants.DefaultAoContrast); }
             set { EditorPrefs.SetFloat(AoContrastKey, value); }
+        }
+
+        /// <summary>Whether vertex-color decomposition runs during Process (D-05; default OFF).</summary>
+        public bool DecompositionEnabled
+        {
+            get { return EditorPrefs.GetBool(DecompositionEnabledKey, NamerEditorConstants.DefaultDecompositionEnabled); }
+            set { EditorPrefs.SetBool(DecompositionEnabledKey, value); }
+        }
+
+        /// <summary>Max reconstruction error before a residual is required (D-15; default 0.02).</summary>
+        public float ErrorThreshold
+        {
+            get { return EditorPrefs.GetFloat(ErrorThresholdKey, NamerEditorConstants.DefaultErrorThreshold); }
+            set { EditorPrefs.SetFloat(ErrorThresholdKey, value); }
+        }
+
+        /// <summary>Residual resolution popup index (D-17; 0 = Auto, else ladder index).</summary>
+        public int ResidualResolution
+        {
+            get { return EditorPrefs.GetInt(ResidualResolutionKey, NamerEditorConstants.DefaultResidualResolution); }
+            set { EditorPrefs.SetInt(ResidualResolutionKey, value); }
         }
     }
 }

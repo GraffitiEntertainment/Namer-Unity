@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
 
@@ -95,7 +96,12 @@ namespace GraffitiEntertainment.Namer.Editor
             NamerComputePipeline pipeline = null;
             try
             {
-                AssetGenerator.PreflightTargets(model, settings, destinationFolder);
+                AssetGenerator.PreflightTargets(model, settings, destinationFolder, settings.DecompositionEnabled);
+
+                // D-05 decomposition needs the source mesh the inspection wears. Resolve it
+                // once from the selection (a scene object, prefab, or model) so the split and
+                // the later renderer sharedMesh swap agree on the same source.
+                Mesh decomposeSourceMesh = settings.DecompositionEnabled ? ResolveSourceMesh(selection) : null;
 
                 pipeline = new NamerComputePipeline();
                 AssetGenerator generator = new AssetGenerator();
@@ -109,8 +115,70 @@ namespace GraffitiEntertainment.Namer.Editor
                     NamerComputeResult computeResult = pipeline.Process(inspection);
                     try
                     {
-                        NamerGeneratedAsset asset = generator.Generate(computeResult, inspection, settings, destinationFolder);
-                        result.GeneratedAssets.Add(asset);
+                        NamerDecompData decomp = null;
+                        VertexColorFitResult fit = null;
+                        NamerDecompPipeline decompPipeline = null;
+                        NamerDecompOutput decompOutput = null;
+                        NativeArray<Color32> baseTexels = default;
+                        try
+                        {
+                            if (settings.DecompositionEnabled)
+                            {
+                                inspection.BakeSourceMesh = decomposeSourceMesh;
+                                if (decomposeSourceMesh == null)
+                                {
+                                    result.Warnings.Add("No mesh to decompose for material '"
+                                        + (inspection.Material != null ? inspection.Material.name : "(null)")
+                                        + "' — generating the Phase-3 shape instead.");
+                                }
+                                else
+                                {
+                                    baseTexels = ReadBackBase(computeResult.NormalizedBaseColor);
+                                    NamerSplitResult split = MeshVertexSplitter.Split(decomposeSourceMesh);
+                                    fit = VertexColorFitter.Fit(split, baseTexels, computeResult.Width, computeResult.Height);
+                                    Color32[] colors = fit.ToColor32Array();
+                                    decompPipeline = new NamerDecompPipeline();
+                                    decompOutput = decompPipeline.GenerateResidual(
+                                        split, colors, computeResult.NormalizedBaseColor,
+                                        computeResult.Width, computeResult.Height,
+                                        settings.ErrorThreshold, settings.ResidualResolution);
+                                    decomp = new NamerDecompData
+                                    {
+                                        Split = split,
+                                        Colors = colors,
+                                        Residual = decompOutput.Residual,
+                                        Stats = decompOutput.Stats,
+                                    };
+                                }
+                            }
+
+                            NamerGeneratedAsset asset = generator.Generate(computeResult, inspection, settings, destinationFolder, decomp);
+                            result.GeneratedAssets.Add(asset);
+                        }
+                        finally
+                        {
+                            // The residual RT is read back synchronously inside Generate, so
+                            // release it (and the pool) only after Generate returns.
+                            if (decompOutput != null)
+                            {
+                                decompOutput.Dispose();
+                            }
+
+                            if (decompPipeline != null)
+                            {
+                                decompPipeline.Dispose();
+                            }
+
+                            if (fit != null)
+                            {
+                                fit.Dispose();
+                            }
+
+                            if (baseTexels.IsCreated)
+                            {
+                                baseTexels.Dispose();
+                            }
+                        }
                     }
                     catch (InvalidOperationException ex)
                     {
@@ -171,6 +239,7 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             var generatedBySourceId = new Dictionary<int, Material>();
+            var generatedMeshBySourceMeshId = new Dictionary<int, Mesh>();
             int count = Math.Min(model.Materials.Count, result.GeneratedAssets.Count);
             for (int i = 0; i < count; i++)
             {
@@ -180,10 +249,30 @@ namespace GraffitiEntertainment.Namer.Editor
                 {
                     generatedBySourceId[source.GetInstanceID()] = generated;
                 }
+
+                Mesh sourceMesh = model.Materials[i].BakeSourceMesh;
+                string meshPath = result.GeneratedAssets[i].MeshPath;
+                if (sourceMesh != null && !string.IsNullOrEmpty(meshPath))
+                {
+                    Mesh generatedMesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
+                    if (generatedMesh != null)
+                    {
+                        generatedMeshBySourceMeshId[sourceMesh.GetInstanceID()] = generatedMesh;
+                    }
+                }
             }
 
             foreach (Renderer renderer in gameObject.GetComponentsInChildren<Renderer>(true))
             {
+                // D-07 / Pitfall 3: swap the renderer's mesh to the generated split mesh so
+                // the fitted vertex colors render. Guarded on the renderer still wearing the
+                // split source mesh (T-04-09) — never swap an unrelated renderer.
+                Mesh currentMesh = ResolveRendererMesh(renderer);
+                if (currentMesh != null && generatedMeshBySourceMeshId.TryGetValue(currentMesh.GetInstanceID(), out Mesh generatedMesh))
+                {
+                    SetRendererMesh(renderer, generatedMesh);
+                }
+
                 if (slotSources == null || !slotSources.TryGetValue(renderer, out int[] sourceIds))
                 {
                     continue;
@@ -205,6 +294,33 @@ namespace GraffitiEntertainment.Namer.Editor
                 {
                     renderer.sharedMaterials = shared;
                 }
+            }
+        }
+
+        private static Mesh ResolveRendererMesh(Renderer renderer)
+        {
+            if (renderer is MeshFilter mf)
+            {
+                return mf.sharedMesh;
+            }
+
+            if (renderer is SkinnedMeshRenderer smr)
+            {
+                return smr.sharedMesh;
+            }
+
+            return null;
+        }
+
+        private static void SetRendererMesh(Renderer renderer, Mesh mesh)
+        {
+            if (renderer is MeshFilter mf)
+            {
+                mf.sharedMesh = mesh;
+            }
+            else if (renderer is SkinnedMeshRenderer smr)
+            {
+                smr.sharedMesh = mesh;
             }
         }
 
@@ -282,6 +398,104 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             AssetDatabase.CreateFolder(parent, folderName);
+        }
+
+        /// <summary>
+        /// Reads the linear base-color render target back as RGBA32 texels for the
+        /// vertex-color fit. Throws on a failed readback so no files are written on a
+        /// GPU error (the same contract as <see cref="AssetGenerator"/>).
+        /// </summary>
+        private static NativeArray<Color32> ReadBackBase(RenderTexture source)
+        {
+            AsyncGPUReadbackRequest request = NamerComputePipeline.RequestReadback(source, 0, TextureFormat.RGBA32);
+            request.forcePlayerLoopUpdate = true;
+            request.WaitForCompletion();
+
+            if (request.hasError)
+            {
+                throw new InvalidOperationException("GPU readback failed while decomposing; no files were written.");
+            }
+
+            return request.GetData<Color32>();
+        }
+
+        /// <summary>
+        /// Resolves the single source mesh a selection wears (D-05 decomposition input).
+        /// Mirrors the processor window's preview-mesh resolution: scene renderers first,
+        /// then prefab contents, then model/FBX sub-assets. Null when the selection has no
+        /// mesh (e.g. a bare material), which decomposition treats as a non-blocking skip.
+        /// </summary>
+        private static Mesh ResolveSourceMesh(UnityEngine.Object selection)
+        {
+            if (selection == null)
+            {
+                return null;
+            }
+
+            if (selection is GameObject gameObject)
+            {
+                string assetPath = AssetDatabase.GetAssetPath(gameObject);
+                if (string.IsNullOrEmpty(assetPath))
+                {
+                    return FindMeshInObject(gameObject);
+                }
+
+                PrefabAssetType prefabType = PrefabUtility.GetPrefabAssetType(gameObject);
+                if (prefabType == PrefabAssetType.Regular || prefabType == PrefabAssetType.Variant)
+                {
+                    Mesh subAsset = FindMeshSubAsset(assetPath);
+                    if (subAsset != null)
+                    {
+                        return subAsset;
+                    }
+
+                    GameObject contents = PrefabUtility.LoadPrefabContents(assetPath);
+                    try
+                    {
+                        Mesh mesh = contents != null ? FindMeshInObject(contents) : null;
+                        return mesh != null && AssetDatabase.Contains(mesh) ? mesh : null;
+                    }
+                    finally
+                    {
+                        PrefabUtility.UnloadPrefabContents(contents);
+                    }
+                }
+
+                return FindMeshSubAsset(assetPath);
+            }
+
+            string path = AssetDatabase.GetAssetPath(selection);
+            return string.IsNullOrEmpty(path) ? null : FindMeshSubAsset(path);
+        }
+
+        private static Mesh FindMeshInObject(GameObject gameObject)
+        {
+            MeshFilter filter = gameObject.GetComponentInChildren<MeshFilter>(true);
+            if (filter != null && filter.sharedMesh != null)
+            {
+                return filter.sharedMesh;
+            }
+
+            SkinnedMeshRenderer skinned = gameObject.GetComponentInChildren<SkinnedMeshRenderer>(true);
+            if (skinned != null && skinned.sharedMesh != null)
+            {
+                return skinned.sharedMesh;
+            }
+
+            return null;
+        }
+
+        private static Mesh FindMeshSubAsset(string assetPath)
+        {
+            foreach (UnityEngine.Object subAsset in AssetDatabase.LoadAllAssetsAtPath(assetPath))
+            {
+                if (subAsset is Mesh mesh)
+                {
+                    return mesh;
+                }
+            }
+
+            return null;
         }
     }
 }

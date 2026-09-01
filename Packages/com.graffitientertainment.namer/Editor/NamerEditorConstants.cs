@@ -42,5 +42,14 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>Default AO contrast (D-11; 1 = identity, pivot 0.5).</summary>
         public const float DefaultAoContrast = 1f;
+
+        /// <summary>Default vertex-color decomposition toggle (D-05: opt-in, OFF).</summary>
+        public const bool DefaultDecompositionEnabled = false;
+
+        /// <summary>Default reconstruction-error threshold (D-15).</summary>
+        public const float DefaultErrorThreshold = 0.02f;
+
+        /// <summary>Default residual-resolution ladder index (D-17: 0 = Auto).</summary>
+        public const int DefaultResidualResolution = 0;
     }
 }

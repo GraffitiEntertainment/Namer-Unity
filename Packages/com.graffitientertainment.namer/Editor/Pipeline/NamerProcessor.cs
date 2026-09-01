@@ -4,6 +4,7 @@ using System.IO;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace GraffitiEntertainment.Namer.Editor
 {
@@ -299,28 +300,29 @@ namespace GraffitiEntertainment.Namer.Editor
 
         private static Mesh ResolveRendererMesh(Renderer renderer)
         {
-            if (renderer is MeshFilter mf)
-            {
-                return mf.sharedMesh;
-            }
-
+            // A MeshFilter is a Component sibling of Renderer (not a subclass), so read it
+            // via GetComponent; a SkinnedMeshRenderer IS the Renderer and owns its own mesh.
             if (renderer is SkinnedMeshRenderer smr)
             {
                 return smr.sharedMesh;
             }
 
-            return null;
+            MeshFilter mf = renderer.GetComponent<MeshFilter>();
+            return mf != null ? mf.sharedMesh : null;
         }
 
         private static void SetRendererMesh(Renderer renderer, Mesh mesh)
         {
-            if (renderer is MeshFilter mf)
-            {
-                mf.sharedMesh = mesh;
-            }
-            else if (renderer is SkinnedMeshRenderer smr)
+            if (renderer is SkinnedMeshRenderer smr)
             {
                 smr.sharedMesh = mesh;
+                return;
+            }
+
+            MeshFilter mf = renderer.GetComponent<MeshFilter>();
+            if (mf != null)
+            {
+                mf.sharedMesh = mesh;
             }
         }
 

@@ -55,13 +55,25 @@ namespace GraffitiEntertainment.Namer.Editor
         /// </summary>
         public Texture Render(Mesh mesh, Material before, Material after, Rect rect)
         {
-            if (mesh == null || _preview == null)
+            return Render(mesh, mesh, before, after, rect);
+        }
+
+        /// <summary>
+        /// Renders two (possibly different) meshes side-by-side — the source mesh (before,
+        /// left) and the decomposition split mesh (after, right) — through one shared,
+        /// framed camera (D-08 after-mesh parity). Framing uses <paramref name="beforeMesh"/>
+        /// bounds; the split mesh carries the fitted vertex colors but identical geometry, so
+        /// both instances stay in view. Returns <c>null</c> when either mesh is missing.
+        /// </summary>
+        public Texture Render(Mesh beforeMesh, Mesh afterMesh, Material before, Material after, Rect rect)
+        {
+            if (beforeMesh == null || afterMesh == null || _preview == null)
             {
                 return null;
             }
 
             _preview.BeginPreview(rect, GUIStyle.none);
-            EnsureFramed(mesh);
+            EnsureFramed(beforeMesh);
             ApplyCamera();
 
             _preview.lights[0].transform.rotation = Quaternion.Euler(50f, -30f, 0f);
@@ -72,12 +84,12 @@ namespace GraffitiEntertainment.Namer.Editor
             // bounds center keeps each pane's object centered on the ±separation offset
             // while it spins (camera fixed — Unity Inspector-preview semantics).
             Quaternion meshRotation = Quaternion.Euler(_pitch, _yaw, 0f);
-            Vector3 rotatedBoundsCenter = meshRotation * mesh.bounds.center;
+            Vector3 rotatedBoundsCenter = meshRotation * beforeMesh.bounds.center;
             Vector3 beforePosition = new Vector3(-HalfSeparation, 0f, 0f) - rotatedBoundsCenter;
             Vector3 afterPosition = new Vector3(HalfSeparation, 0f, 0f) - rotatedBoundsCenter;
 
-            _preview.DrawMesh(mesh, beforePosition, meshRotation, before, 0);
-            _preview.DrawMesh(mesh, afterPosition, meshRotation, after, 0);
+            _preview.DrawMesh(beforeMesh, beforePosition, meshRotation, before, 0);
+            _preview.DrawMesh(afterMesh, afterPosition, meshRotation, after, 0);
 
             // allowScriptableRenderPipeline = true is REQUIRED for URP materials —
             // the default false path renders them magenta/fallback-error.

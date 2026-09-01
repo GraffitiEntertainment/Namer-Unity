@@ -1,7 +1,9 @@
 using System;
+using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
 
 namespace GraffitiEntertainment.Namer.Editor
 {
@@ -22,6 +24,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private static readonly string[] DebugChannelLabels =
         {
             "Shaded", "Base Color", "AO", "Normal", "Roughness", "Metallic", "Emissive",
+            "Vertex Colors", "Residual", "Error Heatmap",
         };
 
         private static readonly int SurfaceMapId = Shader.PropertyToID("_SurfaceMap");
@@ -34,6 +37,10 @@ namespace GraffitiEntertainment.Namer.Editor
         private NamerPreviewRenderer _preview;
         private NamerDebugChannelMaterial _debugMaterialFactory;
         private NamerComputePipeline _pipeline;
+        private NamerDecompPipeline _decompPipeline;
+        private NamerDecompOutput _decompOutput;
+        private Mesh _previewSplitMesh;
+        private NamerDecompErrorStats _decompStats;
 
         private Material _namerMaterial;
         private Material _debugMaterial;
@@ -41,6 +48,8 @@ namespace GraffitiEntertainment.Namer.Editor
         private Material _generatedMaterial;
         private Texture2D _generatedSurface;
         private Texture2D _generatedBase;
+        private Texture2D _generatedResidual;
+        private Mesh _generatedMesh;
         private NamerComputeResult _liveResult;
         private RenderTexture _previewBaseRt;
 
@@ -52,6 +61,9 @@ namespace GraffitiEntertainment.Namer.Editor
         private float _aoBlurRadius;
         private float _aoStrength = 1f;
         private float _aoContrast = 1f;
+        private bool _decompositionEnabled;
+        private float _errorThreshold = NamerEditorConstants.DefaultErrorThreshold;
+        private int _residualResolution;
         private int _debugChannel;
 
         private bool _dirty;
@@ -133,6 +145,13 @@ namespace GraffitiEntertainment.Namer.Editor
             Selection.selectionChanged -= OnSelectionChanged;
 
             ReleaseLiveResult();
+            ReleaseDecompPreview();
+
+            if (_decompPipeline != null)
+            {
+                _decompPipeline.Dispose();
+                _decompPipeline = null;
+            }
 
             if (_pipeline != null)
             {
@@ -178,6 +197,9 @@ namespace GraffitiEntertainment.Namer.Editor
             _aoBlurRadius = _settings.AoBlurRadius;
             _aoStrength = _settings.AoStrength;
             _aoContrast = _settings.AoContrast;
+            _decompositionEnabled = _settings.DecompositionEnabled;
+            _errorThreshold = _settings.ErrorThreshold;
+            _residualResolution = _settings.ResidualResolution;
 
             _previewMesh = ResolvePreviewMesh(_selection);
             if (_previewMesh != null)
@@ -207,6 +229,8 @@ namespace GraffitiEntertainment.Namer.Editor
             _generatedMaterial = null;
             _generatedSurface = null;
             _generatedBase = null;
+            _generatedResidual = null;
+            _generatedMesh = null;
 
             NamerMaterialInspection inspection = PrimaryInspection;
             if (inspection == null || _selection == null)
@@ -221,6 +245,10 @@ namespace GraffitiEntertainment.Namer.Editor
                 AssetGenerator.ComposePath(inspection, _settings, folder, "_Surface.png"));
             _generatedBase = AssetDatabase.LoadAssetAtPath<Texture2D>(
                 AssetGenerator.ComposePath(inspection, _settings, folder, "_Base.png"));
+            _generatedResidual = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                AssetGenerator.ComposePath(inspection, _settings, folder, "_Residual.exr"));
+            _generatedMesh = AssetDatabase.LoadAssetAtPath<Mesh>(
+                AssetGenerator.ComposePath(inspection, _settings, folder, ".asset"));
 
             if (_generatedMaterial == null)
             {
@@ -231,7 +259,9 @@ namespace GraffitiEntertainment.Namer.Editor
 
             if (_debugMaterial != null)
             {
-                _debugMaterialFactory.SetTextures(_debugMaterial, _generatedSurface, _generatedBase);
+                _debugMaterialFactory.SetTextures(
+                    _debugMaterial, _generatedSurface, _generatedResidual != null ? _generatedResidual : _generatedBase);
+                _debugMaterialFactory.SetDebugBaseMap(_debugMaterial, _generatedBase);
             }
         }
 
@@ -274,6 +304,7 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 EnsurePipeline();
                 ReleaseLiveResult();
+                ReleaseDecompPreview();
                 EnsureMaterials();
 
                 inspection.AoUnmultiplyStrength = _aoUnmultiplyStrength;
@@ -285,8 +316,23 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 RenderTexture previewBaseMap = ResolvePreviewBaseMap();
 
+                // D-08/D-12: run the in-memory fit + residual when decomposition is enabled
+                // and bind the decomposed representation (residual at _BaseResidualMap, split
+                // mesh in the after pane). Never writes to disk.
+                if (_decompositionEnabled)
+                {
+                    RunDecompPreview(inspection);
+                }
+
                 _namerMaterial.SetTexture(SurfaceMapId, _liveResult.PackedSurface);
-                _namerMaterial.SetTexture(BaseResidualMapId, previewBaseMap);
+                if (_decompOutput != null && _decompOutput.Residual != null)
+                {
+                    _namerMaterial.SetTexture(BaseResidualMapId, _decompOutput.Residual);
+                }
+                else
+                {
+                    _namerMaterial.SetTexture(BaseResidualMapId, previewBaseMap);
+                }
                 _namerMaterial.SetColor(BaseColorId, inspection.BaseColor);
                 _namerMaterial.SetColor(EmissionColorId, inspection.EmissionColor);
                 _namerMaterial.SetFloat(OcclusionStrengthId, inspection.OcclusionStrength);
@@ -302,11 +348,17 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 if (_afterPanelState.PreferGenerated && _generatedSurface != null && _generatedBase != null)
                 {
-                    _debugMaterialFactory.SetTextures(_debugMaterial, _generatedSurface, _generatedBase);
+                    _debugMaterialFactory.SetTextures(
+                        _debugMaterial, _generatedSurface, _generatedResidual != null ? _generatedResidual : _generatedBase);
+                    _debugMaterialFactory.SetDebugBaseMap(_debugMaterial, _generatedBase);
                 }
                 else
                 {
-                    _debugMaterialFactory.SetTextures(_debugMaterial, _liveResult.PackedSurface, previewBaseMap);
+                    Texture liveResidual = (_decompOutput != null && _decompOutput.Residual != null)
+                        ? _decompOutput.Residual
+                        : previewBaseMap;
+                    _debugMaterialFactory.SetTextures(_debugMaterial, _liveResult.PackedSurface, liveResidual);
+                    _debugMaterialFactory.SetDebugBaseMap(_debugMaterial, previewBaseMap);
                 }
                 _debugMaterialFactory.SetChannel(_debugMaterial, Mathf.Max(0, _debugChannel - 1));
                 _debugMaterial.SetFloat(OcclusionStrengthId, inspection.OcclusionStrength);
@@ -422,6 +474,127 @@ namespace GraffitiEntertainment.Namer.Editor
             _liveResult = null;
         }
 
+        private void EnsureDecompPipeline()
+        {
+            if (_decompPipeline == null)
+            {
+                _decompPipeline = new NamerDecompPipeline();
+            }
+        }
+
+        /// <summary>
+        /// Releases the live decomposition preview: the pool-leased residual output and the
+        /// in-memory split mesh are destroyed before the next recompute or window disable.
+        /// </summary>
+        private void ReleaseDecompPreview()
+        {
+            if (_decompOutput != null)
+            {
+                _decompOutput.Dispose();
+                _decompOutput = null;
+            }
+
+            if (_previewSplitMesh != null)
+            {
+                DestroyImmediate(_previewSplitMesh);
+                _previewSplitMesh = null;
+            }
+
+            _decompStats = null;
+        }
+
+        /// <summary>
+        /// Runs the in-memory vertex-color fit + residual for the live preview (D-08/D-12).
+        /// Mirrors <see cref="NamerProcessor"/>'s decomposition stage but keeps the residual
+        /// render target bound to the preview material (no readback, no disk write).
+        /// </summary>
+        private void RunDecompPreview(NamerMaterialInspection inspection)
+        {
+            _decompStats = null;
+            if (_previewMesh == null || inspection == null || _liveResult == null)
+            {
+                return;
+            }
+
+            EnsureDecompPipeline();
+
+            NativeArray<Color32> baseTexels = default;
+            VertexColorFitResult fit = null;
+            try
+            {
+                baseTexels = ReadBackBaseTexels(_liveResult.NormalizedBaseColor);
+                NamerSplitResult split = MeshVertexSplitter.Split(_previewMesh);
+                fit = VertexColorFitter.Fit(split, baseTexels, _liveResult.Width, _liveResult.Height);
+                Color32[] colors = fit.ToColor32Array();
+                _decompOutput = _decompPipeline.GenerateResidual(
+                    split, colors, _liveResult.NormalizedBaseColor,
+                    _liveResult.Width, _liveResult.Height,
+                    _errorThreshold, _residualResolution);
+                _decompStats = _decompOutput.Stats;
+                _previewSplitMesh = BuildPreviewSplitMesh(split, colors);
+            }
+            finally
+            {
+                if (fit != null)
+                {
+                    fit.Dispose();
+                }
+
+                if (baseTexels.IsCreated)
+                {
+                    baseTexels.Dispose();
+                }
+            }
+        }
+
+        private static NativeArray<Color32> ReadBackBaseTexels(RenderTexture source)
+        {
+            AsyncGPUReadbackRequest request = NamerComputePipeline.RequestReadback(source, 0, TextureFormat.RGBA32);
+            request.forcePlayerLoopUpdate = true;
+            request.WaitForCompletion();
+
+            if (request.hasError)
+            {
+                throw new InvalidOperationException("GPU readback failed while previewing decomposition.");
+            }
+
+            return request.GetData<Color32>();
+        }
+
+        private static Mesh BuildPreviewSplitMesh(NamerSplitResult split, Color32[] colors)
+        {
+            Mesh mesh = new Mesh { name = "NamerDecompPreview", hideFlags = HideFlags.HideAndDontSave };
+            if (split.VertexCount > ushort.MaxValue)
+            {
+                mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            }
+
+            mesh.SetVertices(split.Positions);
+            mesh.SetNormals(split.Normals);
+            mesh.SetTangents(split.Tangents);
+            mesh.SetUVs(0, split.Uvs);
+            mesh.colors32 = colors;
+
+            if (split.BoneWeights != null)
+            {
+                mesh.boneWeights = split.BoneWeights;
+            }
+
+            mesh.subMeshCount = split.SubMeshTriangles.Length;
+            for (int i = 0; i < split.SubMeshTriangles.Length; i++)
+            {
+                mesh.SetTriangles(split.SubMeshTriangles[i], i);
+            }
+
+            if (split.Bindposes != null)
+            {
+                mesh.bindposes = split.Bindposes;
+            }
+
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
         private void MarkDirty()
         {
             _dirty = true;
@@ -528,7 +701,23 @@ namespace GraffitiEntertainment.Namer.Editor
                 return;
             }
 
-            Texture previewTexture = _preview.Render(_previewMesh, beforeMaterial, afterMaterial, previewRect);
+            // D-08 after-mesh parity: when decomposition is ON, the after pane draws the
+            // split mesh (vertex colors), falling back to the generated split mesh once a
+            // Process wrote one, and to the source mesh otherwise.
+            Mesh afterMesh = _previewMesh;
+            if (_decompositionEnabled)
+            {
+                if (_afterPanelState.PreferGenerated && _generatedMesh != null)
+                {
+                    afterMesh = _generatedMesh;
+                }
+                else if (_previewSplitMesh != null)
+                {
+                    afterMesh = _previewSplitMesh;
+                }
+            }
+
+            Texture previewTexture = _preview.Render(_previewMesh, afterMesh, beforeMaterial, afterMaterial, previewRect);
             if (previewTexture != null)
             {
                 GUI.DrawTexture(previewRect, previewTexture, ScaleMode.StretchToFill);
@@ -640,6 +829,60 @@ namespace GraffitiEntertainment.Namer.Editor
                 MarkDirty();
             }
 
+            EditorGUILayout.Space();
+
+            bool newDecomp = EditorGUILayout.Toggle(
+                new GUIContent(
+                    "Vertex Color Decomposition",
+                    "Fit the base color into mesh vertex colors and reconstruct it with a residual texture. When enabled, the preview shows the decomposed reconstruction and Process writes the seam-split mesh + residual EXR. When both representations exist, this switch flips between them without reprocessing."),
+                _decompositionEnabled);
+            if (newDecomp != _decompositionEnabled)
+            {
+                _decompositionEnabled = newDecomp;
+                _settings.DecompositionEnabled = newDecomp;
+                _afterPanelState.MarkTweaking();
+                MarkDirty();
+            }
+
+            EditorGUI.BeginDisabledGroup(!_decompositionEnabled);
+
+            float newThreshold = EditorGUILayout.Slider(
+                new GUIContent(
+                    "Error Threshold",
+                    "Maximum acceptable reconstruction error before a residual texture is required (a good fit drops the residual entirely). Automatically recomputes the preview in memory "
+                        + NamerEditorConstants.DebounceSeconds + " s after the slider stops — nothing is written to disk."),
+                _errorThreshold, 0f, 0.10f);
+            if (!Mathf.Approximately(newThreshold, _errorThreshold))
+            {
+                _errorThreshold = newThreshold;
+                _settings.ErrorThreshold = newThreshold;
+                _afterPanelState.MarkTweaking();
+                MarkDirty();
+            }
+
+            int newResolution = EditorGUILayout.Popup(
+                new GUIContent(
+                    "Residual Resolution",
+                    "Residual texture resolution. Auto adaptively halves from the source resolution while error stays within the threshold; manual options snap to the same halving steps."),
+                _residualResolution,
+                new[] { "Auto", "2048", "1024", "512", "256", "128" });
+            if (newResolution != _residualResolution)
+            {
+                _residualResolution = newResolution;
+                _settings.ResidualResolution = newResolution;
+                _afterPanelState.MarkTweaking();
+                MarkDirty();
+            }
+
+            if (_decompositionEnabled)
+            {
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Statistics", EditorStyles.boldLabel);
+                DrawDecompStats();
+            }
+
+            EditorGUI.EndDisabledGroup();
+
             EditorGUI.EndDisabledGroup();
 
             // Visible feedback for the otherwise-invisible debounced preview recompute:
@@ -649,6 +892,31 @@ namespace GraffitiEntertainment.Namer.Editor
                 EditorStyles.miniLabel);
 
             EditorGUILayout.Space();
+        }
+
+        /// <summary>
+        /// Renders the five read-only decomposition statistics rows (D-09). Values show "—"
+        /// until the first fit completes; the residual row reads "not required" when the
+        /// D-13 gate dropped the residual.
+        /// </summary>
+        private void DrawDecompStats()
+        {
+            if (_decompStats == null)
+            {
+                EditorGUILayout.LabelField("Coverage", "—");
+                EditorGUILayout.LabelField("Avg Error", "—");
+                EditorGUILayout.LabelField("Max Error", "—");
+                EditorGUILayout.LabelField("Residual", "—");
+                EditorGUILayout.LabelField("Residual Resolution", "—");
+                return;
+            }
+
+            EditorGUILayout.LabelField("Coverage", (_decompStats.Coverage * 100f).ToString("0") + "%");
+            EditorGUILayout.LabelField("Avg Error", _decompStats.AvgError.ToString("0.000"));
+            EditorGUILayout.LabelField("Max Error", _decompStats.MaxError.ToString("0.000"));
+            EditorGUILayout.LabelField("Residual", _decompStats.ResidualRequired ? "required" : "not required");
+            EditorGUILayout.LabelField(
+                "Residual Resolution", _decompStats.ResidualRequired ? _decompStats.ChosenResolution + "px" : "—");
         }
 
         private void DrawOutputSection()

@@ -13,6 +13,7 @@ namespace GraffitiEntertainment.Namer.Editor
     {
         private static readonly int SurfaceMapId = Shader.PropertyToID("_SurfaceMap");
         private static readonly int BaseResidualMapId = Shader.PropertyToID("_BaseResidualMap");
+        private static readonly int DebugBaseMapId = Shader.PropertyToID("_DebugBaseMap");
         private static readonly int DebugChannelId = Shader.PropertyToID("_DebugChannel");
 
         /// <summary>
@@ -43,7 +44,22 @@ namespace GraffitiEntertainment.Namer.Editor
             material.SetTexture(BaseResidualMapId, baseResidual);
         }
 
-        /// <summary>Selects the debug channel (0..5 per the UI-SPEC debug channel contract).</summary>
+        /// <summary>
+        /// Assigns the debug base map the Error Heatmap channel (8) samples for its
+        /// reconstruction-error comparison. Null clears the bind (channel falls back to a
+        /// uniform-zero error).
+        /// </summary>
+        public void SetDebugBaseMap(Material material, Texture baseMap)
+        {
+            if (material == null)
+            {
+                throw new ArgumentNullException(nameof(material));
+            }
+
+            material.SetTexture(DebugBaseMapId, baseMap);
+        }
+
+        /// <summary>Selects the debug channel (0..8 per the UI-SPEC debug channel contract).</summary>
         public void SetChannel(Material material, int channel)
         {
             if (material == null)

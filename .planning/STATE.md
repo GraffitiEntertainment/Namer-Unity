@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Completed 04-03-PLAN.md
+status: executing
+stopped_at: 04-VERIFICATION.md gaps_found (3 gaps) — needs /gsd-plan-phase 4 --gaps
 last_updated: "2026-09-01T00:21:50.082Z"
 last_activity: 2026-09-01
 progress:
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 
 Phase: 4 (vertex-color-decomposition-residual) — EXECUTING
 Plan: 3 of 3
-Status: Phase complete — ready for verification
+Status: Verification found 3 gaps — awaiting gap-closure planning (/gsd-plan-phase 4 --gaps)
 Last activity: 2026-09-01
 
 Progress: [██████████] 100%

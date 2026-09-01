@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: 04-VERIFICATION.md gaps_found (3 gaps) — needs /gsd-plan-phase 4 --gaps
-last_updated: "2026-09-01T00:21:50.082Z"
-last_activity: 2026-09-01
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-09-01T02:58:46.077Z"
+last_activity: 2026-09-01 -- Phase 4 planning complete
 progress:
-  total_phases: 6
-  completed_phases: 5
-  total_plans: 15
+  total_phases: 7
+  completed_phases: 4
+  total_plans: 17
   completed_plans: 15
-  percent: 83
+  percent: 57
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-25)
 
 **Core value:** A user can select a textured FBX in Unity, run `Process with NAMER`, and get a correctly rendering, source-compatible NAMER material without ever modifying the imported source assets or leaving the Unity Editor.
-**Current focus:** Phase 4 — vertex-color-decomposition-residual
+**Current focus:** Phase 4 gap closure (3 verification gaps), then Phase 04.1 — baked-response roughness extraction
 
 ## Current Position
 
 Phase: 4 (vertex-color-decomposition-residual) — EXECUTING
 Plan: 3 of 3
-Status: Verification found 3 gaps — awaiting gap-closure planning (/gsd-plan-phase 4 --gaps)
-Last activity: 2026-09-01
+Status: Ready to execute
+Last activity: 2026-09-01 -- Phase 4 planning complete
 
 Progress: [██████████] 100%
 
@@ -75,6 +75,7 @@ Progress: [██████████] 100%
 ### Roadmap Evolution
 
 - Phase 03.1 inserted after Phase 3: AO extraction: un-multiply baked AO from the base texture, with bake tweaks (cubemap light from high-res model, blur, etc.) (URGENT)
+- Phase 04.1 inserted after Phase 4: Baked-response roughness extraction + zero-residual one-texture mode — extract gloss baked into base as 6-bit roughness, refit vertex colors, D-13 auto-drop becomes primary path (see notes/roughness-extraction-one-texture-mode.md) (URGENT)
 
 ### Decisions
 
@@ -123,6 +124,7 @@ Recent decisions affecting current work:
 - [Phase 04]: Phase 04-03: the decomposition source mesh is resolved inside NamerProcessor.Process (ResolveSourceMesh) because SourceInspector never populates NamerMaterialInspection.BakeSourceMesh in production — BakeSourceMesh was only assigned in tests; without it the decomposition stage would always fall back to the Phase-3 shape
 - [Phase 04]: Phase 04-03: the scene sharedMesh swap reads MeshFilter via renderer.GetComponent<MeshFilter>() (a Component sibling of Renderer), not a 'renderer is MeshFilter' pattern match — MeshFilter is not a Renderer subclass; the plan's literal example does not compile
 - [Phase 04]: Phase 04-03: the live preview keeps the pool-leased residual render target bound to the preview material (no readback) until the next recompute — Matches the Phase-3 'assign render targets directly to preview materials' convention
+- [Phase 04 gap-closure]: Decision-coverage gate override — D-11/D-14 reported uncovered by the gap plans (04-04/04-05); both are body-cited in 04-02-PLAN/04-03-PLAN and implemented in shipped code (viridis ramp in NAMERDecomp.hlsl, preview toggle in NamerEditorWindow). Accepted as a frontmatter-citation gap, not a scope drop; verify-phase should re-surface if evidence of a real drop emerges.
 
 ### Pending Todos
 

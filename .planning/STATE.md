@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-09-01T18:16:54.201Z"
-last_activity: 2026-09-01 -- Phase 04 execution started
+stopped_at: Completed 04-04-PLAN.md
+last_updated: "2026-09-01T22:36:00.137Z"
+last_activity: 2026-09-01 -- Phase 04 plan 04-04 complete
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 17
-  completed_plans: 15
+  completed_plans: 16
   percent: 57
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 ## Current Position
 
 Phase: 04 (vertex-color-decomposition-residual) — EXECUTING
-Plan: 1 of 5
+Plan: 4 of 5
 Status: Executing Phase 04
-Last activity: 2026-09-01 -- Phase 04 execution started
+Last activity: 2026-09-01 -- Phase 04 plan 04-04 complete
 
-Progress: [██████████] 100%
+Progress: [█████████░] 94%
 
 ## Performance Metrics
 
@@ -69,6 +69,7 @@ Progress: [██████████] 100%
 | Phase 04-vertex-color-decomposition-residual P04-01 | 33 | 2 tasks | 7 files |
 | Phase 04-vertex-color-decomposition-residual P04-02 | 32min | 3 tasks | 9 files |
 | Phase 04-vertex-color-decomposition-residual P04-03 | 14min | 3 tasks | 9 files |
+| Phase 04-vertex-color-decomposition-residual P04-04 | 2min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -125,6 +126,7 @@ Recent decisions affecting current work:
 - [Phase 04]: Phase 04-03: the scene sharedMesh swap reads MeshFilter via renderer.GetComponent<MeshFilter>() (a Component sibling of Renderer), not a 'renderer is MeshFilter' pattern match — MeshFilter is not a Renderer subclass; the plan's literal example does not compile
 - [Phase 04]: Phase 04-03: the live preview keeps the pool-leased residual render target bound to the preview material (no readback) until the next recompute — Matches the Phase-3 'assign render targets directly to preview materials' convention
 - [Phase 04 gap-closure]: Decision-coverage gate override — D-11/D-14 reported uncovered by the gap plans (04-04/04-05); both are body-cited in 04-02-PLAN/04-03-PLAN and implemented in shipped code (viridis ramp in NAMERDecomp.hlsl, preview toggle in NamerEditorWindow). Accepted as a frontmatter-citation gap, not a scope drop; verify-phase should re-surface if evidence of a real drop emerges.
+- [Phase 04 gap-closure]: CR-01 guard (CountDistinctSourceMeshes + decomposeSourceMesh=null fallback) and CR-02 (WriteResidualExr FilterMode.Bilinear) verified pre-existing in the 04-04 WIP snapshot — the packed surface texture stays FilterMode.Point (GEN-04), only the residual EXR becomes Bilinear so the reduced-resolution asset matches the reported MaxError
 
 ### Pending Todos
 
@@ -155,6 +157,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-01T00:21:50.063Z
-Stopped at: Completed 04-03-PLAN.md
+Last session: 2026-09-01T22:34:43.591Z
+Stopped at: Completed 04-04-PLAN.md
 Resume file: None

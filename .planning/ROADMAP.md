@@ -143,7 +143,7 @@ Plans:
   3. Residual texture captures the difference between fitted vertex-color interpolation and the source texture
   4. Processor reports reconstruction-error statistics (coverage, average/max error, residual requirement) and adapts residual resolution with manual override
 
-**Plans**: 5 plans (3 executed + 2 gap closure)
+**Plans**: 5 plans (4 executed + 1 gap closure)
 
 Plans:
 
@@ -161,7 +161,7 @@ Plans:
 
 **Wave 4** *(blocked on Waves 1-3 completion)*
 
-- [ ] 04-04: Gap closure — multi-material / shared-material multi-mesh decomposition guard + warning fallback (CR-01) + residual EXR FilterMode.Bilinear import (CR-02)
+- [x] 04-04: Gap closure — multi-material / shared-material multi-mesh decomposition guard + warning fallback (CR-01) + residual EXR FilterMode.Bilinear import (CR-02)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -210,5 +210,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Source Inspection + GPU Compute Pipeline | 3/3 | Complete   | 2026-08-27 |
 | 3. Asset Generation + Editor Workflow + Preview | 3/3 | Complete    | 2026-08-28 |
 | 03.1. AO Extraction (INSERTED) | 3/3 | Complete | 2026-08-31 |
-| 4. Vertex-Color Decomposition + Residual | 3/5 | Gap closure | - |
+| 4. Vertex-Color Decomposition + Residual | 4/5 | In Progress|  |
 | 5. Stylization | 0/3 | Not started | - |

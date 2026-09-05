@@ -301,6 +301,88 @@ namespace GraffitiEntertainment.Namer.Tests
             yield return null;
         }
 
+        [UnityTest]
+        public IEnumerator GenerateResidual_TinyUvFootprint_StillDecomposes_AndZeroCoverageStillFallsBack()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU residual test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            // WR-01: an island covering 12x12 texels of a 512x512 base is a legitimate
+            // ~0.055% coverage — BELOW the ~0.196% effective cutoff the old RGBA32 stats
+            // readback imposed (round(0.00055 * 255) == 0 quantized the fraction to byte
+            // zero) but far above true zero — so it must decompose, not CannotDecompose.
+            {
+                const int w = 512;
+                const int h = 512;
+                const float span = 12f / 512f; // 12 texels per axis -> 144 covered texels
+                NamerSplitResult split = CreateSplitQuad(0f, span);
+                Color32[] colors = ConstantColors(split.VertexCount, 128);
+                RenderTexture baseRt = CreateGradientBase(w, h);
+
+                using (NamerDecompPipeline pipeline = new NamerDecompPipeline())
+                {
+                    try
+                    {
+                        NamerDecompOutput output = pipeline.GenerateResidual(split, colors, baseRt, w, h, 0.02f, 0);
+                        try
+                        {
+                            Assert.IsFalse(output.Stats.CannotDecompose,
+                                "a small-but-legitimate UV footprint (~0.055% of texels) must decompose, not trip the zero-coverage guard (WR-01)");
+                            Assert.IsTrue(output.Stats.ResidualRequired,
+                                "a gradient base must still require a residual at tiny coverage");
+                            Assert.IsNotNull(output.Residual);
+                        }
+                        finally
+                        {
+                            output.Dispose();
+                        }
+                    }
+                    finally
+                    {
+                        Release(baseRt);
+                    }
+                }
+            }
+
+            // True zero coverage (UVs entirely in [1,2]^2, outside texel-center range)
+            // must still trip the CR-03 guard and fall back.
+            {
+                const int w = 64;
+                const int h = 64;
+                NamerSplitResult split = CreateSplitQuad(1f, 2f);
+                Color32[] colors = ConstantColors(split.VertexCount, 128);
+                RenderTexture baseRt = CreateGradientBase(w, h);
+
+                using (NamerDecompPipeline pipeline = new NamerDecompPipeline())
+                {
+                    try
+                    {
+                        NamerDecompOutput output = pipeline.GenerateResidual(split, colors, baseRt, w, h, 0.02f, 0);
+                        try
+                        {
+                            Assert.IsTrue(output.Stats.CannotDecompose,
+                                "zero rasterizer coverage must still trip the CR-03 guard");
+                            Assert.IsFalse(output.Stats.ResidualRequired);
+                            Assert.IsNull(output.Residual);
+                        }
+                        finally
+                        {
+                            output.Dispose();
+                        }
+                    }
+                    finally
+                    {
+                        Release(baseRt);
+                    }
+                }
+            }
+
+            yield return null;
+        }
+
         // --------------------------------------------------------------------
 
         private static NamerSplitResult CreateSplitQuad(float uvMin, float uvMax)

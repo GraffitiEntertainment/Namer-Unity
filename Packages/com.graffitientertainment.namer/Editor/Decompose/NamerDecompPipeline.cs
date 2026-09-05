@@ -432,14 +432,24 @@ namespace GraffitiEntertainment.Namer.Editor
 
         private static ReduceStats ReadBackStats(RenderTexture src, int validW, int validH)
         {
-            AsyncGPUReadbackRequest request = AsyncGPUReadback.Request(src, 0, TextureFormat.RGBA32);
+            // WR-01: the reduce chain carries coverage as a FLOAT fraction (the ping-pong
+            // targets are R16G16B16A16_SFloat and CSReduce averages .b in float), so the
+            // readback must be float too. An RGBA32 readback quantizes the fraction to
+            // 1/255 steps (round(f*255)/255), which turned the kMinCoverageFraction = 1e-6
+            // zero-coverage guard into a ~0.2% coverage cutoff that refused small-but-
+            // legitimate UV footprints. RGBAFloat is exact for both callers: float chains
+            // keep full precision, and the UNorm8 coverageStat chain's 0/1 flags are exactly
+            // representable. forcePlayerLoopUpdate pumps the request in edit mode where
+            // there is no player loop driving async GPU reads (IN-02).
+            AsyncGPUReadbackRequest request = AsyncGPUReadback.Request(src, 0, TextureFormat.RGBAFloat);
+            request.forcePlayerLoopUpdate = true;
             request.WaitForCompletion();
             if (request.hasError)
             {
                 throw new InvalidOperationException("NAMER decomp stats readback failed.");
             }
 
-            NativeArray<Color32> data = request.GetData<Color32>();
+            NativeArray<Color> data = request.GetData<Color>();
             try
             {
                 int rowStride = src.width;
@@ -452,11 +462,11 @@ namespace GraffitiEntertainment.Namer.Editor
                 {
                     for (int x = 0; x < validW; x++)
                     {
-                        Color32 c = data[y * rowStride + x];
-                        meanErr += c.r / 255f;
-                        maxErr = Mathf.Max(maxErr, c.g / 255f);
-                        coverage += c.b / 255f;
-                        minAlpha = Mathf.Min(minAlpha, c.a / 255f);
+                        Color c = data[y * rowStride + x];
+                        meanErr += c.r;
+                        maxErr = Mathf.Max(maxErr, c.g);
+                        coverage += c.b;
+                        minAlpha = Mathf.Min(minAlpha, c.a);
                         count++;
                     }
                 }

@@ -106,20 +106,28 @@ No new per-task commits were required — both tasks were already implemented an
 - **Files verified:** `NamerProcessor.cs`, `NamerDecompIntegrationTests.cs`
 - **Committed in:** `5ff09ac` (pre-existing)
 
+**3. [Rule 1 - Bug] CR-01 regression tests asserted the SOURCE base map, not the generated base PNG**
+- **Found during:** Orchestrator live-editor EditMode run (99 PASS / 2 FAIL — both CR-01 tests)
+- **Issue:** `Process_MultiMaterialSelection_FallsBackToPhase3WithWarning` and `Process_SharedMaterialMultiMesh_FallsBackToPhase3WithWarning` asserted `_BaseResidualMap == baseMapA/baseMapB/baseMap` (the SOURCE base map). The fallback — and the true Phase-3 path — bind the GENERATED base PNG: `AssetGenerator.Generate` (line 184) sets `baseResidualPath = decomp != null ? residualWritePath : basePath`, and `WriteMaterial` binds `LoadAssetAtPath(basePath)`. The cleaned/generated base is a different `Texture2D` asset than the source base map, so both assertions failed even though the production fallback was already byte-equivalent to a `DecompositionEnabled == false` run.
+- **Fix:** Corrected both assertions to compare against `AssetDatabase.LoadAssetAtPath<Texture2D>(... .BaseTexturePath)` — the generated base PNG — exactly matching the passing `Process_WithDecompositionOff_KeepsPhase3Shape` test (lines 128-130). This is a test-reference correction, not a loosening: the assertion still verifies "base bound, not residual/nothing". No production change was required.
+- **Files modified:** `Packages/com.graffitientertainment.namer/Tests/Editor/NamerDecompIntegrationTests.cs`
+
 ---
 
-**Total deviations:** 2 (both "verified pre-existing" — the execution brief under-described the state of the WIP snapshot)
-**Impact on plan:** None. Both CR-01 and CR-02 are fully implemented and committed. No new production/test code was written by this executor.
+**Total deviations:** 3 (2 "verified pre-existing", 1 auto-fixed test-reference bug)
+**Impact on plan:** CR-01/CR-02 production was already correct and committed; the only code change was correcting the two CR-01 test references to match the Phase-3 binding contract.
 
 ## Issues Encountered
 
 - The execution brief's `<critical_preexisting_work>` note claimed Task 2's production change was missing (`FilterMode.Point` at ~line 437), but the change was already committed in `dad71ec`. The note was stale relative to HEAD `5ff09ac`.
 - Commit `dad71ec` carries a non-descriptive message ("test message") for the CR-02 production change. This is noted for traceability; it was not rewritten (no history rewrite performed).
+- **1Password SSH signing blocked the fix commit** — after the successful `76e0075` commit, 1Password locked and `op-ssh-sign` began failing (`failed to fill whole buffer` → `agent returned an error`). The test-reference fix is staged but uncommitted pending 1Password unlock.
 
 ## Verification
 
 - Static `grep` gates from the plan passed for both tasks (guard literal, `FilterMode.Bilinear` in `WriteResidualExr`, exactly one `FilterMode.Point` file-wide, all three test methods + assertions present).
-- **EditMode run deferred to orchestrator (live-editor lock):** the live interactive Unity Editor holds the project lock; a batchmode Unity run would exit 134. The three new `[UnityTest]` cases were verified statically and must be run via the live-editor TestRunnerApi by the orchestrator, which gates phase tracking on the 98+ suite.
+- **Orchestrator live-editor EditMode run: 99 PASS / 2 FAIL.** CR-02 (`Process_ReducedResolutionResidual_StampsBilinearImporter`) passed green. The 2 failures were both CR-01 tests failing only on the `_BaseResidualMap` assertion — root-caused as a test-reference bug (asserted the source base map instead of the generated base PNG) and fixed (see deviation 3). Awaiting orchestrator re-run.
+- **EditMode re-run still requires the live editor** (a batchmode Unity run would exit 134 against the held project lock). The orchestrator must re-run the two corrected CR-01 cases.
 
 ## User Setup Required
 
@@ -135,6 +143,6 @@ None — no external service configuration required. All changes are C# + Unity 
 *Phase: 04-vertex-color-decomposition-residual*
 *Completed: 2026-09-01*
 
-## Self-Check: PASSED
+## Self-Check: PASSED (code) / COMMIT BLOCKED (1Password)
 
-All three modified files exist and their changes are committed (`5ff09ac` for Task 1 + tests, `dad71ec` for Task 2 production). The plan's `grep` gates all passed. EditMode test run is deferred to the orchestrator (live-editor lock), as mandated by the environment constraints.
+All three modified files exist and their changes are committed (`5ff09ac` for Task 1 + tests, `dad71ec` for Task 2 production; metadata in `76e0075`). The plan's `grep` gates all passed. The follow-up CR-01 test-reference fix is staged but its commit is blocked by a locked 1Password SSH-signing agent (`op-ssh-sign` → "agent returned an error"); it must be committed once 1Password is unlocked, then the two corrected cases re-run by the orchestrator.

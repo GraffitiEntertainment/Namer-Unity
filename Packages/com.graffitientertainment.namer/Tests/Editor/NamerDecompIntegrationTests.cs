@@ -231,8 +231,11 @@ namespace GraffitiEntertainment.Namer.Tests
 
                     Material generatedMaterial = AssetDatabase.LoadAssetAtPath<Material>(asset.MaterialPath);
                     Assert.IsNotNull(generatedMaterial, "generated material must load");
-                    Texture2D expectedBase = i == 0 ? baseMapA : baseMapB;
-                    Assert.AreEqual(expectedBase, generatedMaterial.GetTexture("_BaseResidualMap"),
+                    // Phase-3-equivalent binding: the fallback binds the GENERATED base PNG
+                    // (BaseTexturePath), not the source base map (same contract as the
+                    // decomposition-OFF test). The cleaned base differs from the source.
+                    Texture2D generatedBase = AssetDatabase.LoadAssetAtPath<Texture2D>(asset.BaseTexturePath);
+                    Assert.AreEqual(generatedBase, generatedMaterial.GetTexture("_BaseResidualMap"),
                         "fallback must bind the base PNG at _BaseResidualMap");
                 }
 
@@ -289,7 +292,11 @@ namespace GraffitiEntertainment.Namer.Tests
 
                 Material generatedMaterial = AssetDatabase.LoadAssetAtPath<Material>(generated.MaterialPath);
                 Assert.IsNotNull(generatedMaterial, "generated material must load");
-                Assert.AreEqual(baseMap, generatedMaterial.GetTexture("_BaseResidualMap"),
+                // Phase-3-equivalent binding: the fallback binds the GENERATED base PNG
+                // (BaseTexturePath), not the source base map (same contract as the
+                // decomposition-OFF test).
+                Texture2D generatedBase = AssetDatabase.LoadAssetAtPath<Texture2D>(generated.BaseTexturePath);
+                Assert.AreEqual(generatedBase, generatedMaterial.GetTexture("_BaseResidualMap"),
                     "fallback must bind the base PNG (not residual) at _BaseResidualMap");
 
                 MeshFilter filterA = gameObject.transform.GetChild(0).GetComponent<MeshFilter>();
@@ -352,6 +359,59 @@ namespace GraffitiEntertainment.Namer.Tests
                 Assert.IsFalse(importer.sRGBTexture, "residual EXR must stay linear (D-02)");
                 Assert.AreEqual(TextureImporterCompression.Uncompressed, importer.textureCompression,
                     "residual EXR must stay uncompressed (D-02)");
+            }
+            finally
+            {
+                Destroy(gameObject);
+                RestorePrefs(prefs);
+                AssetDatabase.DeleteAsset(TempFolder);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Process_TilingUvMesh_FallsBackToPhase3WithWarning()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU decomposition integration test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            EnsureTempFolder();
+            PrefsSnapshot prefs = CapturePrefs();
+            GameObject gameObject = null;
+            try
+            {
+                Mesh sourceMesh = CreateTilingQuadMeshAsset(TempFolder + "/SourceTilingQuad.asset");
+                Texture2D baseMap = CreateImportedBaseMap(TempFolder + "/SourceBase.png", 64, 64, Checkerboard);
+                Material source = CreateSourceMaterial(TempFolder, "SourceMat", baseMap);
+                gameObject = CreateSceneObject(sourceMesh, source, "TilingTarget");
+
+                MeshFilter filter = gameObject.GetComponent<MeshFilter>();
+                var settings = NewSettings(decompositionEnabled: true);
+
+                NamerProcessResult result = NamerProcessor.Process(gameObject, settings);
+
+                Assert.IsNull(result.Error, "Process should succeed: " + result.Error);
+                Assert.AreEqual(1, result.GeneratedAssets.Count, "one material set expected");
+
+                Assert.IsTrue(result.Warnings.Exists(w => w.Contains("UV coverage near zero")),
+                    "tiling-UV mesh must warn on zero rasterizer coverage (CR-03)");
+
+                NamerGeneratedAsset generated = result.GeneratedAssets[0];
+                Assert.IsTrue(string.IsNullOrEmpty(generated.MeshPath), "coverage fallback must not write a split mesh");
+                Assert.IsTrue(string.IsNullOrEmpty(generated.ResidualTexturePath), "coverage fallback must not write a residual");
+
+                Material generatedMaterial = AssetDatabase.LoadAssetAtPath<Material>(generated.MaterialPath);
+                Assert.IsNotNull(generatedMaterial, "generated material must load");
+                Texture2D generatedBase = AssetDatabase.LoadAssetAtPath<Texture2D>(generated.BaseTexturePath);
+                Assert.AreEqual(generatedBase, generatedMaterial.GetTexture("_BaseResidualMap"),
+                    "coverage fallback must bind the base PNG at _BaseResidualMap");
+
+                Assert.AreEqual(sourceMesh, filter.sharedMesh,
+                    "coverage fallback must leave the renderer mesh unchanged (no swap)");
             }
             finally
             {
@@ -458,6 +518,33 @@ namespace GraffitiEntertainment.Namer.Tests
                 new Vector2(1f, 0f),
                 new Vector2(1f, 1f),
                 new Vector2(0f, 1f),
+            };
+            mesh.triangles = new[] { 0, 2, 1, 0, 3, 2 };
+            mesh.RecalculateBounds();
+            AssetDatabase.CreateAsset(mesh, path);
+            return AssetDatabase.LoadAssetAtPath<Mesh>(path);
+        }
+
+        private static Mesh CreateTilingQuadMeshAsset(string path)
+        {
+            // Same quad geometry as CreateQuadMeshAsset, but UVs live entirely in [1,2] x [1,2]
+            // (outside [0,1]) so the GPU rasterizer covers zero texels and the CPU fitter must
+            // wrap them back into range (CR-03).
+            Mesh mesh = new Mesh { name = "SourceTilingQuad" };
+            mesh.vertices = new[]
+            {
+                new Vector3(0f, 0f, 0f),
+                new Vector3(1f, 0f, 0f),
+                new Vector3(1f, 0f, 1f),
+                new Vector3(0f, 0f, 1f),
+            };
+            mesh.normals = new[] { Vector3.up, Vector3.up, Vector3.up, Vector3.up };
+            mesh.uv = new[]
+            {
+                new Vector2(1f, 1f),
+                new Vector2(2f, 1f),
+                new Vector2(2f, 2f),
+                new Vector2(1f, 2f),
             };
             mesh.triangles = new[] { 0, 2, 1, 0, 3, 2 };
             mesh.RecalculateBounds();

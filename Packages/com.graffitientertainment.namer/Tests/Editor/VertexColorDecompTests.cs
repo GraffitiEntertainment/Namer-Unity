@@ -173,6 +173,57 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         [Test]
+        public void Fit_WrapsUvsOutsideZeroOne()
+        {
+            Mesh mesh = CreateTilingTriangleMesh();
+            try
+            {
+                NamerSplitResult split = MeshVertexSplitter.Split(mesh);
+                NativeArray<Color32> baseTexels = CreateRampBase(4, 4);
+                try
+                {
+                    VertexColorFitResult result = VertexColorFitter.Fit(split, baseTexels, 4, 4);
+                    try
+                    {
+                        Assert.AreEqual(split.VertexCount, result.VertexCount);
+                        // Rationale: the triangle's UVs live in [1.25, 1.75]; the old clamp
+                        // mapped every sample to edge texel x=3 (white, 1.0), while the Repeat
+                        // wrap maps them to the wrapped ramp ~0.5. The 0.15 / 0.85 bounds are
+                        // 1/6 and 5/6 (the linearly-derived wrapped-ramp fit) widened by a
+                        // 1/60 safety margin — do not loosen further.
+                        for (int i = 0; i < result.VertexCount; i++)
+                        {
+                            Assert.LessOrEqual(result.Colors[i].x, 0.85f,
+                                "wrapped fit must not clamp to the white edge texel");
+                            Assert.GreaterOrEqual(result.Colors[i].x, 0.15f,
+                                "wrapped fit must wrap to the mid-ramp, not black");
+                            Assert.LessOrEqual(result.Colors[i].y, 0.85f,
+                                "wrapped fit must not clamp to the white edge texel");
+                            Assert.GreaterOrEqual(result.Colors[i].y, 0.15f,
+                                "wrapped fit must wrap to the mid-ramp, not black");
+                            Assert.LessOrEqual(result.Colors[i].z, 0.85f,
+                                "wrapped fit must not clamp to the white edge texel");
+                            Assert.GreaterOrEqual(result.Colors[i].z, 0.15f,
+                                "wrapped fit must wrap to the mid-ramp, not black");
+                        }
+                    }
+                    finally
+                    {
+                        result.Dispose();
+                    }
+                }
+                finally
+                {
+                    baseTexels.Dispose();
+                }
+            }
+            finally
+            {
+                Destroy(mesh);
+            }
+        }
+
+        [Test]
         public void Fit_IsDeterministic()
         {
             Mesh quad = CreateWeldedQuad();
@@ -435,6 +486,51 @@ namespace GraffitiEntertainment.Namer.Tests
             }
 
             return texels;
+        }
+
+        private static NativeArray<Color32> CreateRampBase(int width, int height)
+        {
+            // Grayscale x-ramp: texel 0 is black, texel (width-1) is white. Each texel's r/g/b
+            // equal the x fraction so the fit test can distinguish wrap (mid-ramp) from clamp
+            // (white edge).
+            var texels = new NativeArray<Color32>(width * height, Allocator.TempJob);
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    byte v = (byte)Mathf.RoundToInt(x / (float)(width - 1) * 255f);
+                    texels[y * width + x] = new Color32(v, v, v, 255);
+                }
+            }
+
+            return texels;
+        }
+
+        private static Mesh CreateTilingTriangleMesh()
+        {
+            // A single triangle whose UVs all live in [1.25, 1.75] (outside [0,1]) so the old
+            // clamp mapped every bilinear sample to the white edge texel while the Repeat wrap
+            // samples the mid-ramp.
+            Mesh mesh = new Mesh { name = "VertexColorDecompTilingTriangle" };
+            mesh.vertices = new[]
+            {
+                new Vector3(0f, 0f, 0f),
+                new Vector3(1f, 0f, 0f),
+                new Vector3(0f, 0f, 1f),
+            };
+            mesh.normals = new[]
+            {
+                Vector3.up, Vector3.up, Vector3.up,
+            };
+            mesh.uv = new[]
+            {
+                new Vector2(1.25f, 0.5f),
+                new Vector2(1.75f, 0.5f),
+                new Vector2(1.5f, 0.9f),
+            };
+            mesh.triangles = new[] { 0, 1, 2 };
+            mesh.RecalculateBounds();
+            return mesh;
         }
 
         private static void Destroy(params Object[] objects)

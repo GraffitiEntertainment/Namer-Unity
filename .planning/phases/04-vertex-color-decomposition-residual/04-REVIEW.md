@@ -238,6 +238,44 @@ own WR-01 snippet folded IN-02 in (see below)._
   Verified statically: the readback (`AssetGenerator.cs:171-174`) precedes the first
   `File.WriteAllBytes` call site (`WriteSurfaceTexture`, reached at `:182`).
 
+### Post-fix round: batchmode regression corrections (2026-09-05)
+
+The first batchmode run of the fixed suite came back 102 PASS / 3 FAIL — two regressions
+introduced by the WR-02 fix plus the new WR-03 test failing. Both diagnosed at the root and
+fixed; no assertions were loosened.
+
+**WR-02 regression (Failures 1+2)** — `Process_MultiMaterialSelection_FallsBackToPhase3WithWarning`
+and `Process_SharedMaterialMultiMesh_FallsBackToPhase3WithWarning` died with
+`ArgumentNullException: sourceMesh` at `NamerProcessor.cs:164 → MeshVertexSplitter.Split`.
+- **Root cause:** the pre-WR-02 `if (decomposeSourceMesh == null) { warn } else { split }`
+  coupled the warning to the null-gate. Changing only the warning condition to
+  `decomposeSourceMesh == null && !decompGuardTripped` made the guard-tripped case (mesh
+  null, guard tripped) fall into the `else` and call `Split(null)`.
+- **Fix (commit `1d399ae`):** the null-gate is now a separate statement —
+  `if (decomposeSourceMesh != null) { split path }` (`NamerProcessor.cs:161-167`) — so a
+  guard trip takes neither branch and skips the split exactly as before WR-02. Truth table:
+  mesh null + genuine resolution failure → warning only; mesh null + guard tripped →
+  neither; mesh non-null → split (unchanged).
+
+**WR-03 test failure (Failure 3)** — `Process_PrefabWithDistinctMeshSubAsset_FallsBackToPhase3WithWarning`
+failed its skip-warning count (Expected 1, But was 0).
+- **Root cause:** fixture, not production. The first fixture attached the Mesh sub-asset
+  with `AddObjectToAsset(mesh, prefabPath)` + `ImportAsset(prefabPath)` — the pattern that
+  works for `.asset` containers (see `NamerReprocessTests`). A `.prefab` file is owned by
+  the prefab system: the import regenerated the file from the unchanged in-memory prefab
+  model and silently dropped the raw-added sub-object. With no visible sub-asset, both the
+  resolver (`FindMeshSubAsset`) and the counter's sub-asset walk saw nothing; the resolver
+  fell back to the contents walk (`rendererMesh`), the union counted 1, the guard passed,
+  and decomposition ran normally — 0 skip warnings. Production resolver and counter agree
+  on branch selection for the same input; the fixture simply never produced the intended
+  input.
+- **Fix (commit `310bf6e`):** the fixture now uses the documented prefab pattern —
+  `LoadPrefabContents` → `AddObjectToAsset(mesh, contents)` → `SaveAsPrefabAsset` →
+  `UnloadPrefabContents` — and asserts its own precondition (the prefab file must expose a
+  Mesh sub-asset whose instance ID differs from the renderer's mesh) so it can never again
+  silently degrade into testing the wrong input. All original assertions unchanged;
+  the precondition makes the test strictly stronger.
+
 ---
 
 _Reviewed: 2026-09-05_

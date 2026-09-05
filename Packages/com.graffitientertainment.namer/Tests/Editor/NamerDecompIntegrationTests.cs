@@ -439,6 +439,90 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         [UnityTest]
+        public IEnumerator Process_PrefabWithDistinctMeshSubAsset_FallsBackToPhase3WithWarning()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU decomposition integration test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            EnsureTempFolder();
+            PrefsSnapshot prefs = CapturePrefs();
+            try
+            {
+                // The renderer wears an EXTERNAL persisted quad asset; the prefab file
+                // later gains a DISTINCT Mesh sub-asset, so ResolveSourceMesh returns the
+                // sub-asset (FindMeshSubAsset first) while the renderer keeps wearing the
+                // external quad — the WR-03 corner case.
+                Mesh rendererMesh = CreateQuadMeshAsset(TempFolder + "/RendererQuad.asset");
+                Texture2D baseMap = CreateImportedBaseMap(TempFolder + "/SourceBase.png", 64, 64, Checkerboard);
+                Material source = CreateSourceMaterial(TempFolder, "SourceMat", baseMap);
+
+                GameObject sceneGo = CreateSceneObject(rendererMesh, source, "PrefabSource");
+                string prefabPath = TempFolder + "/DistinctSubAssetPrefab.prefab";
+                GameObject prefabRoot = PrefabUtility.SaveAsPrefabAsset(sceneGo, prefabPath);
+                Destroy(sceneGo);
+                Assert.IsNotNull(prefabRoot, "prefab asset must be saved");
+
+                Mesh subAssetMesh = new Mesh { name = "PrefabMeshSubAsset" };
+                subAssetMesh.vertices = new[]
+                {
+                    new Vector3(0f, 0f, 0f),
+                    new Vector3(1f, 0f, 0f),
+                    new Vector3(1f, 0f, 1f),
+                    new Vector3(0f, 0f, 1f),
+                };
+                subAssetMesh.normals = new[] { Vector3.up, Vector3.up, Vector3.up, Vector3.up };
+                subAssetMesh.uv = new[]
+                {
+                    new Vector2(0f, 0f),
+                    new Vector2(1f, 0f),
+                    new Vector2(1f, 1f),
+                    new Vector2(0f, 1f),
+                };
+                subAssetMesh.triangles = new[] { 0, 2, 1, 0, 3, 2 };
+                subAssetMesh.RecalculateBounds();
+                AssetDatabase.AddObjectToAsset(subAssetMesh, prefabPath);
+                AssetDatabase.ImportAsset(prefabPath);
+
+                GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+                Assert.IsNotNull(prefab, "prefab must reload after adding the mesh sub-asset");
+
+                var settings = NewSettings(decompositionEnabled: true);
+                NamerProcessResult result = NamerProcessor.Process(prefab, settings);
+
+                Assert.IsNull(result.Error, "Process should succeed: " + result.Error);
+                Assert.AreEqual(1, result.GeneratedAssets.Count, "one material set expected");
+
+                // WR-03: the guard must see the sub-asset mesh AND the renderer mesh as
+                // two distinct source meshes, so decomposition is skipped instead of
+                // silently running on a mesh the renderer does not wear.
+                Assert.AreEqual(1, CountWarnings(result, "Vertex-color decomposition skipped"),
+                    "a prefab whose Mesh sub-asset differs from its renderers' meshes must trip the CR-01 guard (WR-03)");
+                Assert.AreEqual(0, CountWarnings(result, "No mesh to decompose"),
+                    "guard trip must not add per-material no-mesh warnings (WR-02)");
+
+                NamerGeneratedAsset generated = result.GeneratedAssets[0];
+                Assert.IsTrue(string.IsNullOrEmpty(generated.MeshPath), "WR-03 fallback must not write a split mesh");
+                Assert.IsTrue(string.IsNullOrEmpty(generated.ResidualTexturePath), "WR-03 fallback must not write a residual");
+
+                Material generatedMaterial = AssetDatabase.LoadAssetAtPath<Material>(generated.MaterialPath);
+                Assert.IsNotNull(generatedMaterial, "generated material must load");
+                Texture2D generatedBase = AssetDatabase.LoadAssetAtPath<Texture2D>(generated.BaseTexturePath);
+                Assert.AreEqual(generatedBase, generatedMaterial.GetTexture("_BaseResidualMap"),
+                    "WR-03 fallback must bind the base PNG at _BaseResidualMap");
+            }
+            finally
+            {
+                RestorePrefs(prefs);
+                AssetDatabase.DeleteAsset(TempFolder);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
         public IEnumerator SourceImmutability_WithDecomposition()
         {
             if (!ComputeAvailable)

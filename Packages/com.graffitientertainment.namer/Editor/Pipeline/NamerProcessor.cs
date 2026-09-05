@@ -539,11 +539,17 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Counts the DISTINCT source meshes a selection resolves to, mirroring
-        /// <see cref="ResolveSourceMesh"/>'s per-case resolution but collecting a
-        /// <see cref="HashSet{T}"/> of mesh instance IDs instead of stopping at the first
-        /// mesh (CR-01 guard input). Scene renderers, then prefab contents, then model/FBX
-        /// sub-assets — the same order the single-mesh resolution uses.
+        /// Counts the DISTINCT source meshes a selection involves, mirroring
+        /// <see cref="ResolveSourceMesh"/>'s per-case resolution — scene renderers, then
+        /// prefab sub-assets + prefab contents renderers, then model/FBX sub-assets — but
+        /// collecting a <see cref="HashSet{T}"/> of mesh instance IDs instead of stopping
+        /// at the first mesh (CR-01 guard input). In the Regular/Variant prefab case the
+        /// resolver returns the <see cref="FindMeshSubAsset"/> mesh FIRST without ever
+        /// looking at renderers, so the counter collects the mesh sub-assets AND the
+        /// contents renderers' meshes (WR-03): when those differ, decomposition would run
+        /// on the sub-asset while <see cref="BindGeneratedMaterials"/> keys the swap on
+        /// what the renderers actually wear — the CR-01 silent-wrong-render failure mode —
+        /// so the mismatch itself must trip the guard.
         /// </summary>
         private static int CountDistinctSourceMeshes(UnityEngine.Object selection)
         {
@@ -574,6 +580,19 @@ namespace GraffitiEntertainment.Namer.Editor
                 PrefabAssetType prefabType = PrefabUtility.GetPrefabAssetType(gameObject);
                 if (prefabType == PrefabAssetType.Regular || prefabType == PrefabAssetType.Variant)
                 {
+                    // WR-03: mirror the resolver's priority — FindMeshSubAsset is checked
+                    // FIRST — and count the sub-asset meshes alongside the contents
+                    // renderers' meshes. For a normal prefab these are the same set (or the
+                    // sub-asset walk is empty), so the count is unchanged; only a prefab
+                    // whose sub-asset differs from its renderers' meshes counts 2.
+                    foreach (UnityEngine.Object subAsset in AssetDatabase.LoadAllAssetsAtPath(assetPath))
+                    {
+                        if (subAsset is Mesh mesh)
+                        {
+                            distinctIds.Add(mesh.GetInstanceID());
+                        }
+                    }
+
                     GameObject contents = PrefabUtility.LoadPrefabContents(assetPath);
                     try
                     {

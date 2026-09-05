@@ -484,22 +484,16 @@ namespace GraffitiEntertainment.Namer.Tests
                 subAssetMesh.triangles = new[] { 0, 2, 1, 0, 3, 2 };
                 subAssetMesh.RecalculateBounds();
 
-                // Attach the mesh through the prefab CONTENTS and re-save — the documented
-                // AddObjectToAsset pattern for prefabs. Adding directly against the .prefab
-                // path and calling ImportAsset lets the import regenerate the file from the
-                // unchanged in-memory prefab model, silently dropping the raw sub-object (an
-                // .asset container keeps it, a .prefab does not), so the first version of
-                // this fixture never actually exercised the WR-03 path.
-                GameObject contents = PrefabUtility.LoadPrefabContents(prefabPath);
-                try
-                {
-                    AssetDatabase.AddObjectToAsset(subAssetMesh, contents);
-                    PrefabUtility.SaveAsPrefabAsset(contents, prefabPath);
-                }
-                finally
-                {
-                    PrefabUtility.UnloadPrefabContents(contents);
-                }
+                // Attach the mesh to the PERSISTENT prefab object SaveAsPrefabAsset returned
+                // and flush with SaveAssets — never re-import this path afterwards. Both
+                // earlier attempts failed differently: AddObjectToAsset(mesh, prefabPath) +
+                // ImportAsset let the import regenerate the .prefab from the unchanged
+                // in-memory prefab model, silently dropping the raw sub-object (round 1),
+                // and AddObjectToAsset(mesh, LoadPrefabContents-root) fails because that
+                // root is not persistent (round 2). The precondition assert below catches
+                // both failure modes loudly.
+                AssetDatabase.AddObjectToAsset(subAssetMesh, prefabRoot);
+                AssetDatabase.SaveAssets();
 
                 GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
                 Assert.IsNotNull(prefab, "prefab must reload after adding the mesh sub-asset");

@@ -432,13 +432,15 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 float u = uv.x * BaseWidth - 0.5f;
                 float v = uv.y * BaseHeight - 0.5f;
-                u = clamp(u, 0f, BaseWidth - 1f);
-                v = clamp(v, 0f, BaseHeight - 1f);
+                // Repeat wrap matches the runtime TextureWrapMode.Repeat sampling, so tiling
+                // (out-of-[0,1]) UVs fit the same texels the runtime samples (CR-03).
+                u = u - floor(u / BaseWidth) * BaseWidth;
+                v = v - floor(v / BaseHeight) * BaseHeight;
 
                 int x0 = (int)u;
                 int y0 = (int)v;
-                int x1 = min(x0 + 1, BaseWidth - 1);
-                int y1 = min(y0 + 1, BaseHeight - 1);
+                int x1 = (x0 + 1) % BaseWidth;
+                int y1 = (y0 + 1) % BaseHeight;
 
                 float fu = u - x0;
                 float fv = v - y0;
@@ -511,13 +513,15 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 float u = uv.x * BaseWidth - 0.5f;
                 float v = uv.y * BaseHeight - 0.5f;
-                u = clamp(u, 0f, BaseWidth - 1f);
-                v = clamp(v, 0f, BaseHeight - 1f);
+                // Repeat wrap matches the runtime TextureWrapMode.Repeat sampling, so tiling
+                // (out-of-[0,1]) UVs fit the same texels the runtime samples (CR-03).
+                u = u - floor(u / BaseWidth) * BaseWidth;
+                v = v - floor(v / BaseHeight) * BaseHeight;
 
                 int x0 = (int)u;
                 int y0 = (int)v;
-                int x1 = min(x0 + 1, BaseWidth - 1);
-                int y1 = min(y0 + 1, BaseHeight - 1);
+                int x1 = (x0 + 1) % BaseWidth;
+                int y1 = (y0 + 1) % BaseHeight;
 
                 float fu = u - x0;
                 float fv = v - y0;

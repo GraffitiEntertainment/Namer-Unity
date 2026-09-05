@@ -25,6 +25,7 @@ namespace GraffitiEntertainment.Namer.Editor
         public float MaxError;
         public bool ResidualRequired;
         public int ChosenResolution;
+        public bool CannotDecompose;
     }
 
     /// <summary>
@@ -83,6 +84,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private const int ReduceDownsampleFactor = 8;
         private const float kMaxObservedErrFloor = 0.25f;
         private const float kOpaqueAlphaThreshold = 0.999f;
+        private const float kMinCoverageFraction = 1e-6f;
 
         /// <summary>D-17 halving ladder (0 = Auto maps to the adaptive search).</summary>
         public static readonly int[] ResolutionLadder = { 2048, 1024, 512, 256, 128 };
@@ -204,6 +206,26 @@ namespace GraffitiEntertainment.Namer.Editor
                 // 2. Fit-only error (residual == identity) + base opacity for the D-13 gate.
                 RunErrorHeatmap(vcInterp, fullResidual, baseLinear, heatmap, errorStat, coverageStat, 1f, w, h);
                 ReduceStats fitStats = ReduceToStats(errorStat, w, h, avgA, avgB);
+
+                // CR-03 coverage guard: zero rasterizer coverage means the fit was never
+                // validated against any texel. Without this guard the D-13 gate would read
+                // MaxError=0 / MinAlpha=1 from the unwritten _ErrorStat texels and silently
+                // drop the residual as a "perfect fit". kMinCoverageFraction is a tiny epsilon
+                // (NOT 0.5): a legitimately partial layout — e.g. the [0,0.5]^2 quad in
+                // Residual_UncoveredTexels_AreIdentity (~25% coverage) — must still decompose,
+                // so only zero coverage trips this guard.
+                if (fitStats.CoverageFraction < kMinCoverageFraction)
+                {
+                    return new NamerDecompOutput(null, new NamerDecompErrorStats
+                    {
+                        Coverage = 0f,
+                        AvgError = 0f,
+                        MaxError = 0f,
+                        ResidualRequired = false,
+                        ChosenResolution = 0,
+                        CannotDecompose = true,
+                    }, this);
+                }
 
                 // 3. D-13 residual-required gate: drop only for a within-threshold fit on a
                 //    fully opaque base (Pitfall 5 — transparent/cutout always keep a residual).

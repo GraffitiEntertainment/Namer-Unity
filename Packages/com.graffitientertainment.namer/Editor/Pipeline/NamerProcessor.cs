@@ -162,13 +162,25 @@ namespace GraffitiEntertainment.Namer.Editor
                                         split, colors, computeResult.NormalizedBaseColor,
                                         computeResult.Width, computeResult.Height,
                                         settings.ErrorThreshold, settings.ResidualResolution);
-                                    decomp = new NamerDecompData
+                                    if (decompOutput.Stats.CannotDecompose)
                                     {
-                                        Split = split,
-                                        Colors = colors,
-                                        Residual = decompOutput.Residual,
-                                        Stats = decompOutput.Stats,
-                                    };
+                                        // CR-03 fallback: near-zero rasterizer coverage means the
+                                        // fit was never validated — leave decomp null so the Phase-3
+                                        // shape is generated instead of a bogus residual.
+                                        result.Warnings.Add("Vertex-color decomposition skipped for material '"
+                                            + (inspection.Material != null ? inspection.Material.name : "(null)")
+                                            + "': UV coverage near zero (tiling/out-of-range UVs) — generating the non-decomposed Phase-3 shape instead.");
+                                    }
+                                    else
+                                    {
+                                        decomp = new NamerDecompData
+                                        {
+                                            Split = split,
+                                            Colors = colors,
+                                            Residual = decompOutput.Residual,
+                                            Stats = decompOutput.Stats,
+                                        };
+                                    }
                                 }
                             }
 

@@ -483,11 +483,41 @@ namespace GraffitiEntertainment.Namer.Tests
                 };
                 subAssetMesh.triangles = new[] { 0, 2, 1, 0, 3, 2 };
                 subAssetMesh.RecalculateBounds();
-                AssetDatabase.AddObjectToAsset(subAssetMesh, prefabPath);
-                AssetDatabase.ImportAsset(prefabPath);
+
+                // Attach the mesh through the prefab CONTENTS and re-save — the documented
+                // AddObjectToAsset pattern for prefabs. Adding directly against the .prefab
+                // path and calling ImportAsset lets the import regenerate the file from the
+                // unchanged in-memory prefab model, silently dropping the raw sub-object (an
+                // .asset container keeps it, a .prefab does not), so the first version of
+                // this fixture never actually exercised the WR-03 path.
+                GameObject contents = PrefabUtility.LoadPrefabContents(prefabPath);
+                try
+                {
+                    AssetDatabase.AddObjectToAsset(subAssetMesh, contents);
+                    PrefabUtility.SaveAsPrefabAsset(contents, prefabPath);
+                }
+                finally
+                {
+                    PrefabUtility.UnloadPrefabContents(contents);
+                }
 
                 GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
                 Assert.IsNotNull(prefab, "prefab must reload after adding the mesh sub-asset");
+
+                // Fixture precondition: the prefab file must genuinely expose a Mesh
+                // sub-asset distinct from the mesh its renderer wears, or the WR-03 branch
+                // is not being exercised at all.
+                bool hasDistinctMeshSubAsset = false;
+                foreach (UnityEngine.Object subAsset in AssetDatabase.LoadAllAssetsAtPath(prefabPath))
+                {
+                    if (subAsset is Mesh m && m.GetInstanceID() != rendererMesh.GetInstanceID())
+                    {
+                        hasDistinctMeshSubAsset = true;
+                    }
+                }
+
+                Assert.IsTrue(hasDistinctMeshSubAsset,
+                    "fixture must expose a Mesh sub-asset distinct from the renderer's mesh (WR-03 precondition)");
 
                 var settings = NewSettings(decompositionEnabled: true);
                 NamerProcessResult result = NamerProcessor.Process(prefab, settings);

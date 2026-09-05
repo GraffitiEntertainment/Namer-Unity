@@ -115,12 +115,14 @@ namespace GraffitiEntertainment.Namer.Editor
                 // decomp == null Phase-3 path below, so both disjuncts produce correct
                 // non-decomposed output plus a warning instead of silent garbage.
                 int distinctSourceMeshes = decomposeSourceMesh != null ? CountDistinctSourceMeshes(selection) : 0;
+                bool decompGuardTripped = false;
                 if (decomposeSourceMesh != null && (model.Materials.Count > 1 || distinctSourceMeshes > 1))
                 {
                     result.Warnings.Add("Vertex-color decomposition skipped for '" + selection.name
                         + "': the selection maps " + model.Materials.Count + " material(s) to "
                         + distinctSourceMeshes + " source mesh(es) — generating the non-decomposed Phase-3 shape instead.");
                     decomposeSourceMesh = null;
+                    decompGuardTripped = true;
                 }
 
                 pipeline = new NamerComputePipeline();
@@ -145,7 +147,12 @@ namespace GraffitiEntertainment.Namer.Editor
                             if (settings.DecompositionEnabled)
                             {
                                 inspection.BakeSourceMesh = decomposeSourceMesh;
-                                if (decomposeSourceMesh == null)
+                                // WR-02: the CR-01 guard above already explained why the mesh
+                                // is null (with the accurate material/mesh counts) — only a
+                                // genuine resolution failure (no mesh was ever found) adds
+                                // this per-material warning, so a guard trip emits exactly
+                                // ONE accurate warning instead of N+1 contradictory ones.
+                                if (decomposeSourceMesh == null && !decompGuardTripped)
                                 {
                                     result.Warnings.Add("No mesh to decompose for material '"
                                         + (inspection.Material != null ? inspection.Material.name : "(null)")

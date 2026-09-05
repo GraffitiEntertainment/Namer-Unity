@@ -223,6 +223,14 @@ namespace GraffitiEntertainment.Namer.Tests
                 Assert.IsTrue(result.Warnings.Exists(w => w.Contains("Vertex-color decomposition skipped")),
                     "multi-material selection must warn that decomposition was skipped");
 
+                // WR-02: the CR-01 guard — not a per-material resolution failure — nulled
+                // the mesh, so the fallback must emit exactly ONE accurate skip warning and
+                // no contradictory "No mesh to decompose" warnings for the 2 materials.
+                Assert.AreEqual(1, CountWarnings(result, "Vertex-color decomposition skipped"),
+                    "the CR-01 fallback must emit exactly one decomposition-skip warning");
+                Assert.AreEqual(0, CountWarnings(result, "No mesh to decompose"),
+                    "the CR-01 fallback must not add per-material no-mesh warnings when the guard tripped (WR-02)");
+
                 for (int i = 0; i < result.GeneratedAssets.Count; i++)
                 {
                     NamerGeneratedAsset asset = result.GeneratedAssets[i];
@@ -285,6 +293,13 @@ namespace GraffitiEntertainment.Namer.Tests
 
                 Assert.IsTrue(result.Warnings.Exists(w => w.Contains("Vertex-color decomposition skipped")),
                     "shared-material multi-mesh selection must warn that decomposition was skipped");
+
+                // WR-02: the guard tripped here too, so exactly ONE skip warning and no
+                // contradictory per-material no-mesh warnings.
+                Assert.AreEqual(1, CountWarnings(result, "Vertex-color decomposition skipped"),
+                    "the CR-01 fallback must emit exactly one decomposition-skip warning");
+                Assert.AreEqual(0, CountWarnings(result, "No mesh to decompose"),
+                    "the CR-01 fallback must not add per-material no-mesh warnings when the guard tripped (WR-02)");
 
                 NamerGeneratedAsset generated = result.GeneratedAssets[0];
                 Assert.IsTrue(string.IsNullOrEmpty(generated.MeshPath), "fallback must not write a split mesh");
@@ -646,6 +661,20 @@ namespace GraffitiEntertainment.Namer.Tests
         private static byte[] ComputeFileHash(string path)
         {
             return SHA256.Create().ComputeHash(File.ReadAllBytes(path));
+        }
+
+        private static int CountWarnings(NamerProcessResult result, string fragment)
+        {
+            int count = 0;
+            foreach (string warning in result.Warnings)
+            {
+                if (warning.Contains(fragment))
+                {
+                    count++;
+                }
+            }
+
+            return count;
         }
 
         private static void EnsureTempFolder()

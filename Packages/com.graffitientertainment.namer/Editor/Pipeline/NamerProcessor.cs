@@ -158,7 +158,12 @@ namespace GraffitiEntertainment.Namer.Editor
                                         + (inspection.Material != null ? inspection.Material.name : "(null)")
                                         + "' — generating the Phase-3 shape instead.");
                                 }
-                                else
+
+                                // The null-gate is deliberately separate from the warning
+                                // above: a guard trip (mesh null, guard tripped) must take
+                                // NEITHER branch — it skips the split path exactly as it did
+                                // before WR-02, where the old if/else coupled the two.
+                                if (decomposeSourceMesh != null)
                                 {
                                     baseTexels = ReadBackBase(computeResult.NormalizedBaseColor);
                                     NamerSplitResult split = MeshVertexSplitter.Split(decomposeSourceMesh);

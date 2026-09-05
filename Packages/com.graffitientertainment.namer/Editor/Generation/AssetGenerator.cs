@@ -157,8 +157,23 @@ namespace GraffitiEntertainment.Namer.Editor
             Texture2D residualTex = null;
             string residualWritePath = null;
 
+            // WR-04 / T-03-02: read the residual back BEFORE the first disk write so a GPU
+            // readback failure throws while "no files were written" is still literally true
+            // and no partial asset set (surface + base + mesh without the residual) is left
+            // behind. The surface/base readbacks above already ran, so after this hoist every
+            // fallible readback completes before anything touches disk.
+            bool writeResidual = decomp != null
+                && decomp.Stats != null
+                && decomp.Stats.ResidualRequired
+                && decomp.Residual != null;
+
             try
             {
+                if (writeResidual)
+                {
+                    residualTex = ReadBackResidual(decomp.Residual);
+                }
+
                 WriteSurfaceTexture(surfaceTex, surfacePath, settings.OverwriteGenerated);
                 WriteBaseTexture(baseTex, basePath, settings.OverwriteGenerated);
 
@@ -171,9 +186,8 @@ namespace GraffitiEntertainment.Namer.Editor
                         meshPath,
                         settings.OverwriteGenerated);
 
-                    if (decomp.Stats != null && decomp.Stats.ResidualRequired && decomp.Residual != null)
+                    if (writeResidual)
                     {
-                        residualTex = ReadBackResidual(decomp.Residual);
                         WriteResidualExr(residualTex, residualPath, settings.OverwriteGenerated);
                         residualWritePath = residualPath;
                     }

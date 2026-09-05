@@ -14,7 +14,7 @@ The journey moves from the format contract outward. First we lock the NAMER pack
 - [x] **Phase 1: Core Format Contract + Runtime Decode** - Define the packed format in pure-C# Core and decode it in the URP runtime shader (completed 2026-08-26)
 - [x] **Phase 2: Source Inspection + GPU Compute Pipeline** - Read source materials and produce normalized + packed textures in GPU compute (completed 2026-08-27)
 - [x] **Phase 3: Asset Generation + Editor Workflow + Preview** - Generate NAMER assets non-destructively from an editor window with preview (completed 2026-08-27)
-- [ ] **Phase 4: Vertex-Color Decomposition + Residual** - Fit low-frequency color into vertex colors with an adaptive residual texture (gap closure in progress; verification found 3 gaps)
+- [x] **Phase 4: Vertex-Color Decomposition + Residual** - Fit low-frequency color into vertex colors with an adaptive residual texture (gap closure in progress; verification found 3 gaps) (completed 2026-09-01)
 - [ ] **Phase 5: Stylization** - Apply reference-image-driven, hue-preserving stylization via NAMERStyleProfile
 
 ## Phase Details
@@ -165,7 +165,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 04-05: Gap closure — tiling-UV repeat-wrap CPU sampling + coverage < 0.5 guard with CannotDecompose fallback (CR-03)
+- [x] 04-05: Gap closure — tiling-UV repeat-wrap CPU sampling + coverage < 0.5 guard with CannotDecompose fallback (CR-03)
 
 ### Phase 04.1: Baked-response roughness extraction + zero-residual one-texture mode (extract gloss/shading from base into 6-bit roughness, refit vertex colors, D-13 primary) (INSERTED)
 
@@ -210,5 +210,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Source Inspection + GPU Compute Pipeline | 3/3 | Complete   | 2026-08-27 |
 | 3. Asset Generation + Editor Workflow + Preview | 3/3 | Complete    | 2026-08-28 |
 | 03.1. AO Extraction (INSERTED) | 3/3 | Complete | 2026-08-31 |
-| 4. Vertex-Color Decomposition + Residual | 4/5 | In Progress|  |
+| 4. Vertex-Color Decomposition + Residual | 5/5 | Complete   | 2026-09-01 |
 | 5. Stylization | 0/3 | Not started | - |

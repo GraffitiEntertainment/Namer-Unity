@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-04-PLAN.md
-last_updated: "2026-09-01T22:36:00.137Z"
-last_activity: 2026-09-01 -- Phase 04 plan 04-04 complete
+stopped_at: Completed 04-05-PLAN.md
+last_updated: "2026-09-01T23:20:11.938Z"
+last_activity: 2026-09-01
 progress:
   total_phases: 7
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 17
-  completed_plans: 16
-  percent: 57
+  completed_plans: 17
+  percent: 71
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 ## Current Position
 
 Phase: 04 (vertex-color-decomposition-residual) — EXECUTING
-Plan: 4 of 5
-Status: Executing Phase 04
-Last activity: 2026-09-01 -- Phase 04 plan 04-04 complete
+Plan: 5 of 5
+Status: Ready to execute
+Last activity: 2026-09-01
 
-Progress: [█████████░] 94%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -70,6 +70,7 @@ Progress: [█████████░] 94%
 | Phase 04-vertex-color-decomposition-residual P04-02 | 32min | 3 tasks | 9 files |
 | Phase 04-vertex-color-decomposition-residual P04-03 | 14min | 3 tasks | 9 files |
 | Phase 04-vertex-color-decomposition-residual P04-04 | 2min | 2 tasks | 3 files |
+| Phase 04-vertex-color-decomposition-residual P04-05 | 12min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -127,6 +128,9 @@ Recent decisions affecting current work:
 - [Phase 04]: Phase 04-03: the live preview keeps the pool-leased residual render target bound to the preview material (no readback) until the next recompute — Matches the Phase-3 'assign render targets directly to preview materials' convention
 - [Phase 04 gap-closure]: Decision-coverage gate override — D-11/D-14 reported uncovered by the gap plans (04-04/04-05); both are body-cited in 04-02-PLAN/04-03-PLAN and implemented in shipped code (viridis ramp in NAMERDecomp.hlsl, preview toggle in NamerEditorWindow). Accepted as a frontmatter-citation gap, not a scope drop; verify-phase should re-surface if evidence of a real drop emerges.
 - [Phase 04 gap-closure]: CR-01 guard (CountDistinctSourceMeshes + decomposeSourceMesh=null fallback) and CR-02 (WriteResidualExr FilterMode.Bilinear) verified pre-existing in the 04-04 WIP snapshot — the packed surface texture stays FilterMode.Point (GEN-04), only the residual EXR becomes Bilinear so the reduced-resolution asset matches the reported MaxError
+- [Phase 04 gap-closure]: CR-01 fallback is byte-equivalent to DecompositionEnabled==false: AssetGenerator.Generate keys base-vs-residual binding on decomp != null (not settings.DecompositionEnabled), so _BaseResidualMap binds the GENERATED base PNG (BaseTexturePath) — the CR-01 regression tests must compare against BaseTexturePath, not the source base map
+- [Phase 04]: CR-03 closed: CPU VertexColorFitter.SampleBase now Repeat-wraps UVs (floor(u / BaseWidth) + (x0+1) % BaseWidth) instead of clamping, and GenerateResidual guards the D-13 drop gate on kMinCoverageFraction = 1e-6f — zero-coverage (tiling) fits flag CannotDecompose and NamerProcessor falls back to the Phase-3 shape with a 'UV coverage near zero' warning
+- [Phase 04]: kMinCoverageFraction = 1e-6f (near-zero epsilon): zero-coverage (tiling) fits flag CannotDecompose and fall back to the Phase-3 shape; legitimately partial coverage (small mesh on a large atlas) proceeds as before — that was true pre-gap and stays true
 
 ### Pending Todos
 
@@ -157,6 +161,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-01T22:34:43.591Z
-Stopped at: Completed 04-04-PLAN.md
+Last session: 2026-09-01T23:20:11.931Z
+Stopped at: Completed 04-05-PLAN.md
 Resume file: None

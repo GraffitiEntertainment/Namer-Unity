@@ -269,12 +269,28 @@ failed its skip-warning count (Expected 1, But was 0).
   and decomposition ran normally — 0 skip warnings. Production resolver and counter agree
   on branch selection for the same input; the fixture simply never produced the intended
   input.
-- **Fix (commit `310bf6e`):** the fixture now uses the documented prefab pattern —
-  `LoadPrefabContents` → `AddObjectToAsset(mesh, contents)` → `SaveAsPrefabAsset` →
-  `UnloadPrefabContents` — and asserts its own precondition (the prefab file must expose a
-  Mesh sub-asset whose instance ID differs from the renderer's mesh) so it can never again
-  silently degrade into testing the wrong input. All original assertions unchanged;
-  the precondition makes the test strictly stronger.
+- **Fix (round 2 = commit `310bf6e`, superseded by round 3 = commit `9b95cf5`):** the
+  fixture needed three rounds, each with hard batchmode evidence:
+  - **Round 1** — `AddObjectToAsset(mesh, prefabPath)` + `ImportAsset(prefabPath)`: the
+    pattern that works for `.asset` containers (see `NamerReprocessTests`) silently drops
+    the sub-object on a `.prefab`, because the import regenerates the file from the
+    unchanged in-memory prefab model. Result: no visible sub-asset → resolver and counter
+    agreed on the contents fallback → union counted 1 → guard passed → 0 skip warnings
+    (Expected 1, But was 0).
+  - **Round 2 (commit `310bf6e`)** — `LoadPrefabContents` → `AddObjectToAsset(mesh,
+    contentsRoot)`: fails with `[Error] AddAssetToSameFile failed because the other asset
+    DistinctSubAssetPrefab is not persistent` — the contents root is an in-memory object,
+    and `AddObjectToAsset` requires a persistent on-disk destination.
+  - **Round 3 (working combination)** — attach to the PERSISTENT prefab object that
+    `SaveAsPrefabAsset` already returned (`prefabRoot`), then flush with
+    `AssetDatabase.SaveAssets()`; never call `ImportAsset`/`Refresh` on that path
+    afterwards — that re-import is precisely what regenerated the sub-asset away in
+    round 1, so `SaveAssets`-not-`ImportAsset` is load-bearing here. Any refresh must
+    happen BEFORE the `AddObjectToAsset`.
+  The precondition assert (the prefab file must expose a Mesh sub-asset whose instance ID
+  differs from the renderer's mesh) is kept unchanged from round 2 — it converts both prior
+  failure modes into loud, clearly-labeled failures instead of silently testing the wrong
+  input. All original test assertions unchanged.
 
 ---
 

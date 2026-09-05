@@ -1,161 +1,141 @@
 ---
 phase: 04-vertex-color-decomposition-residual
-reviewed: 2026-09-01T00:34:54Z
+reviewed: 2026-09-05T00:00:00Z
 depth: standard
-files_reviewed: 18
+files_reviewed: 6
 files_reviewed_list:
-  - Packages/com.graffitientertainment.namer/Compute/NAMERDecomp.compute
-  - Packages/com.graffitientertainment.namer/Compute/NAMERDecomp.hlsl
-  - Packages/com.graffitientertainment.namer/Core/NamerConstants.cs
-  - Packages/com.graffitientertainment.namer/Editor/Decompose/MeshVertexSplitter.cs
   - Packages/com.graffitientertainment.namer/Editor/Decompose/NamerDecompPipeline.cs
   - Packages/com.graffitientertainment.namer/Editor/Decompose/VertexColorFitter.cs
   - Packages/com.graffitientertainment.namer/Editor/Generation/AssetGenerator.cs
-  - Packages/com.graffitientertainment.namer/Editor/NamerEditorConstants.cs
   - Packages/com.graffitientertainment.namer/Editor/Pipeline/NamerProcessor.cs
-  - Packages/com.graffitientertainment.namer/Editor/Settings/NamerProcessorSettings.cs
-  - Packages/com.graffitientertainment.namer/Editor/UI/NamerDebugChannelMaterial.cs
-  - Packages/com.graffitientertainment.namer/Editor/UI/NamerEditorWindow.cs
-  - Packages/com.graffitientertainment.namer/Editor/UI/NamerPreviewRenderer.cs
-  - Packages/com.graffitientertainment.namer/Shaders/NamerDebugView.shader
   - Packages/com.graffitientertainment.namer/Tests/Editor/NamerDecompIntegrationTests.cs
-  - Packages/com.graffitientertainment.namer/Tests/Editor/ResidualPipelineTests.cs
   - Packages/com.graffitientertainment.namer/Tests/Editor/VertexColorDecompTests.cs
-  - Packages/com.graffitientertainment.namer/Editor/Pipeline/ComputeTexturePool.cs
 findings:
-  critical: 3
-  warning: 5
-  info: 7
-  total: 15
+  critical: 0
+  warning: 4
+  info: 4
+  total: 8
 status: issues_found
 ---
 
-# Phase 4: Code Review Report
+# Phase 4: Code Review Report (Gap-Closure Delta Round)
 
-**Reviewed:** 2026-09-01T00:34:54Z
+**Reviewed:** 2026-09-05
 **Depth:** standard
-**Files Reviewed:** 18 (17 listed + `ComputeTexturePool.cs` read as a cross-file dependency of the decomp pipeline's pooling contract)
+**Files Reviewed:** 6 (plus cross-file verification of `NAMERDecomp.compute`, `ComputeTexturePool.cs`, `NamerComputePipeline.cs`, `MeshVertexSplitter.cs`, `NamerProcessorSettings.cs`, `NamerSourceModel.cs`, `NamerEditorWindow.cs` resolution popup)
 **Status:** issues_found
+**Scope:** Phase-04 gap-closure delta closing prior CR-01/CR-02/CR-03. The prior round's full report is preserved in git history at commit 5887a78.
 
 ## Summary
 
-The CPU/Burst fitter, the seam-safe splitter, and the GPU residual kernels are individually solid — the quotient math, the VcFloor guard, the identity branch on uncovered texels, the fit-only vs. full-residual error metric, and the pool lease/release discipline in `NamerDecompPipeline.GenerateResidual` are all correct and well matched by the golden tests. The three critical findings are all at the seams between those correct parts:
+All three prior Critical findings are genuinely closed and their regression tests are meaningful (details below). No new Critical defects were found. Four Warnings remain: one is a precision defect in the new CR-03 coverage guard that makes its effective threshold ~0.2% instead of the documented zero (WR-01), two are quality gaps in the CR-01 guard's diagnostics and its mesh-counting mirror (WR-02/WR-03), and one is a pre-existing but delta-widened partial-write window in `AssetGenerator.Generate` (WR-04).
 
-1. **CR-01** — the processor resolves ONE mesh for the entire selection and fits every material's vertex colors against it, then the bind step's mesh dictionary silently overwrites per-material entries. Any multi-material mesh or multi-mesh selection renders with the wrong vertex colors while the tool reports success.
-2. **CR-02** — the residual EXR is imported Point-filtered, but the whole adaptive-resolution design (and the error metric that justifies dropping resolution) assumes bilinear runtime sampling. Saved materials go blocky exactly when the adaptive search succeeds.
-3. **CR-03** — UVs outside [0,1] (tiling layouts) rasterize to zero coverage, which the D-13 gate interprets as a perfect fit and silently drops the residual, while the CPU fitter clamps instead of wrapping and fits against wrong texels.
+### Closure verification
 
-Warnings cover an exception-type escape from the documented "returns error, never throws" contract (empty meshes), degenerate zero tangents on generated split meshes, non-square-source handling in the resolution ladder, Gamma-project color-space mixing in the new heatmap channel, and stale render-target bindings after a failed preview recompute.
+**CR-01 (multi-material / shared-material guard) — CLOSED.**
+`NamerProcessor.cs:117-124` trips on `model.Materials.Count > 1 || distinctSourceMeshes > 1`, nulls `decomposeSourceMesh`, and every material then takes the existing `decomp == null` Phase-3 path. Verified end-to-end:
+- The fallback writes no mesh asset and no residual; the material binds the generated base PNG; `BindGeneratedMaterials` leaves every renderer's `sharedMesh` untouched (`BakeSourceMesh` keying at `NamerProcessor.cs:285-294` only maps when `MeshPath` is non-empty).
+- `SourceInspector.AddUnique` dedupes by material instance ID, so the shared-material/multi-mesh disjunct is real and covered by `Process_SharedMaterialMultiMesh_FallsBackToPhase3WithWarning`.
+- Both regression tests assert the warning, the absence of mesh/residual, the base-PNG bind, and no mesh swap. Good tests.
+- Residual gaps in the closure: WR-02 (the fallback also emits a contradictory "No mesh to decompose" warning per material) and WR-03 (`CountDistinctSourceMeshes` does not fully mirror `ResolveSourceMesh`).
 
-## Critical Issues
+**CR-02 (residual EXR bilinear import) — CLOSED.**
+`AssetGenerator.cs:440` sets `FilterMode.Bilinear` in `WriteResidualExr` only; `WriteSurfaceTexture` still forces `FilterMode.Point` (line 388, GEN-04 intact). Linear/uncompressed/no-mip/Repeat preserved. `Process_ReducedResolutionResidual_StampsBilinearImporter` asserts the full importer state plus the 128px reduced size. Correct and consistent with the bilinear-resampled `MaxError` the adaptive search reports.
 
-### CR-01: Decomposition pairs every material with a single selection-wide mesh, and the mesh-swap dictionary overwrites per-material entries
-
-**File:** `Packages/com.graffitientertainment.namer/Editor/Pipeline/NamerProcessor.cs:105,138-152,242-264`
-**Issue:** `ResolveSourceMesh(selection)` (line 105) returns the FIRST mesh found (`FindMeshSubAsset` / `FindMeshInObject` return on the first hit). That one mesh is then used inside the per-material loop (lines 138-152) to split and fit vertex colors for **every** material in `model.Materials`. Two failure modes:
-
-- **Multi-material, single mesh** (one mesh, 2+ material slots — very common): each material `i` gets its own split-mesh `.asset` whose vertex colors are fit against material `i`'s base texture, and each material's residual is computed as `base_i / vcInterp_i`. But `BindGeneratedMaterials` (lines 254-263) keys the generated meshes by the SHARED source mesh instance ID in a plain dictionary assignment — `generatedMeshBySourceMeshId[sourceMesh.GetInstanceID()] = generatedMesh;` — so the last material's mesh wins. The renderer swaps to that mesh, and every other slot now renders `residual_i * vc_fit_last ≠ base_i`. Slot 0's reconstruction is wrong wherever the two fits differ.
-- **Multi-mesh selection** (two renderers, different meshes, different materials): material B is fit against mesh M1's UV layout — garbage vertex colors for renderer 2 — and renderer 1 is swapped to B's mesh by the same dictionary overwrite.
-
-`SourceInspector.Inspect` explicitly supports multiple unique materials per selection, so this is a first-class path, and it fails silently (Process reports success). The integration tests only cover the single-material, single-mesh case, which is why 98/98 stays green.
-**Fix:** Resolve the mesh per material (per renderer/sub-mesh slot) rather than once per selection — e.g. have `CollectMaterials`/`NamerMaterialInspection` carry the owning renderer's `sharedMesh` (the `BakeSourceMesh` field already exists for exactly this shape), skip decomposition with a warning for materials whose owning mesh can't be resolved, and for the shared-mesh multi-slot case either (a) keep the mesh keyed per material and only swap when the selection has exactly one material, or (b) reject decomposition with a blocking warning when `model.Materials.Count > 1` maps to the same mesh, since one vertex-color stream cannot represent N materials' fits simultaneously.
-
-### CR-02: Residual EXR is imported with Point filtering, contradicting the bilinear sampling the resolution search is built on
-
-**File:** `Packages/com.graffitientertainment.namer/Editor/Generation/AssetGenerator.cs:437`
-**Issue:** `WriteResidualExr` sets `importer.filterMode = FilterMode.Point;` (copied from the packed-surface path, where Point is mandatory because bit-packed alpha cannot survive interpolation). But the residual is a plain float color map that the pipeline deliberately produces at a REDUCED resolution: `NamerDecompOutput` documents "produced at the chosen resolution (not upsampled back to source) — the runtime material samples it with hardware bilinear filtering" (`NamerDecompPipeline.cs:33-36`), and the adaptive search (`ChooseResolution` / step 7) measures error after a bilinear `Resample` up to source size — i.e. the reported `MaxError` and the D-16 halving decision are both computed under bilinear assumptions. `NamerSurface.hlsl` uses `SAMPLER(sampler_BaseResidualMap)`, so the runtime sampler comes from the import settings: Point. Consequences: saved materials render blocky whenever `ChosenResolution < sourceWidth` (the feature's headline case), the stats block understates the actual runtime error, and the live preview (which binds the pool RT, default Bilinear) does not match the saved result.
-**Fix:**
-```csharp
-// WriteResidualExr — the residual is a plain float map sampled with hardware
-// bilinear at runtime (NamerDecompOutput contract); Point is only for the
-// bit-packed surface.
-importer.filterMode = FilterMode.Bilinear;
-```
-
-### CR-03: UVs outside [0,1] produce zero coverage, which the D-13 gate reads as a perfect fit and silently drops the residual
-
-**File:** `Packages/com.graffitientertainment.namer/Compute/NAMERDecomp.compute:76-116`; `Packages/com.graffitientertainment.namer/Editor/Decompose/VertexColorFitter.cs:433-436`; `Packages/com.graffitientertainment.namer/Editor/Decompose/NamerDecompPipeline.cs:209-215`
-**Issue:** `CSRasterizeVertexColors` tests each texel center `uv = (id + 0.5)/size ∈ [0,1)` against each triangle's raw UV coordinates — there is no wrap handling. A tiling UV layout (any triangle whose UVs live in `[1,2]`, `[0,4]`, etc. — standard for environment/architecture assets) covers no texels at all. Uncovered texels write `_ErrorStat = (0,0,0,1)` (compute line 160), so `fitStats.MaxError` is exactly 0 and `ReduceStats.MinAlpha` is the opaque base alpha — the gate at `NamerDecompPipeline.cs:210-215` concludes "fit within threshold on an opaque base" and returns `ResidualRequired = false`. Meanwhile the CPU fitter's `SampleBase` CLAMPS out-of-range UVs to the texture edge (`u = clamp(u, 0, BaseWidth - 1)`, lines 435-436) instead of wrapping, so the vertex colors written into the mesh are fit against clamped edge texels. Net result for a tiling-UV mesh: garbage vertex colors, no residual, material binds nothing at `_BaseResidualMap`, Process reports success. Note the same zero-coverage blind spot applies to any fully-unrasterizable UV set (all-degenerate UVs), not just tiling.
-**Fix:** (1) Make the CPU sampler wrap (`u = uv.x * BaseWidth - 0.5f; u -= floor(u);` style, or `Repeat` via `u - BaseWidth * floor(u / BaseWidth)`) so the fit at least matches what a Repeat-wrap runtime sample sees; (2) in `GenerateResidual`, treat near-zero coverage (e.g. `fitStats.CoverageFraction < 0.5f` — the `.b` channel already carries it) as "cannot decompose": keep the Phase-3 shape and surface a warning instead of running the drop-residual gate, since a fit that covers no texels has not been validated. Optionally wrap triangle UVs into [0,1) per-texel in the rasterizer (`frac` of the barycentric point against each triangle's wrapped bounds), but the coverage guard alone prevents the silent wrong output.
+**CR-03 (repeat-wrap SampleBase + zero-coverage guard + CannotDecompose fallback) — CLOSED, with one precision defect (WR-01).**
+- The wrap in both Burst jobs (`VertexColorFitter.cs:437-438`, `518-519`) is mathematically correct: `u - floor(u/W)*W` maps the half-texel-aligned coordinate into `[0, W)`, `x1 = (x0+1) % W` wraps the bilinear neighbor, matching hardware `TextureWrapMode.Repeat` sampling at `uv*W - 0.5`. Verified for in-range, tiling (`[1,2]`), and negative UVs.
+- `NamerDecompPipeline.cs:217-228` places the guard before the D-13 gate, so unwritten `_ErrorStat` texels can no longer masquerade as a perfect fit. The rasterizer kernel (`NAMERDecomp.compute:74-117`) writes every texel (uncovered → `(0,0,0,0)`), so no stale pooled data leaks into the stats.
+- The `CannotDecompose` branch (`NamerProcessor.cs:165-173`) leaves `decomp` null → Phase-3 shape; `NamerDecompOutput.Dispose()` with a null residual is safe (`ComputeTexturePool.Release` null-checks at `ComputeTexturePool.cs:62-65`).
+- The GPU rasterizer only sees texel centers in `[0,1]`, so fully out-of-range UVs genuinely produce zero coverage; the partially-tiling case (some triangles in range) still decomposes, and the CPU wrap makes the fit valid there — coherent design.
+- Defect: the guard's effective threshold is ~0.2%, not zero — see WR-01.
 
 ## Warnings
 
-### WR-01: Empty/no-triangle mesh throws ArgumentException through Process's documented "returns error, never throws" contract; the context-menu path crashes
+### WR-01: Coverage guard's effective threshold is ~0.2% of texels, not "near zero" — small UV footprints are falsely refused
 
-**File:** `Packages/com.graffitientertainment.namer/Editor/Decompose/VertexColorFitter.cs:126-129`; `Packages/com.graffitientertainment.namer/Editor/Pipeline/NamerProcessor.cs:184,195`; `Packages/com.graffitientertainment.namer/Editor/UI/NamerEditorWindow.cs:101-105`
-**Issue:** A mesh with no vertices, or with vertices but no triangles (the splitter's weld map is populated only from triangle indices, so such a mesh yields `VertexCount == 0`), makes `VertexColorFitter.Fit` throw `ArgumentException("Split result has no vertices to fit.")`. `NamerProcessor.Process` catches only `InvalidOperationException` (its XML contract says errors are returned, never thrown), so the exception propagates out of `Process`. The window's `RunProcess` catches `Exception`, but the `Assets/Process with NAMER` and `GameObject/Process with NAMER` menu handlers (`ProcessSelection` → `LogResult`) do not — an artist right-clicking a degenerate/empty mesh asset gets an unhandled exception bubble instead of a logged error. (`NamerDecompPipeline.GenerateResidual` would also build `new ComputeBuffer(0, stride)` buffers for such a split — currently unreachable only because Fit throws first.)
-**Fix:** Either throw `InvalidOperationException` from `Fit` for the empty-split case, or widen the two catch clauses in `NamerProcessor.Process` to `catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)`, and/or guard in `Process` before splitting: `if (decomposeSourceMesh != null && decomposeSourceMesh.vertexCount == 0) { result.Warnings.Add(...); decomposeSourceMesh = null; }`.
+**File:** `Packages/com.graffitientertainment.namer/Editor/Decompose/NamerDecompPipeline.cs:217` (guard), `:87` (`kMinCoverageFraction`), `:435` (`ReadBackStats` RGBA32 readback)
+**Issue:** The reduce chain carries coverage as float (`_ErrorStat` is `R16G16B16A16_SFloat`, `CSReduce` averages `.b` in float) but `ReadBackStats` reads the final 1x1 target as `TextureFormat.RGBA32`, quantizing the fraction once to 1/255 steps: `CoverageFraction = round(f * 255) / 255`. The guard `CoverageFraction < 1e-6f` is therefore equivalent to `round(f*255) == 0`, i.e. it trips for any true coverage fraction below ~0.5/255 (~0.196%), not just zero — contradicting the comment at lines 210-216 ("only zero coverage trips this guard").
 
-### WR-02: Zero-tangent fallback is written verbatim into generated/preview split meshes — normal mapping breaks on meshes whose source lacks tangents
+Concrete failure: a mesh whose UV islands occupy a 64x64 region of a 2048x2048 base atlas covers 4096/4,194,304 = 0.098% of texels; `0.00098 * 255 = 0.25` rounds to byte 0 → `CannotDecompose` → decomposition silently skipped with a misleading "UV coverage near zero (tiling/out-of-range UVs)" warning. On a 4096 source the refusal line is ~180x180 texels. Atlas-packed small props hit this; a UV-less mesh (the splitter substitutes all-zero UVs, `MeshVertexSplitter.cs:84-88`) lands in the same bucket with the same wrong message.
 
-**File:** `Packages/com.graffitientertainment.namer/Editor/Decompose/MeshVertexSplitter.cs:81-85`; `Packages/com.graffitientertainment.namer/Editor/Generation/AssetGenerator.cs:504`; `Packages/com.graffitientertainment.namer/Editor/UI/NamerEditorWindow.cs:574`
-**Issue:** When `sourceMesh.tangents` is empty, the splitter fabricates `new Vector4[positions.Length]` — all `(0,0,0,0)`. `BuildSplitMesh` and `BuildPreviewSplitMesh` then `SetTangents` those zeros, and no `RecalculateTangents` runs anywhere. The NAMER runtime shader decodes the octahedral normal and transforms by the tangent frame; a zero tangent yields a degenerate TBN, so generated split meshes from tangent-less sources (runtime-built meshes, some FBX exports) shade with broken normals. The renderer-mesh swap makes this permanent for the scene object.
-**Fix:** Track "source had no tangent stream" on `NamerSplitResult` (or emit `null` Tangents) and in that case call `outMesh.RecalculateTangents()` after `SetUVs`/`SetTriangles` instead of `SetTangents(zeros)` — in both `AssetGenerator.BuildSplitMesh` and `NamerEditorWindow.BuildPreviewSplitMesh`.
+**Fix:** Read the reduce result back in float so the epsilon means what it says:
 
-### WR-03: Non-square sources: manual override clamps only against width, and the square residual resample distorts aspect
+```csharp
+private static ReduceStats ReadBackStats(RenderTexture src, int validW, int validH)
+{
+    AsyncGPUReadbackRequest request = AsyncGPUReadback.Request(src, 0, TextureFormat.RGBAFloat);
+    request.forcePlayerLoopUpdate = true;
+    request.WaitForCompletion();
+    if (request.hasError)
+    {
+        throw new InvalidOperationException("NAMER decomp stats readback failed.");
+    }
 
-**File:** `Packages/com.graffitientertainment.namer/Editor/Decompose/NamerDecompPipeline.cs:236,303-304,471-476`
-**Issue:** `Resample(fullResidual, chosenResolution, chosenResolution)` always produces a SQUARE residual. For a 4096x512 base, a manual pick of 2048 (`Mathf.Min(ResolutionLadder[idx], w)` — `h` is never consulted) yields a 2048x2048 residual whose V axis is upscaled 4x from 512 (pure waste), while the U axis is halved. The adaptive path is self-consistent (the error metric resamples back to w×h the same way, and UV-space sampling is preserved under the stretch), so this is a quality/memory defect rather than a broken invariant — but for portrait/landscape atlases the effective per-axis resolution differs by the aspect ratio, and the manual ladder can silently upscale one axis.
-**Fix:** Scale the chosen resolution per axis: `int dstW = Mathf.Min(chosenW, w); int dstH = Mathf.Max(1, Mathf.RoundToInt(dstW * (h / (float)w)));` in `Resample` call sites (and clamp the manual override against both `w` and `h`), or clamp the manual value to `Mathf.Min(ResolutionLadder[idx], Mathf.Min(w, h))`.
+    NativeArray<Color> data = request.GetData<Color>();   // 4x float, no 1/255 quantization
+    try
+    {
+        int rowStride = src.width;
+        // ... replace c.r / 255f with c.r etc. — values are already [0,1] floats
+```
 
-### WR-04: Gamma-project decomposition preview mixes sRGB-encoded base with linear residual/vertex colors — the Error Heatmap channel shows phantom error
+(`RGBAFloat` readback of the UNorm8 `coverageStat` chain is also exact for its 0/1 flags, so the shared helper stays correct for both callers.)
 
-**File:** `Packages/com.graffitientertainment.namer/Editor/UI/NamerEditorWindow.cs:422-453`; `Packages/com.graffitientertainment.namer/Shaders/NamerDebugView.shader:129-137`
-**Issue:** In a Gamma project, `ResolvePreviewBaseMap` deliberately returns an sRGB-ENCODED copy of the base (correct for the non-decomposed base bind, which matches the saved PNG). But when decomposition is on, the same sRGB-encoded texture is also bound to `_DebugBaseMap`, while `_BaseResidualMap` is the raw linear residual RT and `input.vertexColor` is the linear fit. The heatmap channel computes `err = |residual*vc (linear) - debugBase (sRGB-encoded)|` — a large, meaningless nonzero error across the whole model. Similarly the decomposed after-pane (`residual*vc`, linear, displayed without encode) shades darker than both the before-pane and the non-decomposed base bind.
-**Fix:** In Gamma projects, either bind `_liveResult.NormalizedBaseColor` (linear) to `_DebugBaseMap` when `_decompOutput?.Residual != null`, or sRGB-encode the residual RT before binding it to the preview materials, so both operands of the reconstruction comparison live in the same space. At minimum, gate the Error Heatmap toolbar entry on `ColorSpace.Linear`.
+### WR-02: CR-01 fallback emits contradictory "No mesh to decompose" warnings per material
 
-### WR-05: A failed preview recompute leaves preview materials bound to pool-released / destroyed render targets
+**File:** `Packages/com.graffitientertainment.namer/Editor/Pipeline/NamerProcessor.cs:148-153`
+**Issue:** When the CR-01 guard trips, it adds one accurate warning ("Vertex-color decomposition skipped ... maps 2 material(s) to 1 source mesh(es)") and sets `decomposeSourceMesh = null`. The per-material block then can't distinguish "guard tripped" from "no mesh was ever resolved", so every material additionally gets `"No mesh to decompose for material 'X' — generating the Phase-3 shape instead."` For a 2-material selection the user sees 3 warnings, N+1 of which state there is no mesh while the first says there are 1+. The tests pass only because they use `Warnings.Exists(...)`.
+**Fix:** Track why the mesh is null and only warn on a genuine resolution failure:
 
-**File:** `Packages/com.graffitientertainment.namer/Editor/UI/NamerEditorWindow.cs:294-380,455-475`
-**Issue:** `RecomputePreview` calls `ReleaseLiveResult()` (DestroyImmediate on `_previewBaseRt`, pool-release of `_liveResult`) and `ReleaseDecompPreview()` (pool-release of the residual) BEFORE the new compute. If anything after that throws (`_pipeline.Process`, `RunDecompPreview`, a readback error), the `catch` at line 369 sets the error status and `Repaint()` — but `_namerMaterial`/`_debugMaterial` still reference the released/destroyed RTs, and the after-pane draws them (stale contents for pooled RTs that a later lease may re-dispatch into; Unity fake-null behavior for the destroyed `_previewBaseRt`). The bindings are only repaired on the next successful recompute.
-**Fix:** In the `catch` (or a `finally` before `Repaint`), clear the stale binds when the recompute did not complete: `_namerMaterial.SetTexture(BaseResidualMapId, null); _debugMaterialFactory.SetTextures(_debugMaterial, null, null); _debugMaterialFactory.SetDebugBaseMap(_debugMaterial, null);` — or restructure so textures are released only after their replacements exist.
+```csharp
+bool guardTripped = decomposeSourceMesh != null
+    && (model.Materials.Count > 1 || distinctSourceMeshes > 1);
+// ... after the guard sets decomposeSourceMesh = null:
+if (decomposeSourceMesh == null && !guardTripped)
+{
+    result.Warnings.Add("No mesh to decompose for material '...' ...");
+}
+```
+
+### WR-03: `CountDistinctSourceMeshes` does not mirror `ResolveSourceMesh`'s prefab sub-asset branch — guard can pass while the resolved mesh differs from what renderers wear
+
+**File:** `Packages/com.graffitientertainment.namer/Editor/Pipeline/NamerProcessor.cs:567-591` (count) vs `:476-486` (resolution)
+**Issue:** `ResolveSourceMesh` for Regular/Variant prefabs checks `FindMeshSubAsset(assetPath)` FIRST and returns it without looking at renderers; `CountDistinctSourceMeshes` skips the sub-asset check entirely and only walks prefab-contents renderers, despite its doc comment claiming to mirror "ResolveSourceMesh's per-case resolution ... the same order the single-mesh resolution uses". If a prefab file carries a `Mesh` sub-asset that differs from the mesh its renderers reference, the count sees 1 renderer mesh → guard passes → decomposition runs on the sub-asset mesh, but `BindGeneratedMaterials` keys the swap on the sub-asset mesh while the renderer wears the other mesh → no swap → the material binds a residual onto a mesh with no fitted vertex colors. That is exactly the CR-01 silent-wrong-render failure mode, re-opened through a corner case. Rare trigger, real consequence.
+**Fix:** Mirror the priority in the prefab branch — if `FindMeshSubAsset(assetPath)` is non-null, count distinct mesh sub-assets via `LoadAllAssetsAtPath` instead of (or in addition to) walking contents renderers, and make the two methods share one enumerator so they cannot drift again.
+
+### WR-04: Mid-`Generate` failure leaves a partially-written asset set, and `ReadBackResidual`'s error message is then false
+
+**File:** `Packages/com.graffitientertainment.namer/Editor/Generation/AssetGenerator.cs:162-185` (write ordering), `:470-474` (message)
+**Issue:** `Generate` writes surface → base → mesh → residual → material sequentially. `ReadBackResidual` (line 176) runs after the surface, base, and mesh are already on disk, so a residual readback failure, a missing `TextureImporter`, or a missing NAMER shader in `WriteMaterial` leaves surface+base(+mesh)(+residual) without the material — despite T-03-02/D-04's "never a partially-written asset set" contract (preflight only covers overwrite refusals) and despite the thrown message `"GPU readback failed while reading the decomposition residual; no files were written."`, which is factually wrong at that point: three files were.
+**Fix:** Move both blocking readbacks (`ReadBackResidual`, and the residual importer/shader existence checks) ahead of the first `File.WriteAllBytes`, e.g. hoist `residualTex = decomp.Stats != null && decomp.Stats.ResidualRequired && decomp.Residual != null ? ReadBackResidual(decomp.Residual) : null;` above `WriteSurfaceTexture(...)` and correct the message to name the files that were written.
 
 ## Info
 
-### IN-01: `_Verts` StructuredBuffer is bound every call but never read by any kernel
+### IN-01: `surfaceData` / `baseData` readback NativeArrays are never disposed
 
-**File:** `Packages/com.graffitientertainment.namer/Compute/NAMERDecomp.compute:53`; `Packages/com.graffitientertainment.namer/Editor/Decompose/NamerDecompPipeline.cs:171,193`
-**Issue:** The rasterize is UV-space only (documented at line 51-52), so the vertex-position upload (`ToFloat3(split.Positions)` + buffer create/set/dispose) is pure overhead per material per recompute. If it is a deliberate interface commitment, a comment saying "reserved" exists; otherwise drop it.
-**Fix:** Remove `_Verts`, `vertsBuf`, and `ToFloat3`, or gate the upload behind a future consumer.
+**File:** `Packages/com.graffitientertainment.namer/Editor/Generation/AssetGenerator.cs:139-141`
+**Issue:** The arrays from `surfaceRequest.GetData<byte>()` / `baseRequest.GetData<byte>()` are used and abandoned, while `ReadBackResidual` (line 476-487) correctly disposes its array in a `finally`. Inconsistent ownership pattern; per Unity's readback contract the caller disposes.
+**Fix:** Wrap usage in `try/finally { surfaceData.Dispose(); baseData.Dispose(); }` mirroring `ReadBackResidual`.
 
-### IN-02: The reduce block factor exists as a C# constant and as bare HLSL literals — silent corruption on drift
+### IN-02: `ReadBackStats` omits `forcePlayerLoopUpdate = true` before `WaitForCompletion`
 
-**File:** `Packages/com.graffitientertainment.namer/Editor/Decompose/NamerDecompPipeline.cs:83`; `Packages/com.graffitientertainment.namer/Compute/NAMERDecomp.compute:180-216`
-**Issue:** `ReduceDownsampleFactor = 8` must match `numthreads(8,8,1)`, the `uint2(8u,8u)` source stride, and the `for (y < 8) for (x < 8)` loop in `CSReduce`. Nothing enforces that; changing the C# side alone mis-addresses every reduce read with no error. (Same pattern as the `_Size`-driven kernels, but those pass their size as a uniform.)
-**Fix:** Add a static assert-style comment pairing the constant with the kernel, or pass the block factor as a uniform and loop `for (uint y = 0; y < _Block; ++y)`.
+**File:** `Packages/com.graffitientertainment.namer/Editor/Decompose/NamerDecompPipeline.cs:435-436`
+**Issue:** Every other readback site in the package (`AssetGenerator.cs:126-127`, `:467-468`, `NamerProcessor.cs:444-445`) sets the flag with the documented rationale ("pumps the request even in edit mode where there is no player loop driving async GPU reads"). This site — the hottest one, called per resolution-ladder step — does not. The live-editor suite passes, but batch/headless invocations are the stated motivation for the pattern.
+**Fix:** Add `request.forcePlayerLoopUpdate = true;` before `WaitForCompletion()` (included in the WR-01 snippet).
 
-### IN-03: Heatmap normalization bound 0.25 duplicated between C# and the debug shader
+### IN-03: `_Verts` position buffer is built, converted, and uploaded but never read by any kernel
 
-**File:** `Packages/com.graffitientertainment.namer/Editor/Decompose/NamerDecompPipeline.cs:84,202`; `Packages/com.graffitientertainment.namer/Shaders/NamerDebugView.shader:137`
-**Issue:** `kMaxObservedErrFloor = 0.25f` feeds `_MaxObservedErr` in the compute path; the debug shader hardcodes `err / 0.25`. They agree only because the threshold slider tops out at 0.10. Raise the slider max past 0.25 (or lower the floor) and the on-model heatmap and the stats diverge silently.
-**Fix:** Bind the ramp scale from C# (`_debugMaterial.SetFloat("_HeatmapScale", Mathf.Max(threshold, 0.25f))`) or share one HLSL constant like `NAMER_VC_FLOOR` already does.
+**File:** `Packages/com.graffitientertainment.namer/Editor/Decompose/NamerDecompPipeline.cs:151, 173, 195`
+**Issue:** `CSRasterizeVertexColors` is position-independent (`NAMERDecomp.compute:51-53` documents `_Verts` as "carried for the documented interface"), so `ToFloat3(split.Positions)` + `CreateBuffer` + `SetBuffer` + dispose is dead work proportional to vertex count on every decompose.
+**Fix:** Delete the `_Verts` plumbing from C# and the `StructuredBuffer<float3> _Verts` declaration from the shader, or gate it behind the debug interface that will eventually consume it.
 
-### IN-04: Stats readback byte-quantizes the reduced error/alpha channels
+### IN-04: Preflight demands residual/mesh targets the CR-01/CR-03 fallbacks never write; stale decomposition assets linger beside a regenerated non-decomposed set
 
-**File:** `Packages/com.graffitientertainment.namer/Editor/Decompose/NamerDecompPipeline.cs:411-454`
-**Issue:** `ReadBackStats` requests `TextureFormat.RGBA32` from the R16G16B16A16 reduce target, so `MaxError` and `MinAlpha` land on a 1/255 grid. At the default threshold 0.02, a true max error of 0.0198 and 0.0210 are 2 ticks apart — the D-13 gate can flip on quantization (currently in the conservative keep-residual direction), and `kOpaqueAlphaThreshold = 0.999` effectively means "alpha must be exactly 255". Acceptable, but worth a comment; if tighter gating is ever needed, read back `RGBAHalf`.
-**Fix:** Document the quantization at `kOpaqueAlphaThreshold`, or read back `TextureFormat.RGBAHalf` into `half4`.
-
-### IN-05: CPU fit consumes an 8-bit LINEAR readback of the base — dark-region fit precision loss
-
-**File:** `Packages/com.graffitientertainment.namer/Editor/Pipeline/NamerProcessor.cs:410-422`; `Packages/com.graffitientertainment.namer/Editor/UI/NamerEditorWindow.cs:550-562`
-**Issue:** `ReadBackBase`/`ReadBackBaseTexels` quantize the linear float16 base to RGBA32 before the fitter samples it. Linear 8-bit has ~4 usable levels below 0.05 sRGB, so fits on dark materials are noisier than the GPU side (which divides the float16 base by the quantized vc). Reconstruction stays near-exact because the residual divides by the same quantized vc, but `FitQuality` and the fit-only error metric absorb the noise.
-**Fix:** Read back `TextureFormat.RGBAHalf` and convert to `float3` in the sampler (the fitter's `SampleBase` already works in float), or note the accepted precision limit where `baseTexels` is documented as "linear RGBA32".
-
-### IN-06: Multi-material selections write N identical split-mesh assets (one per material name)
-
-**File:** `Packages/com.graffitientertainment.namer/Editor/Generation/AssetGenerator.cs:65-72,169-172`
-**Issue:** The mesh path is composed from the material name inside the per-material `Generate` loop, so a 3-slot selection writes three `.asset` meshes with identical geometry (and, per CR-01, competing vertex colors) plus three EXR-adjacent preflights. Beyond the waste, this is the mechanism that makes CR-01's dictionary overwrite possible.
-**Fix:** Resolve one split mesh per source MESH (see CR-01) and write it once, keyed by the mesh rather than the material.
-
-### IN-07: Hierarchical reduce means "mean of block means" for partial edge blocks
-
-**File:** `Packages/com.graffitientertainment.namer/Compute/NAMERDecomp.compute:180-216`
-**Issue:** Pass N≥2 averages the per-block means with equal weight, but edge blocks with fewer than 64 valid sources carry the same weight as full blocks. For non-multiple-of-8 sizes this biases `Coverage`/`AvgError` by up to one block's worth of weight out of ~thousands. Negligible in practice; noting because the kernel comment claims exact means.
-**Fix:** None needed; optionally carry a valid-count channel and weight by it if stats ever need to be exact.
+**File:** `Packages/com.graffitientertainment.namer/Editor/Generation/AssetGenerator.cs:233-244`, `NamerProcessor.cs:100`
+**Issue:** `PreflightTargets(..., settings.DecompositionEnabled)` preflights `_Residual.exr` and the mesh `.asset` whenever decomposition is enabled, but the CR-01/CR-03 fallbacks produce neither. Two consequences: (a) a stale stamped residual from a previous decomposed run plus `OverwriteGenerated == false` now hard-blocks a run that would not have touched it; (b) when preflight passes, the fallback regenerates the material as non-decomposed while the previous run's residual EXR and split mesh remain on disk next to it (inert — nothing binds them — but untracked clutter).
+**Fix:** Either pass the post-guard effective flag into preflight, or have the fallback delete previously-generated residual/mesh assets for the materials it regenerates without them.
 
 ---
 
-_Reviewed: 2026-09-01T00:34:54Z_
+_Reviewed: 2026-09-05_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_

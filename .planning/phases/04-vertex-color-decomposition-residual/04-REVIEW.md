@@ -136,6 +136,110 @@ if (decomposeSourceMesh == null && !guardTripped)
 
 ---
 
+## Resolution Log (post-review fix round)
+
+_Fixed: 2026-09-05. All four Warnings verified against the code before fixing — every claim
+held. Info findings IN-01..IN-04 were not in scope for this round except where the review's
+own WR-01 snippet folded IN-02 in (see below)._
+
+### WR-01 — CONFIRMED, FIXED (commit `5eed72c`)
+
+- **Root cause:** The reduce chain carries coverage as a float fraction (`avgA`/`avgB` are
+  `R16G16B16A16_SFloat`; `CSReduce` averages `.b` in float), but `ReadBackStats` read the
+  final 1x1 target back as `TextureFormat.RGBA32`, quantizing the fraction once to
+  `round(f*255)/255`. The `kMinCoverageFraction = 1e-6f` guard therefore fired for any true
+  coverage below ~0.5/255 (~0.196%), not just zero.
+- **Fix:** `NamerDecompPipeline.ReadBackStats` now requests `TextureFormat.RGBAFloat` and
+  reads `GetData<Color>()` with no `/255f` scaling — values are already [0,1] floats
+  (`NamerDecompPipeline.cs:433-476`, request at `:444`). `RGBAFloat` is exact for both
+  callers: the float error chain keeps full precision, and the UNorm8 `coverageStat`
+  chain's 0/1 flags are exactly representable. `forcePlayerLoopUpdate = true` before
+  `WaitForCompletion()` was added as part of the review's suggested snippet (IN-02).
+- **Test added:** `ResidualPipelineTests.GenerateResidual_TinyUvFootprint_StillDecomposes_AndZeroCoverageStillFallsBack`
+  — block 1 covers a 12x12-texel island of a 512x512 base (~0.055% coverage: below the old
+  ~0.196% effective cutoff, far above true zero) and asserts it decomposes
+  (`CannotDecompose == false`, residual required); block 2 re-asserts true zero coverage
+  (UVs in [1,2]^2) still trips the CR-03 guard. Block 1 fails on the old RGBA32 readback
+  (0.00055 * 255 rounds to byte 0), so the test is a genuine regression guard. The existing
+  end-to-end zero-coverage test (`Process_TilingUvMesh_FallsBackToPhase3WithWarning`) is
+  unaffected.
+
+### WR-02 — CONFIRMED, FIXED (commit `e03cf9d`)
+
+- **Root cause:** The CR-01 guard nulled `decomposeSourceMesh` after emitting its accurate
+  warning, but the per-material block could not distinguish "guard tripped" from "no mesh
+  was ever resolved", so it added a contradictory `"No mesh to decompose for material 'X'"`
+  warning per material (N+1 warnings for an N-material selection).
+- **Fix:** A `decompGuardTripped` flag set when the guard nulls the mesh
+  (`NamerProcessor.cs:118,125`); the per-material warning now fires only on a genuine
+  resolution failure — `if (decomposeSourceMesh == null && !decompGuardTripped)`
+  (`NamerProcessor.cs:155`). A guard trip now emits exactly ONE accurate warning.
+- **Tests added:** Warning-count assertions in both CR-01 fallback tests —
+  `Process_MultiMaterialSelection_FallsBackToPhase3WithWarning` (2-material selection) and
+  `Process_SharedMaterialMultiMesh_FallsBackToPhase3WithWarning` — each now asserts exactly
+  1 `"Vertex-color decomposition skipped"` warning and 0 `"No mesh to decompose"` warnings,
+  via a new `CountWarnings(result, fragment)` helper. Counts are asserted by fragment
+  rather than `Warnings.Count` so unrelated inspection warnings cannot make the assertion
+  brittle.
+
+### WR-03 — CONFIRMED, FIXED (commit `5e02e06`)
+
+- **Root cause:** `ResolveSourceMesh` checks `FindMeshSubAsset(assetPath)` FIRST for
+  Regular/Variant prefabs and never looks at renderers in that case, while
+  `CountDistinctSourceMeshes` walked only prefab-contents renderers. A prefab whose Mesh
+  sub-asset differs from its renderers' meshes counted 1, passed the guard, and
+  decomposition ran on the sub-asset while `BindGeneratedMaterials` keyed the swap on what
+  the renderers wear — the CR-01 silent-wrong-render failure mode reopened.
+- **Fix:** The counter's prefab branch now collects the mesh sub-asset IDs
+  (`LoadAllAssetsAtPath`) alongside the contents renderers' mesh IDs and returns the
+  DISTINCT-union count (`NamerProcessor.cs:583-593`). Design note: the review offered
+  "instead of (or in addition to)" walking contents renderers; "instead of" alone would
+  still count 1 in the mismatch case (a single sub-asset) and leave the hazard open, so
+  the union form is used — a sub-asset that differs from the renderers' meshes is itself
+  the hazard and must trip the guard. For every normal prefab (sub-assets ARE the renderer
+  meshes, or there is no sub-asset) the union equals the old count, so behavior is
+  unchanged outside the corner case. Doc comment updated to state the mirror + union.
+- **Test added:** `NamerDecompIntegrationTests.Process_PrefabWithDistinctMeshSubAsset_FallsBackToPhase3WithWarning`
+  — builds the fixture headlessly (`PrefabUtility.SaveAsPrefabAsset` from a scene object
+  wearing an external persisted quad, then `AssetDatabase.AddObjectToAsset` of a distinct
+  Mesh into the prefab file, then `ImportAsset`), processes the prefab with decomposition
+  ON, and asserts the guard trips (exactly 1 skip warning, 0 no-mesh warnings, no mesh /
+  residual written, base PNG bound). On the old counter this test fails cleanly: the guard
+  passes and a split mesh + residual are written.
+
+### WR-04 — CONFIRMED, FIXED (commit `bd29c58`)
+
+- **Root cause:** `Generate` wrote surface → base → mesh before `ReadBackResidual` ran, so
+  a residual readback failure threw after three files were on disk while its message
+  claimed "no files were written" — and left a partial asset set behind (T-03-02/D-04
+  contract; preflight only covers overwrite refusals).
+- **Fix:** The residual readback is hoisted to the first statement inside the existing
+  `try` (`AssetGenerator.cs:160-199`): `writeResidual` (the same
+  `decomp.Stats.ResidualRequired && decomp.Residual != null` condition the write used) is
+  computed before the try, `ReadBackResidual` runs as the try's first statement, and
+  `WriteResidualExr` consumes the already-read-back texture after the surface/base/mesh
+  writes. Every fallible GPU readback now completes before the first `File.WriteAllBytes`,
+  making the failure message literally true and eliminating the partial-set window for
+  readback failures. Placing the readback inside the try (rather than before it) preserves
+  the `finally` that `DestroyImmediate`s the already-created surface/base textures.
+  Trade-off documented: a missing `TextureImporter` or a missing NAMER shader
+  (`Shader.Find` in `WriteMaterial`) can still throw after earlier writes — those are
+  non-readback failures that predate this finding, hoisting them would mean restructuring
+  the per-asset write helpers, and the false-message defect the review named is closed.
+  GEN-01 (non-destructive, dedicated directory) is untouched — the write set and order of
+  on-disk artifacts on success are identical.
+- **Test added:** None — not reasonably testable headlessly. Forcing a mid-`Generate`
+  residual readback failure requires making `AsyncGPUReadback.Request` fail on demand;
+  the readback goes through the static `NamerComputePipeline.RequestReadback` with no
+  injection seam, and adding one (interface indirection around a static) is a refactor
+  outside this fix round's scope. Passing a destroyed/released `RenderTexture` as
+  `decomp.Residual` does not deterministically produce `hasError` — it exercises
+  undefined Unity behavior, which would make the test flaky rather than decisive.
+  Verified statically: the readback (`AssetGenerator.cs:171-174`) precedes the first
+  `File.WriteAllBytes` call site (`WriteSurfaceTexture`, reached at `:182`).
+
+---
+
 _Reviewed: 2026-09-05_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_

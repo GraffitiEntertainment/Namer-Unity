@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 04-05-PLAN.md
-last_updated: "2026-09-01T23:20:11.938Z"
+status: ready_to_plan
+stopped_at: Phase 04 complete (5/5) — ready to discuss Phase 04.1
+last_updated: 2026-09-05T11:15:30.030Z
 last_activity: 2026-09-01
 progress:
   total_phases: 7
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-25)
 
 **Core value:** A user can select a textured FBX in Unity, run `Process with NAMER`, and get a correctly rendering, source-compatible NAMER material without ever modifying the imported source assets or leaving the Unity Editor.
-**Current focus:** Phase 04 — vertex-color-decomposition-residual
+**Current focus:** Phase 04.1 — baked response roughness extraction zero residual one textur
 
 ## Current Position
 
-Phase: 04 (vertex-color-decomposition-residual) — EXECUTING
-Plan: 5 of 5
-Status: Ready to execute
-Last activity: 2026-09-01
+Phase: 04.1
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-09-05
 
 Progress: [██████████] 100%
 
@@ -36,7 +36,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 9
+- Total plans completed: 14
 - Average duration: - min
 - Total execution time: 0.0 hours
 
@@ -47,6 +47,7 @@ Progress: [██████████] 100%
 | 02 | 3 | - | - |
 | 3 | 3 | - | - |
 | 03.1 | 3 | - | - |
+| 04 | 5 | - | - |
 
 **Recent Trend:**
 

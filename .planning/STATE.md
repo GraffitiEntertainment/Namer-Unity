@@ -3,16 +3,17 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: 04.1
+current_phase_name: baked-response-roughness-extraction-zero-residual-one-textur
 status: executing
-stopped_at: Phase 04.1 context gathered
-last_updated: "2026-09-06T15:54:04.668Z"
+stopped_at: Completed 04.1-01-PLAN.md
+last_updated: "2026-09-06T16:17:23.279Z"
 last_activity: 2026-09-06
-last_activity_desc: Phase 04.1 planning complete
+last_activity_desc: Phase 04.1 execution started
 progress:
   total_phases: 6
   completed_phases: 5
   total_plans: 20
-  completed_plans: 17
+  completed_plans: 18
 ---
 
 # Project State
@@ -22,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-25)
 
 **Core value:** A user can select a textured FBX in Unity, run `Process with NAMER`, and get a correctly rendering, source-compatible NAMER material without ever modifying the imported source assets or leaving the Unity Editor.
-**Current focus:** Phase 04.1 — baked response roughness extraction zero residual one textur
+**Current focus:** Phase 04.1 — baked-response-roughness-extraction-zero-residual-one-textur
 
 ## Current Position
 
-Phase: 04.1
-Plan: Not started
+Phase: 04.1 (baked-response-roughness-extraction-zero-residual-one-textur) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-09-06 — Phase 04.1 planning complete
+Last activity: 2026-09-06 — Phase 04.1 execution started
 
-Progress: [██████████] 100%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
@@ -73,6 +74,11 @@ Progress: [██████████] 100%
 | Phase 04-vertex-color-decomposition-residual P04-03 | 14min | 3 tasks | 9 files |
 | Phase 04-vertex-color-decomposition-residual P04-04 | 2min | 2 tasks | 3 files |
 | Phase 04-vertex-color-decomposition-residual P04-05 | 12min | 2 tasks | 5 files |
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 04.1 P01 | 10min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -133,6 +139,9 @@ Recent decisions affecting current work:
 - [Phase 04 gap-closure]: CR-01 fallback is byte-equivalent to DecompositionEnabled==false: AssetGenerator.Generate keys base-vs-residual binding on decomp != null (not settings.DecompositionEnabled), so _BaseResidualMap binds the GENERATED base PNG (BaseTexturePath) — the CR-01 regression tests must compare against BaseTexturePath, not the source base map
 - [Phase 04]: CR-03 closed: CPU VertexColorFitter.SampleBase now Repeat-wraps UVs (floor(u / BaseWidth) + (x0+1) % BaseWidth) instead of clamping, and GenerateResidual guards the D-13 drop gate on kMinCoverageFraction = 1e-6f — zero-coverage (tiling) fits flag CannotDecompose and NamerProcessor falls back to the Phase-3 shape with a 'UV coverage near zero' warning
 - [Phase 04]: kMinCoverageFraction = 1e-6f (near-zero epsilon): zero-coverage (tiling) fits flag CannotDecompose and fall back to the Phase-3 shape; legitimately partial coverage (small mesh on a large atlas) proceeds as before — that was true pre-gap and stays true
+- [Phase 04.1]: Rec.601 luminance weights (not Rec.709) for Blender-parity Sobel (RESEARCH Pitfall 4)
+- [Phase 04.1]: Extraction overrides the scalar roughness at PACK time in CSSurfacePack, not by re-dispatching CSNormalize (which would double-apply the AO un-multiply)
+- [Phase 04.1]: RoughnessExtractStrength has no inline default (0 = off) preserving the legacy scalar path; shipped default-on 1f arrives via settings in plan 02
 
 ### Pending Todos
 
@@ -163,6 +172,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-06T12:55:50.782Z
-Stopped at: Phase 04.1 context gathered
-Resume file: .planning/phases/04.1-baked-response-roughness-extraction-zero-residual-one-textur/04.1-CONTEXT.md
+Last session: 2026-09-06T16:17:23.262Z
+Stopped at: Completed 04.1-01-PLAN.md
+Resume file: None

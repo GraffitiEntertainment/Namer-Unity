@@ -39,6 +39,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private readonly int _kernelOctahedralEncode;
         private readonly int _kernelSurfacePack;
         private NamerAOPipeline _aoPipeline;
+        private NamerRoughnessPipeline _roughnessPipeline;
 
         private static Texture2D _whiteFill;
         private static Texture2D _neutralNormalTexture;
@@ -98,8 +99,10 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture packInputs = null;
             RenderTexture surfaceOut = null;
 
+            RenderTexture roughnessTex = null;
             bool usesExtractedAo = false;
             bool usesBakedAo = false;
+            bool shouldExtract = inspection.MetallicGlossMap == null && inspection.RoughnessExtractStrength > 0f;
 
             try
             {
@@ -136,8 +139,21 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 Upload(inspection.MetallicGlossMap, metallicGlossIn, NeutralMetallicGlossTexture());
 
-                BindAndDispatch(inspection, baseColorIn, normalTexel, aoIn, metallicGlossIn,
-                    baseColorOut, octahedral, packInputs, surfaceOut, w, h, usesExtractedAo || usesBakedAo);
+                // (a) Normalize + octahedral encode -> _BaseColorOut / _PackInputs / _Octahedral.
+                BindAndDispatchNormalizeEncode(inspection, baseColorIn, normalTexel, aoIn, metallicGlossIn,
+                    baseColorOut, octahedral, packInputs, w, h, usesExtractedAo || usesBakedAo);
+
+                // (b) Sobel roughness extraction runs between the normalized base and the surface
+                //     pack (D-01 gate: only when no authored map and strength > 0).
+                if (shouldExtract)
+                {
+                    roughnessTex = EnsureRoughnessPipeline().ExtractRoughness(inspection, baseColorOut, w, h);
+                }
+
+                // (c) Surface pack, overriding the scalar roughness with the extracted texture.
+                BindAndDispatchSurfacePack(octahedral, packInputs, surfaceOut,
+                    roughnessTex != null ? (Texture)roughnessTex : WhiteFill(),
+                    shouldExtract, inspection.RoughnessExtractStrength, w, h);
 
                 return new NamerComputeResult
                 {
@@ -162,6 +178,10 @@ namespace GraffitiEntertainment.Namer.Editor
                 Release(metallicGlossIn);
                 Release(octahedral);
                 Release(packInputs);
+                if (roughnessTex != null)
+                {
+                    _roughnessPipeline.ReleaseRoughness(roughnessTex);
+                }
             }
         }
 
@@ -194,6 +214,7 @@ namespace GraffitiEntertainment.Namer.Editor
         public void Dispose()
         {
             _aoPipeline?.Dispose();
+            _roughnessPipeline?.Dispose();
             _pool.Dispose();
         }
 
@@ -205,6 +226,16 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             return _aoPipeline;
+        }
+
+        private NamerRoughnessPipeline EnsureRoughnessPipeline()
+        {
+            if (_roughnessPipeline == null)
+            {
+                _roughnessPipeline = new NamerRoughnessPipeline();
+            }
+
+            return _roughnessPipeline;
         }
 
         /// <summary>
@@ -226,7 +257,7 @@ namespace GraffitiEntertainment.Namer.Editor
             return EnsureAoPipeline().RequestBake(inspection, w, h, onComplete, shouldCancel);
         }
 
-        private void BindAndDispatch(
+        private void BindAndDispatchNormalizeEncode(
             NamerMaterialInspection inspection,
             RenderTexture baseColorIn,
             RenderTexture normalTexel,
@@ -235,7 +266,6 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture baseColorOut,
             RenderTexture octahedral,
             RenderTexture packInputs,
-            RenderTexture surfaceOut,
             int w,
             int h,
             bool usesSyntheticAo)
@@ -262,12 +292,27 @@ namespace GraffitiEntertainment.Namer.Editor
             _compute.SetTexture(_kernelOctahedralEncode, "_AoIn", aoIn);
             _compute.SetTexture(_kernelOctahedralEncode, "_Octahedral", octahedral);
 
+            Dispatch(_kernelNormalize, w, h);
+            Dispatch(_kernelOctahedralEncode, w, h);
+        }
+
+        private void BindAndDispatchSurfacePack(
+            RenderTexture octahedral,
+            RenderTexture packInputs,
+            RenderTexture surfaceOut,
+            Texture roughnessTex,
+            bool hasExtractedRoughness,
+            float roughnessExtractStrength,
+            int w,
+            int h)
+        {
             _compute.SetTexture(_kernelSurfacePack, "_Octahedral", octahedral);
             _compute.SetTexture(_kernelSurfacePack, "_PackInputs", packInputs);
             _compute.SetTexture(_kernelSurfacePack, "_SurfaceOut", surfaceOut);
+            _compute.SetFloat("_HasExtractedRoughness", hasExtractedRoughness ? 1f : 0f);
+            _compute.SetFloat("_RoughnessExtractStrength", roughnessExtractStrength);
+            _compute.SetTexture(_kernelSurfacePack, "_RoughnessTex", roughnessTex);
 
-            Dispatch(_kernelNormalize, w, h);
-            Dispatch(_kernelOctahedralEncode, w, h);
             Dispatch(_kernelSurfacePack, w, h);
         }
 

@@ -74,6 +74,17 @@ namespace GraffitiEntertainment.Namer.Editor
 
         public float Roughness;
         public float AoUnmultiplyStrength;
+
+        // Roughness extraction controls (Phase 04.1, plan 01). RoughnessExtractStrength is the
+        // D-02 user override (strength 0 = off); it has NO inline default (matching
+        // AoUnmultiplyStrength) so the identity 0 = off preserves the legacy scalar path for
+        // direct NamerComputePipeline.Process callers and existing no-map fixtures — the shipped
+        // default-on 1f arrives via settings/constants in plan 02. RoughnessEstimator is the
+        // D-03 selector (0 = fit-driven, 1 = Sobel), retyped to the NamerRoughnessEstimator enum
+        // in plan 02.
+        public float RoughnessExtractStrength;
+        public int RoughnessEstimator = 0;
+
         public float Cutoff;
         public float SurfaceType;
 

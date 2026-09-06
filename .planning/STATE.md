@@ -4,16 +4,16 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 04.1
 current_phase_name: baked-response-roughness-extraction-zero-residual-one-textur
-status: executing
-stopped_at: Completed 04.1-02-PLAN.md
-last_updated: "2026-09-06T17:02:04.109Z"
+status: verifying
+stopped_at: Completed 04.1-03-PLAN.md
+last_updated: "2026-09-06T17:18:33.065Z"
 last_activity: 2026-09-06
 last_activity_desc: Phase 04.1 execution started
 progress:
   total_phases: 6
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 20
-  completed_plans: 19
+  completed_plans: 20
 ---
 
 # Project State
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 
 Phase: 04.1 (baked-response-roughness-extraction-zero-residual-one-textur) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-06 — Phase 04.1 execution started
 
-Progress: [██████████] 95%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -80,6 +80,7 @@ Progress: [██████████] 95%
 |------|----------|-------|-------|
 | Phase 04.1 P01 | 10min | 3 tasks | 7 files |
 | Phase 04.1 P02 | 31 | 3 tasks | 15 files |
+| Phase 04.1 P03 | 10min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -147,6 +148,8 @@ Recent decisions affecting current work:
 - [Phase ?]: The fit-driven strength search runs synchronously on cache miss inside NamerProcessor.Process, reusing a pre-Process split; the refit consumes NormalizedBaseColor (already the D-05 cleaned base)
 - [Phase ?]: RoughnessExtractStrength/RoughnessEstimator settings + NamerEditorConstants defaults pulled into plan 02 (NamerProcessor settings copy + fit tests need them)
 - [Phase ?]: NamerComputeResult.NormalizedBaseColorOwnedByRoughnessPool tracks the D-05 repoint so ReleaseResult returns the cleaned base to the roughness pool (compute pool Release would no-op and leak)
+- [Phase ?]: [Phase 04.1 P03]: The one-texture _BaseResidualMap unbinding needs no code change — already delivered by the existing D-13 drop (baseResidualPath = decomp != null ? residualWritePath : basePath yields null when residualWritePath == null); no baseResidualPath edit is made, so the non-decomposed Phase-3 path keeps binding the Base PNG.
+- [Phase ?]: [Phase 04.1 P03]: D-06 _RoughnessOffsetMap is additive with a neutral 'black' {} default (offset .r == 0 => byte-identical decode), applied in InitializeNamerSurfaceData AFTER NAMER_DECODE_SURFACE so the macro signature and Meta-pass call site are untouched; the offset is a direct user-assigned Texture2D (no AssetDatabase.LoadAssetAtPath).
 
 ### Pending Todos
 
@@ -177,6 +180,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-06T17:02:04.101Z
-Stopped at: Completed 04.1-02-PLAN.md
+Last session: 2026-09-06T17:18:33.057Z
+Stopped at: Completed 04.1-03-PLAN.md
 Resume file: None

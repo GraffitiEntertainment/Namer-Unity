@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 3
+open_count: 4
 waived_count: 0
 fixed_count: 0
-total_count: 3
-last_updated: 2026-09-06T17:01:47.864Z
+total_count: 4
+last_updated: 2026-09-06T17:16:07.300Z
 ---
 
 # Broken Windows Ledger
@@ -18,6 +18,7 @@ last_updated: 2026-09-06T17:01:47.864Z
 | 1 | 04.1 | unrun-verify | Packages/com.graffitientertainment.namer/Tests/Editor/NamerRoughnessExtractionTests.cs |  | Headless GPU round-trip run delegated to orchestrator in-editor TestRunnerApi (live editor holds project lock); tests authored but not yet executed | open |  | 2026-09-06T16:17:40.236Z |  |
 | 2 | 04.1 | unrun-verify | Packages/com.graffitientertainment.namer/Tests/Editor/NamerRoughnessFitTests.cs |  | Headless GPU fit-driven tests (FitDriven_SelectsFirstPassingStrength / FitDriven_BakedResponse_ResidualCollapses / FitDriven_DefaultOn_DecomposedNoMapAsset_ExtractsAndDropsResidual) authored + capability-gated but not executed (live editor holds project lock); delegated to orchestrator in-editor TestRunnerApi run | open |  | 2026-09-06T17:01:39.922Z |  |
 | 3 | 04.1 | unrun-verify | Packages/com.graffitientertainment.namer/Tests/Editor/NamerEditorWindowSmokeTests.cs |  | EditMode smoke (foldout defaults + DebugChannelLabels index-10 pairing) authored but not executed headless (live editor holds project lock); delegated to orchestrator in-editor TestRunnerApi run | open |  | 2026-09-06T17:01:47.864Z |  |
+| 4 | 04.1 | unrun-verify | Packages/com.graffitientertainment.namer/Tests/Editor/NamerOneTextureTests.cs |  | Headless GPU acceptance tests (OneTexture_ResidualDropped_LeavesBaseResidualMapUnbound / RoughnessOffset_Unset_DecodesIdentical / HonestGate_AlbedoDetail_StillRequiresResidual / RoughnessOffset_Set_BindsMaterialTexture) authored + capability-gated but not executed (live editor holds project lock); delegated to orchestrator in-editor TestRunnerApi run | open |  | 2026-09-06T17:16:07.300Z |  |
 
 ````json
 [
@@ -55,6 +56,18 @@ last_updated: 2026-09-06T17:01:47.864Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-06T17:01:47.864Z",
+    "resolved_at": null
+  },
+  {
+    "id": 4,
+    "kind": "unrun-verify",
+    "phase": "04.1",
+    "file": "Packages/com.graffitientertainment.namer/Tests/Editor/NamerOneTextureTests.cs",
+    "line": null,
+    "description": "Headless GPU acceptance tests (OneTexture_ResidualDropped_LeavesBaseResidualMapUnbound / RoughnessOffset_Unset_DecodesIdentical / HonestGate_AlbedoDetail_StillRequiresResidual / RoughnessOffset_Set_BindsMaterialTexture) authored + capability-gated but not executed (live editor holds project lock); delegated to orchestrator in-editor TestRunnerApi run",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-06T17:16:07.300Z",
     "resolved_at": null
   }
 ]

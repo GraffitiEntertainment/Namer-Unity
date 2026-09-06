@@ -61,11 +61,15 @@ namespace GraffitiEntertainment.Namer.Editor
         private readonly int _kernelSharpRemoval;
         private readonly int _kernelRemap;
 
-        // 3A fit cache keyed by (source mesh id, estimator, w, h) — mirrors NamerAOPipeline's
-        // bake cache. Stores the SELECTED strength so a later Process call reuses it without
-        // re-running the strength search.
-        private readonly Dictionary<(int meshId, int estimator, int w, int h), NamerRoughnessFitResult> _fitCache =
-            new Dictionary<(int, int, int, int), NamerRoughnessFitResult>();
+        // 3A fit cache keyed by (source mesh id, estimator, w, h, maxErrorThreshold) — mirrors
+        // NamerAOPipeline's bake cache. Stores the SELECTED strength so a later Process call
+        // reuses it without re-running the strength search. The threshold is part of the key
+        // (WR-02): a strength that passes one threshold may not pass another, so a fit must be
+        // re-searched when the threshold changes. Only a PASSED search is cached — a failed
+        // search re-runs on the next request instead of reusing the honest-but-invalid max
+        // ladder strength.
+        private readonly Dictionary<(int meshId, int estimator, int w, int h, float maxErrorThreshold), NamerRoughnessFitResult> _fitCache =
+            new Dictionary<(int, int, int, int, float), NamerRoughnessFitResult>();
 
         public NamerRoughnessPipeline()
         {
@@ -184,11 +188,13 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>
         /// True when a fit-driven strength for <paramref name="meshId"/>/<paramref name="estimator"/>
-        /// at <paramref name="w"/>×<paramref name="h"/> is already cached (3A).
+        /// at <paramref name="w"/>×<paramref name="h"/> and <paramref name="maxErrorThreshold"/>
+        /// is already cached (3A). The threshold participates in the cache key (WR-02) — a
+        /// strength fitted against one threshold is not reusable under a different one.
         /// </summary>
-        public bool HasCachedFit(int meshId, int estimator, int w, int h)
+        public bool HasCachedFit(int meshId, int estimator, int w, int h, float maxErrorThreshold)
         {
-            return _fitCache.ContainsKey((meshId, estimator, w, h));
+            return _fitCache.ContainsKey((meshId, estimator, w, h, maxErrorThreshold));
         }
 
         /// <summary>
@@ -214,7 +220,8 @@ namespace GraffitiEntertainment.Namer.Editor
                 return true;
             }
 
-            (int meshId, int estimator, int w, int h) key = MakeFitKey(inspection, w, h);
+            (int meshId, int estimator, int w, int h, float maxErrorThreshold) key =
+                MakeFitKey(inspection, w, h, maxErrorThreshold);
             if (_fitCache.ContainsKey(key))
             {
                 onComplete?.Invoke();
@@ -229,7 +236,13 @@ namespace GraffitiEntertainment.Namer.Editor
                 return false;
             }
 
-            _fitCache[key] = fit;
+            // WR-02: only a PASSED search is cached — a failed search (Passed == false) re-runs
+            // on the next request instead of reusing its honest-but-invalid max-ladder strength.
+            if (fit.Passed)
+            {
+                _fitCache[key] = fit;
+            }
+
             onComplete?.Invoke();
             return true;
         }
@@ -316,7 +329,8 @@ namespace GraffitiEntertainment.Namer.Editor
                 return new NamerRoughnessExtractResult();
             }
 
-            (int meshId, int estimator, int w, int h) key = MakeFitKey(inspection, w, h);
+            (int meshId, int estimator, int w, int h, float maxErrorThreshold) key =
+                MakeFitKey(inspection, w, h, maxErrorThreshold);
 
             NamerRoughnessFitResult fit;
             if (_fitCache.TryGetValue(key, out fit))
@@ -331,7 +345,12 @@ namespace GraffitiEntertainment.Namer.Editor
                     return new NamerRoughnessExtractResult();
                 }
 
-                _fitCache[key] = fit;
+                // WR-02: only a PASSED search is cached — a failed search re-runs on the next
+                // request instead of reusing its honest-but-invalid max-ladder strength.
+                if (fit.Passed)
+                {
+                    _fitCache[key] = fit;
+                }
             }
 
             return RunFrequencySeparation(baseColorOut, w, h, fit.Strength);
@@ -486,10 +505,11 @@ namespace GraffitiEntertainment.Namer.Editor
             }
         }
 
-        private static (int meshId, int estimator, int w, int h) MakeFitKey(NamerMaterialInspection inspection, int w, int h)
+        private static (int meshId, int estimator, int w, int h, float maxErrorThreshold) MakeFitKey(
+            NamerMaterialInspection inspection, int w, int h, float maxErrorThreshold)
         {
             int meshId = inspection.BakeSourceMesh != null ? inspection.BakeSourceMesh.GetInstanceID() : 0;
-            return (meshId, (int)inspection.RoughnessEstimator, w, h);
+            return (meshId, (int)inspection.RoughnessEstimator, w, h, maxErrorThreshold);
         }
 
         private void Dispatch(int kernel, int w, int h)

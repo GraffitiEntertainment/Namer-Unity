@@ -314,13 +314,15 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>
         /// Thin forwarder to <see cref="NamerRoughnessPipeline.HasCachedFit"/> — true when a
-        /// fit-driven strength for this inspection is already cached (3A).
+        /// fit-driven strength for this inspection is already cached (3A). The
+        /// <paramref name="maxErrorThreshold"/> participates in the cache key (WR-02) — a
+        /// strength fitted against one threshold is not reusable under a different one.
         /// </summary>
-        public bool HasCachedFit(NamerMaterialInspection inspection, int w, int h)
+        public bool HasCachedFit(NamerMaterialInspection inspection, int w, int h, float maxErrorThreshold = 0f)
         {
             int meshId = inspection != null && inspection.BakeSourceMesh != null ? inspection.BakeSourceMesh.GetInstanceID() : 0;
             int estimator = inspection != null ? (int)inspection.RoughnessEstimator : 0;
-            return EnsureRoughnessPipeline().HasCachedFit(meshId, estimator, w, h);
+            return EnsureRoughnessPipeline().HasCachedFit(meshId, estimator, w, h, maxErrorThreshold);
         }
 
         /// <summary>

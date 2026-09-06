@@ -31,6 +31,7 @@ namespace GraffitiEntertainment.Namer.Tests
         private const string DecompKey = "NamerProcessor.DecompositionEnabled";
         private const string ThresholdKey = "NamerProcessor.ErrorThreshold";
         private const string ResolutionKey = "NamerProcessor.ResidualResolution";
+        private const string RoughnessExtractStrengthKey = "NamerProcessor.RoughnessExtractStrength";
 
         private static bool ComputeAvailable =>
             SystemInfo.supportsComputeShaders && SystemInfo.supportsAsyncGPUReadback;
@@ -614,6 +615,13 @@ namespace GraffitiEntertainment.Namer.Tests
                 DecompositionEnabled = decompositionEnabled,
                 ErrorThreshold = 0.02f,
                 ResidualResolution = 0,
+                // Phase 04.1 plan 02: pin roughness extraction OFF. These fixtures test the
+                // pre-extraction vertex-color decomposition in isolation (the checkerboard must
+                // still require a residual); the default-on fit-driven path is covered by
+                // NamerRoughnessFitTests. Without this pin the shipped default (strength 1)
+                // would sharp-remove the checkerboard and collapse the residual these tests
+                // assert must exist.
+                RoughnessExtractStrength = 0f,
             };
         }
 
@@ -817,6 +825,7 @@ namespace GraffitiEntertainment.Namer.Tests
             public bool DecompositionEnabled;
             public float ErrorThreshold;
             public int ResidualResolution;
+            public float RoughnessExtractStrength;
             public bool HadDestination;
             public bool HadPrefix;
             public bool HadSuffix;
@@ -824,6 +833,7 @@ namespace GraffitiEntertainment.Namer.Tests
             public bool HadDecompositionEnabled;
             public bool HadErrorThreshold;
             public bool HadResidualResolution;
+            public bool HadRoughnessExtractStrength;
         }
 
         private static PrefsSnapshot CapturePrefs()
@@ -837,6 +847,7 @@ namespace GraffitiEntertainment.Namer.Tests
                 DecompositionEnabled = EditorPrefs.GetBool(DecompKey, false),
                 ErrorThreshold = EditorPrefs.GetFloat(ThresholdKey, 0.02f),
                 ResidualResolution = EditorPrefs.GetInt(ResolutionKey, 0),
+                RoughnessExtractStrength = EditorPrefs.GetFloat(RoughnessExtractStrengthKey, 1f),
                 HadDestination = EditorPrefs.HasKey(DestinationKey),
                 HadPrefix = EditorPrefs.HasKey(PrefixKey),
                 HadSuffix = EditorPrefs.HasKey(SuffixKey),
@@ -844,6 +855,7 @@ namespace GraffitiEntertainment.Namer.Tests
                 HadDecompositionEnabled = EditorPrefs.HasKey(DecompKey),
                 HadErrorThreshold = EditorPrefs.HasKey(ThresholdKey),
                 HadResidualResolution = EditorPrefs.HasKey(ResolutionKey),
+                HadRoughnessExtractStrength = EditorPrefs.HasKey(RoughnessExtractStrengthKey),
             };
         }
 
@@ -910,6 +922,15 @@ namespace GraffitiEntertainment.Namer.Tests
             else
             {
                 EditorPrefs.DeleteKey(ResolutionKey);
+            }
+
+            if (snapshot.HadRoughnessExtractStrength)
+            {
+                EditorPrefs.SetFloat(RoughnessExtractStrengthKey, snapshot.RoughnessExtractStrength);
+            }
+            else
+            {
+                EditorPrefs.DeleteKey(RoughnessExtractStrengthKey);
             }
         }
     }

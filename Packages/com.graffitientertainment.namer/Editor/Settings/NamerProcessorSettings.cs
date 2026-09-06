@@ -24,6 +24,12 @@ namespace GraffitiEntertainment.Namer.Editor
         private const string ResidualResolutionKey = "NamerProcessor.ResidualResolution";
         private const string RoughnessExtractStrengthKey = "NamerProcessor.RoughnessExtractStrength";
         private const string RoughnessEstimatorKey = "NamerProcessor.RoughnessEstimator";
+        private const string FoldoutSourceKey = "NamerProcessor.FoldoutSource";
+        private const string FoldoutPreviewKey = "NamerProcessor.FoldoutPreview";
+        private const string FoldoutRoughnessExtractionKey = "NamerProcessor.FoldoutRoughnessExtraction";
+        private const string FoldoutAoKey = "NamerProcessor.FoldoutAo";
+        private const string FoldoutDecompositionKey = "NamerProcessor.FoldoutDecomposition";
+        private const string FoldoutOutputKey = "NamerProcessor.FoldoutOutput";
 
         /// <summary>Generated-output root folder (D-01 default: Assets/NAMERGenerated/).</summary>
         public string Destination
@@ -114,6 +120,48 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             get { return EditorPrefs.GetInt(RoughnessEstimatorKey, NamerEditorConstants.DefaultRoughnessEstimator); }
             set { EditorPrefs.SetInt(RoughnessEstimatorKey, value); }
+        }
+
+        /// <summary>Source foldout open/closed state (D-07; Source defaults OPEN so the selection is visible).</summary>
+        public bool FoldoutSource
+        {
+            get { return EditorPrefs.GetBool(FoldoutSourceKey, true); }
+            set { EditorPrefs.SetBool(FoldoutSourceKey, value); }
+        }
+
+        /// <summary>Preview/Debug foldout open/closed state (D-07; default collapsed).</summary>
+        public bool FoldoutPreview
+        {
+            get { return EditorPrefs.GetBool(FoldoutPreviewKey, false); }
+            set { EditorPrefs.SetBool(FoldoutPreviewKey, value); }
+        }
+
+        /// <summary>Roughness Extraction foldout open/closed state (D-07; default collapsed).</summary>
+        public bool FoldoutRoughnessExtraction
+        {
+            get { return EditorPrefs.GetBool(FoldoutRoughnessExtractionKey, false); }
+            set { EditorPrefs.SetBool(FoldoutRoughnessExtractionKey, value); }
+        }
+
+        /// <summary>AO foldout open/closed state (D-07; default collapsed).</summary>
+        public bool FoldoutAo
+        {
+            get { return EditorPrefs.GetBool(FoldoutAoKey, false); }
+            set { EditorPrefs.SetBool(FoldoutAoKey, value); }
+        }
+
+        /// <summary>Decomposition foldout open/closed state (D-07; default collapsed).</summary>
+        public bool FoldoutDecomposition
+        {
+            get { return EditorPrefs.GetBool(FoldoutDecompositionKey, false); }
+            set { EditorPrefs.SetBool(FoldoutDecompositionKey, value); }
+        }
+
+        /// <summary>Output foldout open/closed state (D-07; default collapsed).</summary>
+        public bool FoldoutOutput
+        {
+            get { return EditorPrefs.GetBool(FoldoutOutputKey, false); }
+            set { EditorPrefs.SetBool(FoldoutOutputKey, value); }
         }
     }
 }

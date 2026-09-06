@@ -5,6 +5,7 @@ Shader "GraffitiEntertainment.Namer/NamerDebugView"
         [NoScaleOffset] _SurfaceMap("Surface (Packed)", 2D) = "white" {}
         [NoScaleOffset] _BaseResidualMap("Base/Residual", 2D) = "white" {}
         [NoScaleOffset] _DebugBaseMap("Debug Base", 2D) = "white" {}
+        [NoScaleOffset] _ExtractedRoughness("Extracted Roughness", 2D) = "black" {}
 
         _DebugChannel("Debug Channel", Float) = 0
         _OcclusionStrength("Occlusion Strength", Range(0.0, 1.0)) = 1.0
@@ -53,6 +54,8 @@ Shader "GraffitiEntertainment.Namer/NamerDebugView"
             float _DebugChannel;
             TEXTURE2D(_DebugBaseMap);
             SAMPLER(sampler_DebugBaseMap);
+            TEXTURE2D(_ExtractedRoughness);
+            SAMPLER(sampler_ExtractedRoughness);
 
             struct Attributes
             {
@@ -126,7 +129,7 @@ Shader "GraffitiEntertainment.Namer/NamerDebugView"
                 {
                     channel = baseResidual.rgb;     // 7: Residual (== base when non-decomposed)
                 }
-                else
+                else if (_DebugChannel < 8.5)
                 {
                     // 8: Error Heatmap — the mean-channel MAE between the reconstruction
                     // (residual * vertex color) and the debug base map, mapped through the
@@ -135,6 +138,12 @@ Shader "GraffitiEntertainment.Namer/NamerDebugView"
                     float3 db = SAMPLE_TEXTURE2D(_DebugBaseMap, sampler_DebugBaseMap, input.uv).rgb;
                     float err = (abs(rec.r - db.r) + abs(rec.g - db.g) + abs(rec.b - db.b)) / 3.0;
                     channel = NAMER_DECOMP_HEATMAP(err / 0.25);
+                }
+                else
+                {
+                    // 9: Extracted Roughness — the extracted roughness texture's red channel as
+                    // grayscale (black where extraction did not run).
+                    channel = SAMPLE_TEXTURE2D(_ExtractedRoughness, sampler_ExtractedRoughness, input.uv).r;
                 }
 
                 return half4(channel, 1.0);

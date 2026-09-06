@@ -24,7 +24,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private static readonly string[] DebugChannelLabels =
         {
             "Shaded", "Base Color", "AO", "Normal", "Roughness", "Metallic", "Emissive",
-            "Vertex Colors", "Residual", "Error Heatmap",
+            "Vertex Colors", "Residual", "Error Heatmap", "Extracted Roughness",
         };
 
         private static readonly int SurfaceMapId = Shader.PropertyToID("_SurfaceMap");
@@ -65,6 +65,9 @@ namespace GraffitiEntertainment.Namer.Editor
         private float _errorThreshold = NamerEditorConstants.DefaultErrorThreshold;
         private int _residualResolution;
         private int _debugChannel;
+        private float _roughnessExtractStrength = 1f;
+        private int _roughnessEstimator;
+        private Vector2 _scrollPosition;
 
         private bool _dirty;
         private double _lastChange;
@@ -200,6 +203,8 @@ namespace GraffitiEntertainment.Namer.Editor
             _decompositionEnabled = _settings.DecompositionEnabled;
             _errorThreshold = _settings.ErrorThreshold;
             _residualResolution = _settings.ResidualResolution;
+            _roughnessExtractStrength = _settings.RoughnessExtractStrength;
+            _roughnessEstimator = _settings.RoughnessEstimator;
 
             _previewMesh = ResolvePreviewMesh(_selection);
             if (_previewMesh != null)
@@ -311,6 +316,8 @@ namespace GraffitiEntertainment.Namer.Editor
                 inspection.AoBlurRadius = _aoBlurRadius;
                 inspection.AoStrength = _aoStrength;
                 inspection.AoContrast = _aoContrast;
+                inspection.RoughnessExtractStrength = _roughnessExtractStrength;
+                inspection.RoughnessEstimator = (NamerRoughnessEstimator)_roughnessEstimator;
 
                 _liveResult = _pipeline.Process(inspection);
 
@@ -361,6 +368,7 @@ namespace GraffitiEntertainment.Namer.Editor
                     _debugMaterialFactory.SetDebugBaseMap(_debugMaterial, previewBaseMap);
                 }
                 _debugMaterialFactory.SetChannel(_debugMaterial, Mathf.Max(0, _debugChannel - 1));
+                _debugMaterialFactory.SetExtractedRoughness(_debugMaterial, _liveResult.ExtractedRoughness);
                 _debugMaterial.SetFloat(OcclusionStrengthId, inspection.OcclusionStrength);
 
                 _status = string.Empty;
@@ -605,16 +613,28 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             NamerMaterialInspection inspection = PrimaryInspection;
 
+            // D-07: the functional controls scroll, grouped into collapsible foldout sections
+            // (state persisted via NamerProcessorSettings). The Process button + status stay
+            // OUTSIDE the scroll view so the primary action is always reachable.
+            _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
             DrawSourceSection();
             DrawPreviewSection(inspection);
-            DrawProcessingSection(inspection);
+            DrawRoughnessExtractionSection(inspection);
+            DrawAoSection(inspection);
+            DrawDecompositionSection(inspection);
             DrawOutputSection();
+            EditorGUILayout.EndScrollView();
+
             DrawActionSection(inspection);
         }
 
         private void DrawSourceSection()
         {
-            EditorGUILayout.LabelField("Source", EditorStyles.boldLabel);
+            _settings.FoldoutSource = EditorGUILayout.Foldout(_settings.FoldoutSource, "Source", true);
+            if (!_settings.FoldoutSource)
+            {
+                return;
+            }
 
             if (_selection == null)
             {
@@ -657,7 +677,11 @@ namespace GraffitiEntertainment.Namer.Editor
 
         private void DrawPreviewSection(NamerMaterialInspection inspection)
         {
-            EditorGUILayout.LabelField("Preview", EditorStyles.boldLabel);
+            _settings.FoldoutPreview = EditorGUILayout.Foldout(_settings.FoldoutPreview, "Preview/Debug", true);
+            if (!_settings.FoldoutPreview)
+            {
+                return;
+            }
 
             if (_previewMesh == null || inspection == null)
             {
@@ -767,9 +791,54 @@ namespace GraffitiEntertainment.Namer.Editor
             }
         }
 
-        private void DrawProcessingSection(NamerMaterialInspection inspection)
+        private void DrawRoughnessExtractionSection(NamerMaterialInspection inspection)
         {
-            EditorGUILayout.LabelField("Processing", EditorStyles.boldLabel);
+            _settings.FoldoutRoughnessExtraction = EditorGUILayout.Foldout(_settings.FoldoutRoughnessExtraction, "Roughness Extraction", true);
+            if (!_settings.FoldoutRoughnessExtraction)
+            {
+                return;
+            }
+
+            EditorGUI.BeginDisabledGroup(inspection == null || _busy);
+
+            float newStrength = EditorGUILayout.Slider(
+                new GUIContent(
+                    "Roughness Extract Strength",
+                    "Strength of the roughness extraction (0 = off, 1 = full). Automatically recomputes the preview in memory "
+                        + NamerEditorConstants.DebounceSeconds + " s after the slider stops — nothing is written to disk."),
+                _roughnessExtractStrength, 0f, 1f);
+            if (!Mathf.Approximately(newStrength, _roughnessExtractStrength))
+            {
+                _roughnessExtractStrength = newStrength;
+                _settings.RoughnessExtractStrength = newStrength;
+                _afterPanelState.MarkTweaking();
+                MarkDirty();
+            }
+
+            int newEstimator = EditorGUILayout.Popup(
+                new GUIContent(
+                    "Roughness Estimator",
+                    "How roughness is extracted: Fit-driven searches for the minimal strength that collapses the residual (default); Sobel is the standalone Blender-parity edge estimator. Sobel mode does NOT sharp-remove the base, so Sobel-mode assets do not reach the one-texture outcome (parity-only)."),
+                _roughnessEstimator,
+                new[] { "Fit-driven", "Sobel" });
+            if (newEstimator != _roughnessEstimator)
+            {
+                _roughnessEstimator = newEstimator;
+                _settings.RoughnessEstimator = newEstimator;
+                _afterPanelState.MarkTweaking();
+                MarkDirty();
+            }
+
+            EditorGUI.EndDisabledGroup();
+        }
+
+        private void DrawAoSection(NamerMaterialInspection inspection)
+        {
+            _settings.FoldoutAo = EditorGUILayout.Foldout(_settings.FoldoutAo, "AO", true);
+            if (!_settings.FoldoutAo)
+            {
+                return;
+            }
 
             EditorGUI.BeginDisabledGroup(inspection == null || _busy);
 
@@ -829,7 +898,18 @@ namespace GraffitiEntertainment.Namer.Editor
                 MarkDirty();
             }
 
-            EditorGUILayout.Space();
+            EditorGUI.EndDisabledGroup();
+        }
+
+        private void DrawDecompositionSection(NamerMaterialInspection inspection)
+        {
+            _settings.FoldoutDecomposition = EditorGUILayout.Foldout(_settings.FoldoutDecomposition, "Decomposition", true);
+            if (!_settings.FoldoutDecomposition)
+            {
+                return;
+            }
+
+            EditorGUI.BeginDisabledGroup(inspection == null || _busy);
 
             bool newDecomp = EditorGUILayout.Toggle(
                 new GUIContent(
@@ -921,7 +1001,11 @@ namespace GraffitiEntertainment.Namer.Editor
 
         private void DrawOutputSection()
         {
-            EditorGUILayout.LabelField("Output", EditorStyles.boldLabel);
+            _settings.FoldoutOutput = EditorGUILayout.Foldout(_settings.FoldoutOutput, "Output", true);
+            if (!_settings.FoldoutOutput)
+            {
+                return;
+            }
 
             EditorGUI.BeginDisabledGroup(_busy);
 

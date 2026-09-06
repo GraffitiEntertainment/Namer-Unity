@@ -26,11 +26,20 @@
 #pragma kernel CSRoughnessSobel
 #pragma kernel CSRoughnessMaxReduce
 #pragma kernel CSRoughnessNormalize
+#pragma kernel CSRoughnessBlurH
+#pragma kernel CSRoughnessBlurV
+#pragma kernel CSRoughnessSharpDetail
+#pragma kernel CSRoughnessSharpRemoval
+#pragma kernel CSRoughnessRemap
 
 // Kernel-written outputs (linear, random-access).
 RWTexture2D<float4> _RoughnessRaw; // R16G16B16A16_SFloat: g = Sobel edge magnitude
 RWTexture2D<float4> _RoughnessOut; // R8G8B8A8_UNorm linear: r = normalized roughness
 RWTexture2D<float4> _DstAvg;       // generic max-reduce write target
+RWTexture2D<float4> _BlurPing;     // R16G16B16A16_SFloat: horizontal separable-blur intermediate (full RGB)
+RWTexture2D<float4> _Blurred;      // R16G16B16A16_SFloat: separable-gaussian low-pass of the base (full RGB)
+RWTexture2D<float4> _SharpDetail;  // R16G16B16A16_SFloat: high-frequency detail (base - blurred)
+RWTexture2D<float4> _CleanedBaseOut; // R16G16B16A16_SFloat: sharp-removal cleaned base (full RGB, alpha 1)
 
 // Blit-uploaded / kernel-read inputs.
 Texture2D<float4> _BaseColorOut; // the already-linear cleaned base (CSNormalize output)
@@ -41,6 +50,9 @@ uint2 _Size;       // unsigned: compared against SV_DispatchThreadID (uint) in t
 uint2 _AvgSrcSize;
 uint2 _AvgDstSize;
 float _GlobalMax;  // reduced global Sobel max (uploaded back for the normalize pass)
+float _Strength;   // fit-driven sharp-removal / roughness-remap strength (0..1)
+int _Radius;       // separable-blur radius (frequency-separation low-pass)
+float _Sigma;      // separable-blur sigma
 
 // Clamped luminance tap into the cleaned base (edge clamp mirrors CSBlurH/CSBlurV, T-04.1-01).
 float SampleLuma(uint3 id, int dx, int dy)
@@ -116,4 +128,99 @@ void CSRoughnessNormalize(uint3 id : SV_DispatchThreadID)
     }
 
     _RoughnessOut[id.xy] = float4(saturate(_RoughnessRaw[id.xy].g / max(_GlobalMax, 1e-4)), 0.0, 0.0, 1.0);
+}
+
+// ------------------------------------------------------------------
+// Frequency-separation (fit-driven) kernels (Phase 04.1, plan 02).
+//
+// CSRoughnessBlurH/CSRoughnessBlurV copy the CSBlurH/CSBlurV separable gaussian bodies from
+// NAMERAO.compute (radius _Radius, sigma _Sigma, exp(-x*x/(2*_Sigma*_Sigma)), clamped taps)
+// but operate on the FULL RGB cleaned base — this blur separates COLOR (the low-frequency
+// base from the high-frequency baked-gloss detail), not a scalar channel, so there is no
+// NamerBlurSample/NamerBlurWrite channel-select lerp (the AO blur's channel contract does
+// not apply).
+// ------------------------------------------------------------------
+
+// Separable gaussian low-pass over the full RGB base: horizontal pass.
+[numthreads(8,8,1)]
+void CSRoughnessBlurH(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float3 acc = 0.0;
+    float wsum = 0.0;
+    for (int x = -_Radius; x <= _Radius; ++x)
+    {
+        float w = exp(-(float)(x * x) / (2.0 * _Sigma * _Sigma));
+        int sx = clamp((int)id.x + x, 0, (int)_Size.x - 1);
+        acc += _BaseColorOut[int2(sx, (int)id.y)].rgb * w;
+        wsum += w;
+    }
+
+    _BlurPing[id.xy] = float4(acc / wsum, 1.0);
+}
+
+// Separable gaussian low-pass over the full RGB base: vertical pass (writes the final blur).
+[numthreads(8,8,1)]
+void CSRoughnessBlurV(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float3 acc = 0.0;
+    float wsum = 0.0;
+    for (int y = -_Radius; y <= _Radius; ++y)
+    {
+        float w = exp(-(float)(y * y) / (2.0 * _Sigma * _Sigma));
+        int sy = clamp((int)id.y + y, 0, (int)_Size.y - 1);
+        acc += _BlurPing[int2((int)id.x, sy)].rgb * w;
+        wsum += w;
+    }
+
+    _Blurred[id.xy] = float4(acc / wsum, 1.0);
+}
+
+// High-frequency detail = base - blurred base.
+[numthreads(8,8,1)]
+void CSRoughnessSharpDetail(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    _SharpDetail[id.xy] = float4(_BaseColorOut[id.xy].rgb - _Blurred[id.xy].rgb, 0.0);
+}
+
+// Sharp-removal cleaned base: base - strength * detail, each RGB channel saturate-clamped
+// (halo mitigation — the removed detail is clamped so over-removal cannot invert colors;
+// RESEARCH Pitfall 5).
+[numthreads(8,8,1)]
+void CSRoughnessSharpRemoval(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float3 cleaned = saturate(_BaseColorOut[id.xy].rgb - _Strength * _SharpDetail[id.xy].rgb);
+    _CleanedBaseOut[id.xy] = float4(cleaned, 1.0);
+}
+
+// Fit-driven roughness = strength-scaled sharp-detail magnitude, emitted in the roughness
+// domain (NO 1 - x inversion — RESEARCH Pitfall 1).
+[numthreads(8,8,1)]
+void CSRoughnessRemap(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    _RoughnessOut[id.xy] = float4(saturate(_Strength * length(_SharpDetail[id.xy].rgb)), 0.0, 0.0, 1.0);
 }

@@ -179,7 +179,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 // (c) Surface pack, overriding the scalar roughness with the extracted texture.
                 BindAndDispatchSurfacePack(octahedral, packInputs, surfaceOut,
                     roughnessTex != null ? (Texture)roughnessTex : WhiteFill(),
-                    shouldExtract, inspection.RoughnessExtractStrength, w, h);
+                    roughnessTex != null, inspection.RoughnessExtractStrength, w, h);
 
                 // D-05: the fit-driven path repoints NormalizedBaseColor at the sharp-removal
                 // cleaned base so the refit consumes the post-extraction base.

@@ -465,18 +465,25 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             NativeArray<float> data = request.GetData<float>();
-            float globalMax = 0f;
-            for (int y = 0; y < validHeight; y++)
+            try
             {
-                for (int x = 0; x < validWidth; x++)
+                float globalMax = 0f;
+                for (int y = 0; y < validHeight; y++)
                 {
-                    // RGBAFloat is 4 floats per texel, row-major; the reduce stores the max in .g.
-                    int index = (y * src.width + x) * 4 + 1;
-                    globalMax = Mathf.Max(globalMax, data[index]);
+                    for (int x = 0; x < validWidth; x++)
+                    {
+                        // RGBAFloat is 4 floats per texel, row-major; the reduce stores the max in .g.
+                        int index = (y * src.width + x) * 4 + 1;
+                        globalMax = Mathf.Max(globalMax, data[index]);
+                    }
                 }
-            }
 
-            return globalMax;
+                return globalMax;
+            }
+            finally
+            {
+                data.Dispose();
+            }
         }
 
         private static (int meshId, int estimator, int w, int h) MakeFitKey(NamerMaterialInspection inspection, int w, int h)

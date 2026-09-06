@@ -6,6 +6,9 @@ Shader "GraffitiEntertainment.Namer/NamerDebugView"
         [NoScaleOffset] _BaseResidualMap("Base/Residual", 2D) = "white" {}
         [NoScaleOffset] _DebugBaseMap("Debug Base", 2D) = "white" {}
         [NoScaleOffset] _ExtractedRoughness("Extracted Roughness", 2D) = "black" {}
+        // D-06: NamerSurface.hlsl declares this texture; keep the debug shader's material
+        // layout complete + neutral ("black" {} => .r == 0). Not sampled by DebugFrag.
+        [HideInInspector] _RoughnessOffsetMap("Roughness Offset", 2D) = "black" {}
 
         _DebugChannel("Debug Channel", Float) = 0
         _OcclusionStrength("Occlusion Strength", Range(0.0, 1.0)) = 1.0

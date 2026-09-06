@@ -570,6 +570,15 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 material.SetTexture("_BaseResidualMap", AssetDatabase.LoadAssetAtPath<Texture2D>(baseResidualPath));
             }
+
+            // D-06 optional roughness-offset input: bind the user-assigned texture directly
+            // (no LoadAssetAtPath — it is a user-assigned Texture2D, not a generated path).
+            // Null leaves the shader's "black" {} default (offset 0 => neutral decode).
+            if (inspection.RoughnessOffsetMap != null)
+            {
+                material.SetTexture("_RoughnessOffsetMap", inspection.RoughnessOffsetMap);
+            }
+
             material.SetColor("_BaseColor", inspection.BaseColor);
             material.SetColor("_EmissionColor", inspection.EmissionColor);
             material.SetFloat("_OcclusionStrength", inspection.OcclusionStrength);

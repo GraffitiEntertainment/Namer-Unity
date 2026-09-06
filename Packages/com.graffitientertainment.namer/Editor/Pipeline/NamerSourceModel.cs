@@ -98,6 +98,16 @@ namespace GraffitiEntertainment.Namer.Editor
         public float RoughnessExtractStrength;
         public NamerRoughnessEstimator RoughnessEstimator = NamerRoughnessEstimator.FitDriven;
 
+        /// <summary>
+        /// D-06 optional per-material roughness-offset input (null default = no offset). A
+        /// user-assigned <see cref="Texture2D"/> (no generated path, so no
+        /// <c>AssetDatabase.LoadAssetAtPath</c>) surfaced as the shader's "Roughness Offset"
+        /// slot; <see cref="AssetGenerator.WriteMaterial"/> rebinds it when non-null. The
+        /// shader's neutral <c>"black" {}</c> default means an unassigned slot decodes
+        /// identically.
+        /// </summary>
+        public Texture2D RoughnessOffsetMap;
+
         public float Cutoff;
         public float SurfaceType;
 

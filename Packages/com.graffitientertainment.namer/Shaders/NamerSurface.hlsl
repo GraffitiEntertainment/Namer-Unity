@@ -30,8 +30,11 @@ CBUFFER_END
 
 // _SurfaceMap:  LINEAR (non-sRGB) R8G8B8A8_UNorm packed surface texture.
 // _BaseResidualMap: sRGB base/residual color (residual == base in Phase 1).
+// _RoughnessOffsetMap: D-06 optional roughness-offset input ("black" {} default => .r == 0
+// => neutral/byte-identical decode when unbound). Additive, sampled in InitializeNamerSurfaceData.
 TEXTURE2D(_SurfaceMap);        SAMPLER(sampler_SurfaceMap);
 TEXTURE2D(_BaseResidualMap);   SAMPLER(sampler_BaseResidualMap);
+TEXTURE2D(_RoughnessOffsetMap); SAMPLER(sampler_RoughnessOffsetMap);
 
 // ------------------------------------------------------------------
 // NAMER octahedral decode — mirrors NamerFormat.OctahedralDecode EXACTLY.
@@ -87,6 +90,13 @@ void InitializeNamerSurfaceData(float2 uv, float4 vertexColor, out SurfaceData s
     float ao;
     float3 normalTS;
     NAMER_DECODE_SURFACE(surface, metallic, emissive, roughness, smoothness, normalTS, ao);
+
+    // D-06: additive roughness offset, neutral-when-unset ("black" {} default => .r == 0 =>
+    // roughness unchanged => byte-identical decode). Applied here (not inside
+    // NAMER_DECODE_SURFACE) so the shared macro's signature is unchanged and the Meta-pass
+    // call site (which only reads emissive) is untouched.
+    roughness = saturate(roughness + SAMPLE_TEXTURE2D(_RoughnessOffsetMap, sampler_RoughnessOffsetMap, uv).r);
+    smoothness = 1.0 - roughness;
 
     half alpha = baseResidual.a * _BaseColor.a;
     alpha = AlphaDiscard(alpha, _Cutoff);

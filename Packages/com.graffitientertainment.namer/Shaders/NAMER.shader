@@ -6,6 +6,11 @@ Shader "GraffitiEntertainment.Namer/NAMER"
         // with it); _SurfaceMap is sampled with the same UVs and shows no ST UI.
         [NoScaleOffset] [MainTexture] _SurfaceMap("Surface (Packed)", 2D) = "white" {}
         [NoScaleOffset] _BaseResidualMap("Base/Residual", 2D) = "white" {}
+        // D-06 optional roughness-offset input: additive to decoded roughness, neutral when
+        // unset. The "black" {} default samples .r == 0, so an unbound slot decodes
+        // byte-identically (a "white" {} default would sample .r == 1 and saturate every
+        // unset material's roughness to 1.0 — non-neutral). Artist-assigned post-generation.
+        [NoScaleOffset] _RoughnessOffsetMap("Roughness Offset", 2D) = "black" {}
 
         [MainColor] _BaseColor("Color", Color) = (1,1,1,1)
         [HDR] _EmissionColor("Emission", Color) = (0,0,0)

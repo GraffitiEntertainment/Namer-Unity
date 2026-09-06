@@ -169,13 +169,24 @@ Plans:
 
 ### Phase 04.1: Baked-response roughness extraction + zero-residual one-texture mode (extract gloss/shading from base into 6-bit roughness, refit vertex colors, D-13 primary) (INSERTED)
 
-**Goal:** [Urgent work - to be planned]
-**Requirements**: TBD
+**Goal:** Extract material response (gloss/shading/cavity) baked into the base texture as 6-bit roughness (surface alpha bits 0-5) when no authored roughness map exists — via a Sobel Blender-parity estimator and a fit-driven strength search — then refit the sharp-removal-cleaned base into vertex colors so the Phase-4 D-13 residual auto-drop becomes the primary one-texture path (one RGBA8 surface PNG + vertex-colored mesh, no residual), with a D-06 optional roughness-offset escape hatch.
+**Requirements**: ENCD-02, NORM-01, NORM-03, VCOL-03, VCOL-04, VCOL-05, UI-03, SHDR-02 (boundary-aware IDs strengthened by this phase; no dedicated IDs — success criteria derived from CONTEXT.md D-01..D-06)
 **Depends on:** Phase 4
-**Plans:** 5/5 plans complete
+**Plans:** 3 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 04.1 to break down)
+
+**Wave 1**
+
+- [ ] 04.1-01: Sobel roughness extraction — NAMERRoughness.compute/hlsl + NamerRoughnessPipeline + CSNormalize/CSSurfacePack override + NamerComputePipeline D-01 gate + round-trip tests
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 04.1-02: Fit-driven strength search + sharp-removal cleaned base + D-05 refit wiring + estimator/strength UI + settings
+
+**Wave 3** *(blocked on Waves 1-2 completion)*
+
+- [ ] 04.1-03: One-texture material binding + D-06 roughness-offset input + honest-gate/switch-back acceptance tests
 
 ### Phase 5: Stylization
 
@@ -211,4 +222,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 3. Asset Generation + Editor Workflow + Preview | 3/3 | Complete    | 2026-08-28 |
 | 03.1. AO Extraction (INSERTED) | 3/3 | Complete | 2026-08-31 |
 | 4. Vertex-Color Decomposition + Residual | 5/5 | Complete   | 2026-09-01 |
+| 04.1. Roughness Extraction + One-Texture (INSERTED) | 0/3 | Not started | - |
 | 5. Stylization | 0/3 | Not started | - |

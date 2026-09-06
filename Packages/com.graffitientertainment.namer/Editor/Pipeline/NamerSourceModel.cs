@@ -4,6 +4,19 @@ using UnityEngine;
 namespace GraffitiEntertainment.Namer.Editor
 {
     /// <summary>
+    /// Roughness-extraction estimator selector (D-03). <see cref="FitDriven"/> (0) is the
+    /// default: the strength search picks the minimal strength whose post-refit residual
+    /// MaxError collapses within threshold (D-04). <see cref="Sobel"/> (1) is the explicit
+    /// standalone parity route (plan 01) — it does NOT sharp-remove the base, so Sobel-mode
+    /// assets do not reach the one-texture outcome (parity-only per D-03).
+    /// </summary>
+    public enum NamerRoughnessEstimator
+    {
+        FitDriven = 0,
+        Sobel = 1,
+    }
+
+    /// <summary>
     /// Serializable inspection result for a single unique source material (D-03).
     /// Holds map references, per-map sRGB/channel metadata, scalar fallbacks, and any
     /// warnings produced during discovery. This is the CPU-side data model that plans
@@ -75,15 +88,15 @@ namespace GraffitiEntertainment.Namer.Editor
         public float Roughness;
         public float AoUnmultiplyStrength;
 
-        // Roughness extraction controls (Phase 04.1, plan 01). RoughnessExtractStrength is the
+        // Roughness extraction controls (Phase 04.1). RoughnessExtractStrength is the
         // D-02 user override (strength 0 = off); it has NO inline default (matching
         // AoUnmultiplyStrength) so the identity 0 = off preserves the legacy scalar path for
         // direct NamerComputePipeline.Process callers and existing no-map fixtures — the shipped
         // default-on 1f arrives via settings/constants in plan 02. RoughnessEstimator is the
-        // D-03 selector (0 = fit-driven, 1 = Sobel), retyped to the NamerRoughnessEstimator enum
-        // in plan 02.
+        // D-03 selector, retyped to the NamerRoughnessEstimator enum in plan 02 (FitDriven = 0
+        // is the default; Sobel = 1 the parity alternative).
         public float RoughnessExtractStrength;
-        public int RoughnessEstimator = 0;
+        public NamerRoughnessEstimator RoughnessEstimator = NamerRoughnessEstimator.FitDriven;
 
         public float Cutoff;
         public float SurfaceType;

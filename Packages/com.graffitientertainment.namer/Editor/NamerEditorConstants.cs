@@ -43,6 +43,14 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>Default AO contrast (D-11; 1 = identity, pivot 0.5).</summary>
         public const float DefaultAoContrast = 1f;
 
+        /// <summary>Default roughness-extraction strength (D-01/D-02; 1 = extraction ON by
+        /// default, matching the AO precedent so extraction "runs automatically when no authored
+        /// map"; 0 = the user turns it off).</summary>
+        public const float DefaultRoughnessExtractStrength = 1f;
+
+        /// <summary>Default roughness estimator popup index (D-03; 0 = fit-driven default).</summary>
+        public const int DefaultRoughnessEstimator = 0;
+
         /// <summary>Default vertex-color decomposition toggle (D-05: opt-in, OFF).</summary>
         public const bool DefaultDecompositionEnabled = false;
 

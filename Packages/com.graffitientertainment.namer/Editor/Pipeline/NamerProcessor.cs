@@ -134,7 +134,44 @@ namespace GraffitiEntertainment.Namer.Editor
                     inspection.AoBlurRadius = settings.AoBlurRadius;
                     inspection.AoStrength = settings.AoStrength;
                     inspection.AoContrast = settings.AoContrast;
-                    NamerComputeResult computeResult = pipeline.Process(inspection);
+                    inspection.RoughnessExtractStrength = settings.RoughnessExtractStrength;
+                    inspection.RoughnessEstimator = (NamerRoughnessEstimator)settings.RoughnessEstimator;
+
+                    // ResolveSourceMesh ordering (plan 02): attach the source mesh BEFORE
+                    // Process so the fit-driven estimator can resolve its 1A refit-precondition
+                    // and the composed evaluate callback can reference it. (The decomp block's
+                    // old assignment here moved up.)
+                    if (settings.DecompositionEnabled)
+                    {
+                        inspection.BakeSourceMesh = decomposeSourceMesh;
+                    }
+
+                    // 3A: compose the Func<float,float> evaluate callback — the strength
+                    // search's per-step objective. NamerProcessor owns the splitter/fitter/
+                    // decomp state the callback needs; the pipeline owns the GPU per-step
+                    // sharp-removal (ExtractSharpRemoval) and the fit cache.
+                    int baseW = inspection.BaseMap != null ? inspection.BaseMap.width : NamerComputePipeline.DefaultBaseResolution;
+                    int baseH = inspection.BaseMap != null ? inspection.BaseMap.height : NamerComputePipeline.DefaultBaseResolution;
+                    NamerSplitResult fitSplit = null;
+                    Func<float, float> evaluate = null;
+                    if (settings.DecompositionEnabled && decomposeSourceMesh != null)
+                    {
+                        fitSplit = MeshVertexSplitter.Split(decomposeSourceMesh);
+                        evaluate = strength =>
+                        {
+                            RenderTexture cleaned = pipeline.ExtractSharpRemoval(baseW, baseH, strength);
+                            try
+                            {
+                                return EvaluateRefitMaxError(fitSplit, cleaned, baseW, baseH, settings.ErrorThreshold, settings.ResidualResolution);
+                            }
+                            finally
+                            {
+                                pipeline.ReleaseExtractedRoughness(cleaned);
+                            }
+                        };
+                    }
+
+                    NamerComputeResult computeResult = pipeline.Process(inspection, evaluate, null, settings.ErrorThreshold);
                     try
                     {
                         NamerDecompData decomp = null;
@@ -146,7 +183,6 @@ namespace GraffitiEntertainment.Namer.Editor
                         {
                             if (settings.DecompositionEnabled)
                             {
-                                inspection.BakeSourceMesh = decomposeSourceMesh;
                                 // WR-02: the CR-01 guard above already explained why the mesh
                                 // is null (with the accurate material/mesh counts) — only a
                                 // genuine resolution failure (no mesh was ever found) adds
@@ -166,7 +202,10 @@ namespace GraffitiEntertainment.Namer.Editor
                                 if (decomposeSourceMesh != null)
                                 {
                                     baseTexels = ReadBackBase(computeResult.NormalizedBaseColor);
-                                    NamerSplitResult split = MeshVertexSplitter.Split(decomposeSourceMesh);
+                                    // Reuse the pre-Process split. D-05: NormalizedBaseColor is
+                                    // already the post-extraction cleaned base in the fit-driven
+                                    // path, so this refit consumes the sharp-removal output.
+                                    NamerSplitResult split = fitSplit;
                                     fit = VertexColorFitter.Fit(split, baseTexels, computeResult.Width, computeResult.Height);
                                     Color32[] colors = fit.ToColor32Array();
                                     decompPipeline = new NamerDecompPipeline();
@@ -462,6 +501,40 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             return request.GetData<Color32>();
+        }
+
+        /// <summary>
+        /// Measures the post-refit residual MaxError for the fit-driven strength search: reads
+        /// the (sharp-removal cleaned) base back, runs the vertex-color fit + residual
+        /// generation, and returns the post-refit MaxError. The 3A evaluate callback invokes
+        /// this per strength step; every intermediate allocation is disposed here.
+        /// </summary>
+        private static float EvaluateRefitMaxError(
+            NamerSplitResult split,
+            RenderTexture cleanedBase,
+            int w,
+            int h,
+            float errorThreshold,
+            int residualResolution)
+        {
+            NativeArray<Color32> texels = ReadBackBase(cleanedBase);
+            try
+            {
+                using (VertexColorFitResult probeFit = VertexColorFitter.Fit(split, texels, w, h))
+                {
+                    Color32[] probeColors = probeFit.ToColor32Array();
+                    using (NamerDecompPipeline probeDecomp = new NamerDecompPipeline())
+                    using (NamerDecompOutput probeOutput = probeDecomp.GenerateResidual(
+                        split, probeColors, cleanedBase, w, h, errorThreshold, residualResolution))
+                    {
+                        return probeOutput.Stats.MaxError;
+                    }
+                }
+            }
+            finally
+            {
+                texels.Dispose();
+            }
         }
 
         /// <summary>

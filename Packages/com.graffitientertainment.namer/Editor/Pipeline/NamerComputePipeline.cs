@@ -28,7 +28,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private const string ComputeShaderPath = "Packages/com.graffitientertainment.namer/Compute/NAMERPack.compute";
         private const string RawCopyShaderPath = "Packages/com.graffitientertainment.namer/Editor/Pipeline/NamerRawCopy.shader";
         internal const string ReencodeSrgbKeyword = "_REENCODE_SRGB";
-        private const int DefaultResolution = 256;
+        internal const int DefaultBaseResolution = 256;
 
         private static readonly Color NeutralNormalFill = new Color(0.5f, 0.5f, 1.0f, 1.0f);
         private static readonly Color NeutralMetallicGlossFill = new Color(0.0f, 0.0f, 0.0f, 1.0f);
@@ -40,6 +40,11 @@ namespace GraffitiEntertainment.Namer.Editor
         private readonly int _kernelSurfacePack;
         private NamerAOPipeline _aoPipeline;
         private NamerRoughnessPipeline _roughnessPipeline;
+
+        // The normalized base of the in-flight Process. Set right after the normalize stage so
+        // the NamerProcessor-composed evaluate callback (which the roughness fit invokes
+        // reentrantly during Process) can drive the per-step GPU sharp-removal against it (3A).
+        private RenderTexture _currentBaseColorOut;
 
         private static Texture2D _whiteFill;
         private static Texture2D _neutralNormalTexture;
@@ -74,15 +79,19 @@ namespace GraffitiEntertainment.Namer.Editor
         /// live outputs. Targets still unreleased when this pipeline is disposed are
         /// destroyed with it, so release every result before disposing.
         /// </summary>
-        public NamerComputeResult Process(NamerMaterialInspection inspection)
+        public NamerComputeResult Process(
+            NamerMaterialInspection inspection,
+            Func<float, float> evaluate = null,
+            Func<bool> shouldCancel = null,
+            float maxErrorThreshold = 0f)
         {
             if (inspection == null)
             {
                 throw new ArgumentNullException(nameof(inspection));
             }
 
-            int w = inspection.BaseMap != null ? inspection.BaseMap.width : DefaultResolution;
-            int h = inspection.BaseMap != null ? inspection.BaseMap.height : DefaultResolution;
+            int w = inspection.BaseMap != null ? inspection.BaseMap.width : DefaultBaseResolution;
+            int h = inspection.BaseMap != null ? inspection.BaseMap.height : DefaultBaseResolution;
 
             RenderTextureDescriptor intermediate = NewDescriptor(w, h, GraphicsFormat.R16G16B16A16_SFloat);
             // Inputs and the packed surface are 8-bit raw staging: copy-compatible with
@@ -100,9 +109,11 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture surfaceOut = null;
 
             RenderTexture roughnessTex = null;
+            RenderTexture cleanedBase = null;
             bool usesExtractedAo = false;
             bool usesBakedAo = false;
             bool shouldExtract = inspection.MetallicGlossMap == null && inspection.RoughnessExtractStrength > 0f;
+            bool isFitDriven = inspection.RoughnessEstimator == NamerRoughnessEstimator.FitDriven;
 
             try
             {
@@ -143,28 +154,48 @@ namespace GraffitiEntertainment.Namer.Editor
                 BindAndDispatchNormalizeEncode(inspection, baseColorIn, normalTexel, aoIn, metallicGlossIn,
                     baseColorOut, octahedral, packInputs, w, h, usesExtractedAo || usesBakedAo);
 
-                // (b) Sobel roughness extraction runs between the normalized base and the surface
-                //     pack (D-01 gate: only when no authored map and strength > 0).
-                if (shouldExtract)
+                _currentBaseColorOut = baseColorOut;
+
+                // (b) Roughness extraction runs between the normalized base and the surface
+                //     pack (D-01 authored-map-wins gate + the 1A fit-driven gate).
+                if (shouldExtract && !isFitDriven)
                 {
-                    roughnessTex = EnsureRoughnessPipeline().ExtractRoughness(inspection, baseColorOut, w, h);
+                    // Sobel: explicit standalone extraction (parity-only — no cleaned base).
+                    NamerRoughnessExtractResult sobel = EnsureRoughnessPipeline().ExtractRoughness(inspection, baseColorOut, w, h);
+                    roughnessTex = sobel.Roughness;
                 }
+                else if (shouldExtract && isFitDriven && inspection.BakeSourceMesh != null && evaluate != null)
+                {
+                    // Fit-driven: decomposition enabled AND source mesh resolved AND an evaluate
+                    // objective (composed by NamerProcessor) — the 1A refit-precondition. On
+                    // cache miss the strength search runs synchronously here (3A).
+                    NamerRoughnessExtractResult fitDriven = EnsureRoughnessPipeline().ExtractRoughness(
+                        inspection, baseColorOut, w, h, evaluate, shouldCancel, maxErrorThreshold);
+                    roughnessTex = fitDriven.Roughness;
+                    cleanedBase = fitDriven.CleanedBase;
+                }
+                // else: identity legacy path — fit-driven without a refit (1A) or strength == 0.
 
                 // (c) Surface pack, overriding the scalar roughness with the extracted texture.
                 BindAndDispatchSurfacePack(octahedral, packInputs, surfaceOut,
                     roughnessTex != null ? (Texture)roughnessTex : WhiteFill(),
                     shouldExtract, inspection.RoughnessExtractStrength, w, h);
 
+                // D-05: the fit-driven path repoints NormalizedBaseColor at the sharp-removal
+                // cleaned base so the refit consumes the post-extraction base.
                 return new NamerComputeResult
                 {
-                    NormalizedBaseColor = baseColorOut,
+                    NormalizedBaseColor = cleanedBase != null ? cleanedBase : baseColorOut,
                     PackedSurface = surfaceOut,
+                    ExtractedRoughness = roughnessTex,
+                    NormalizedBaseColorOwnedByRoughnessPool = cleanedBase != null,
                     Width = w,
                     Height = h,
                 };
             }
             finally
             {
+                _currentBaseColorOut = null;
                 Release(baseColorIn);
                 Release(normalTexel);
                 if (usesExtractedAo || usesBakedAo)
@@ -178,9 +209,16 @@ namespace GraffitiEntertainment.Namer.Editor
                 Release(metallicGlossIn);
                 Release(octahedral);
                 Release(packInputs);
-                if (roughnessTex != null)
+
+                // Plan 02: ownership of the extracted-roughness RT (and the fit-driven cleaned
+                // base, which repoints NormalizedBaseColor) MOVED to NamerComputeResult —
+                // released by ReleaseResult, never here. Releasing them through _pool would
+                // silently no-op on foreign targets and leak them.
+                if (cleanedBase != null)
                 {
-                    _roughnessPipeline.ReleaseRoughness(roughnessTex);
+                    // NormalizedBaseColor now points at the cleaned base, so the normalize
+                    // output (baseColorOut) is surplus — return it to the compute pool.
+                    Release(baseColorOut);
                 }
             }
         }
@@ -197,9 +235,26 @@ namespace GraffitiEntertainment.Namer.Editor
                 return;
             }
 
-            _pool.Release(result.NormalizedBaseColor);
+            if (result.NormalizedBaseColorOwnedByRoughnessPool)
+            {
+                // The fit-driven cleaned base came from the roughness pipeline's OWN pool; the
+                // compute pool's Release silently no-ops on it (not in its _live set), so it
+                // must be returned there or it leaks (D-05).
+                _roughnessPipeline.ReleaseRoughness(result.NormalizedBaseColor);
+            }
+            else
+            {
+                _pool.Release(result.NormalizedBaseColor);
+            }
+
+            if (result.ExtractedRoughness != null)
+            {
+                _roughnessPipeline.ReleaseRoughness(result.ExtractedRoughness);
+            }
+
             _pool.Release(result.PackedSurface);
             result.NormalizedBaseColor = null;
+            result.ExtractedRoughness = null;
             result.PackedSurface = null;
         }
 
@@ -236,6 +291,36 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             return _roughnessPipeline;
+        }
+
+        /// <summary>
+        /// Forwards to <see cref="NamerRoughnessPipeline.RunSharpRemoval"/> — the GPU
+        /// per-iteration sharp-removal eval the NamerProcessor-composed evaluate callback
+        /// drives (3A). Uses the in-flight normalized base (see <c>_currentBaseColorOut</c>).
+        /// </summary>
+        public RenderTexture ExtractSharpRemoval(int w, int h, float strength)
+        {
+            return EnsureRoughnessPipeline().RunSharpRemoval(_currentBaseColorOut, w, h, strength);
+        }
+
+        /// <summary>
+        /// Forwards to <see cref="NamerRoughnessPipeline.ReleaseRoughness"/> — returns an
+        /// extracted-roughness (or cleaned-base probe) target to the roughness pipeline's pool.
+        /// </summary>
+        public void ReleaseExtractedRoughness(RenderTexture rt)
+        {
+            _roughnessPipeline?.ReleaseRoughness(rt);
+        }
+
+        /// <summary>
+        /// Thin forwarder to <see cref="NamerRoughnessPipeline.HasCachedFit"/> — true when a
+        /// fit-driven strength for this inspection is already cached (3A).
+        /// </summary>
+        public bool HasCachedFit(NamerMaterialInspection inspection, int w, int h)
+        {
+            int meshId = inspection != null && inspection.BakeSourceMesh != null ? inspection.BakeSourceMesh.GetInstanceID() : 0;
+            int estimator = inspection != null ? (int)inspection.RoughnessEstimator : 0;
+            return EnsureRoughnessPipeline().HasCachedFit(meshId, estimator, w, h);
         }
 
         /// <summary>
@@ -436,6 +521,23 @@ namespace GraffitiEntertainment.Namer.Editor
     {
         public RenderTexture NormalizedBaseColor;
         public RenderTexture PackedSurface;
+
+        /// <summary>
+        /// The extracted roughness render target (roughness pipeline pool), set only when
+        /// extraction ran. Null in the identity/legacy path (and when extraction was skipped).
+        /// <see cref="NamerComputePipeline.ReleaseResult"/> owns releasing it. The D-07 debug
+        /// channel binds it for the Extracted Roughness view.
+        /// </summary>
+        public RenderTexture ExtractedRoughness;
+
+        /// <summary>
+        /// True when <see cref="NormalizedBaseColor"/> is the fit-driven sharp-removal cleaned
+        /// base (leased from the roughness pipeline's own pool) rather than the compute pool's
+        /// normalize output. Drives the correct release in
+        /// <see cref="NamerComputePipeline.ReleaseResult"/> (D-05).
+        /// </summary>
+        internal bool NormalizedBaseColorOwnedByRoughnessPool;
+
         public int Width;
         public int Height;
     }

@@ -45,7 +45,7 @@ namespace GraffitiEntertainment.Namer.Tests
                     NamerMaterialInspection inspection = BuildInspection(
                         baseMap, baseIsSrgb: false, metallicGlossMap: null,
                         smoothness: 0f, roughness: 1f,
-                        roughnessExtractStrength: 1f, roughnessEstimator: 1);
+                        roughnessExtractStrength: 1f, roughnessEstimator: NamerRoughnessEstimator.Sobel);
 
                     NamerComputeResult result = pipeline.Process(inspection);
                     try
@@ -113,7 +113,7 @@ namespace GraffitiEntertainment.Namer.Tests
                     NamerMaterialInspection inspection = BuildInspection(
                         baseMap, baseIsSrgb: false, metallicGlossMap: null,
                         smoothness: 0f, roughness: 1f,
-                        roughnessExtractStrength: 1f, roughnessEstimator: 1);
+                        roughnessExtractStrength: 1f, roughnessEstimator: NamerRoughnessEstimator.Sobel);
 
                     NamerComputeResult result = pipeline.Process(inspection);
                     try
@@ -176,7 +176,7 @@ namespace GraffitiEntertainment.Namer.Tests
                     NamerMaterialInspection inspection = BuildInspection(
                         baseMap, baseIsSrgb: false, metallicGlossMap: metallicGlossMap,
                         smoothness: 1f, roughness: 0.5f,
-                        roughnessExtractStrength: 0f, roughnessEstimator: 0);
+                        roughnessExtractStrength: 0f, roughnessEstimator: NamerRoughnessEstimator.FitDriven);
 
                     Color32[] surfaceOff;
                     NamerComputeResult resultOff = pipeline.Process(inspection);
@@ -233,7 +233,7 @@ namespace GraffitiEntertainment.Namer.Tests
             float smoothness,
             float roughness,
             float roughnessExtractStrength,
-            int roughnessEstimator)
+            NamerRoughnessEstimator roughnessEstimator)
         {
             return new NamerMaterialInspection
             {

@@ -22,6 +22,8 @@ namespace GraffitiEntertainment.Namer.Editor
         private const string DecompositionEnabledKey = "NamerProcessor.DecompositionEnabled";
         private const string ErrorThresholdKey = "NamerProcessor.ErrorThreshold";
         private const string ResidualResolutionKey = "NamerProcessor.ResidualResolution";
+        private const string RoughnessExtractStrengthKey = "NamerProcessor.RoughnessExtractStrength";
+        private const string RoughnessEstimatorKey = "NamerProcessor.RoughnessEstimator";
 
         /// <summary>Generated-output root folder (D-01 default: Assets/NAMERGenerated/).</summary>
         public string Destination
@@ -98,6 +100,20 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             get { return EditorPrefs.GetInt(ResidualResolutionKey, NamerEditorConstants.DefaultResidualResolution); }
             set { EditorPrefs.SetInt(ResidualResolutionKey, value); }
+        }
+
+        /// <summary>Roughness-extraction strength (D-02; 0 = off, default 1 = on).</summary>
+        public float RoughnessExtractStrength
+        {
+            get { return EditorPrefs.GetFloat(RoughnessExtractStrengthKey, NamerEditorConstants.DefaultRoughnessExtractStrength); }
+            set { EditorPrefs.SetFloat(RoughnessExtractStrengthKey, value); }
+        }
+
+        /// <summary>Roughness estimator popup index (D-03; 0 = FitDriven default, 1 = Sobel).</summary>
+        public int RoughnessEstimator
+        {
+            get { return EditorPrefs.GetInt(RoughnessEstimatorKey, NamerEditorConstants.DefaultRoughnessEstimator); }
+            set { EditorPrefs.SetInt(RoughnessEstimatorKey, value); }
         }
     }
 }

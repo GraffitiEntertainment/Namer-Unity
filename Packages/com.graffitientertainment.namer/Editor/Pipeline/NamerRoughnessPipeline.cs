@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
@@ -8,16 +9,30 @@ using UnityEngine.Rendering;
 namespace GraffitiEntertainment.Namer.Editor
 {
     /// <summary>
-    /// GPU dispatch harness for the NAMER image-space roughness extraction stage
-    /// (Phase 04.1, plan 01). Turns the already-cleaned linear base color (the
-    /// <c>CSNormalize</c> output, post AO un-multiply) into a per-texel roughness texture
-    /// (roughness in the red channel, linear) by dispatching the three staged kernels in
-    /// <c>Compute/NAMERRoughness.compute</c> — never per-pixel C#.
+    /// Result of one roughness-extraction run. <see cref="Roughness"/> is always pool-leased
+    /// (<see cref="GraphicsFormat.R8G8B8A8_UNorm"/> linear); <see cref="CleanedBase"/> is only
+    /// set by the fit-driven path (<see cref="GraphicsFormat.R16G16B16A16_SFloat"/> linear — the
+    /// sharp-removal cleaned base the refit consumes, D-05). Both are owned by the roughness
+    /// pipeline's pool and released via <see cref="NamerRoughnessPipeline.ReleaseRoughness"/>.
+    /// </summary>
+    public sealed class NamerRoughnessExtractResult
+    {
+        public RenderTexture Roughness;
+        public RenderTexture CleanedBase;
+    }
+
+    /// <summary>
+    /// GPU dispatch harness for the NAMER image-space roughness extraction stage (Phase 04.1).
+    /// Plan 01 delivered the Sobel (Blender-parity) estimator; plan 02 adds the fit-driven
+    /// estimator and its frequency-separation kernels (blur H/V -> sharp-detail -> sharp-removal
+    /// -> remap) plus the 3A AO-three-way fit cache.
     ///
-    /// The Sobel estimator mirrors Blender's <c>extract_roughness</c>: Rec.601 luminance ->
-    /// 3x3 Sobel edge magnitude -> global-max normalization (Blender's <c>np.max</c>).
-    /// The result is returned pool-leased and must be released by the caller via
-    /// <see cref="ReleaseRoughness"/>.
+    /// The fit-driven path runs the strength search synchronously on cache miss: it calls
+    /// <see cref="NamerRoughnessFitter.Fit"/> with the <c>Func&lt;float,float&gt;</c> evaluate
+    /// callback that <c>NamerProcessor</c> composes (the callback owns the splitter/fitter/decomp
+    /// state and drives the per-step GPU sharp-removal + readback + refit). This pipeline owns
+    /// only the GPU per-iteration sharp-removal eval (<see cref="RunSharpRemoval"/>) and the fit
+    /// cache — never the splitter/fitter/decomp state (3A).
     ///
     /// All render targets are declared with <see cref="GraphicsFormat"/> (intermediates
     /// <see cref="GraphicsFormat.R16G16B16A16_SFloat"/> linear; the roughness output
@@ -29,12 +44,28 @@ namespace GraffitiEntertainment.Namer.Editor
         private const string ComputeShaderPath = "Packages/com.graffitientertainment.namer/Compute/NAMERRoughness.compute";
 
         private const int AverageDownsampleFactor = 8;
+        private const int MinBlurRadius = 8;
+        private const int MaxBlurRadius = 64;
+        private const int BlurRadiusDivisor = 32;
+        private const float BlurSigmaDivisor = 3.0f;
+        private const float MinBlurSigma = 1e-3f;
 
         private readonly ComputeTexturePool _pool = new ComputeTexturePool();
         private readonly ComputeShader _compute;
         private readonly int _kernelSobel;
         private readonly int _kernelMaxReduce;
         private readonly int _kernelNormalize;
+        private readonly int _kernelBlurH;
+        private readonly int _kernelBlurV;
+        private readonly int _kernelSharpDetail;
+        private readonly int _kernelSharpRemoval;
+        private readonly int _kernelRemap;
+
+        // 3A fit cache keyed by (source mesh id, estimator, w, h) — mirrors NamerAOPipeline's
+        // bake cache. Stores the SELECTED strength so a later Process call reuses it without
+        // re-running the strength search.
+        private readonly Dictionary<(int meshId, int estimator, int w, int h), NamerRoughnessFitResult> _fitCache =
+            new Dictionary<(int, int, int, int), NamerRoughnessFitResult>();
 
         public NamerRoughnessPipeline()
         {
@@ -47,16 +78,36 @@ namespace GraffitiEntertainment.Namer.Editor
             _kernelSobel = _compute.FindKernel("CSRoughnessSobel");
             _kernelMaxReduce = _compute.FindKernel("CSRoughnessMaxReduce");
             _kernelNormalize = _compute.FindKernel("CSRoughnessNormalize");
+            _kernelBlurH = _compute.FindKernel("CSRoughnessBlurH");
+            _kernelBlurV = _compute.FindKernel("CSRoughnessBlurV");
+            _kernelSharpDetail = _compute.FindKernel("CSRoughnessSharpDetail");
+            _kernelSharpRemoval = _compute.FindKernel("CSRoughnessSharpRemoval");
+            _kernelRemap = _compute.FindKernel("CSRoughnessRemap");
         }
 
         /// <summary>
-        /// Extracts image-space Sobel roughness from <paramref name="baseColorOut"/> (the
-        /// already-linear cleaned base produced by <c>CSNormalize</c>) and returns a
-        /// pool-leased <see cref="GraphicsFormat.R8G8B8A8_UNorm"/> linear render target with
-        /// the global-max-normalized roughness in the red channel. The caller owns only the
-        /// returned target and must release it via <see cref="ReleaseRoughness"/>.
+        /// Extracts image-space roughness from <paramref name="baseColorOut"/> (the
+        /// already-linear cleaned base produced by <c>CSNormalize</c>), dispatching on
+        /// <c>inspection.RoughnessEstimator</c>:
+        /// <list type="bullet">
+        /// <item><see cref="NamerRoughnessEstimator.Sobel"/> — the plan-01 Sobel estimator
+        /// (returns only a roughness target, no cleaned base).</item>
+        /// <item><see cref="NamerRoughnessEstimator.FitDriven"/> — the strength search via
+        /// <see cref="NamerRoughnessFitter.Fit"/> (driven by the caller-composed
+        /// <paramref name="evaluate"/>), returning BOTH the roughness and the sharp-removal
+        /// cleaned base (D-05).</item>
+        /// </list>
+        /// Both returned targets are pool-leased; the caller owns them and must release via
+        /// <see cref="ReleaseRoughness"/>.
         /// </summary>
-        public RenderTexture ExtractRoughness(NamerMaterialInspection inspection, RenderTexture baseColorOut, int w, int h)
+        public NamerRoughnessExtractResult ExtractRoughness(
+            NamerMaterialInspection inspection,
+            RenderTexture baseColorOut,
+            int w,
+            int h,
+            Func<float, float> evaluate = null,
+            Func<bool> shouldCancel = null,
+            float maxErrorThreshold = 0f)
         {
             if (inspection == null)
             {
@@ -68,6 +119,139 @@ namespace GraffitiEntertainment.Namer.Editor
                 throw new ArgumentNullException(nameof(baseColorOut));
             }
 
+            if (inspection.RoughnessEstimator == NamerRoughnessEstimator.Sobel)
+            {
+                return new NamerRoughnessExtractResult { Roughness = ExtractSobel(baseColorOut, w, h) };
+            }
+
+            return ExtractFitDriven(inspection, baseColorOut, w, h, evaluate, shouldCancel, maxErrorThreshold);
+        }
+
+        /// <summary>
+        /// Runs one self-contained fit-driven sharp-removal at <paramref name="strength"/>
+        /// (blur H/V -> sharp-detail -> sharp-removal) and returns the cleaned base. This is
+        /// the GPU per-iteration eval the <c>NamerProcessor</c>-composed evaluate callback
+        /// drives (3A) — the pipeline owns the GPU work, the caller owns the readback + refit.
+        /// The returned target is pool-leased; release via <see cref="ReleaseRoughness"/>.
+        /// </summary>
+        public RenderTexture RunSharpRemoval(RenderTexture baseColorOut, int w, int h, float strength)
+        {
+            if (baseColorOut == null)
+            {
+                throw new ArgumentNullException(nameof(baseColorOut));
+            }
+
+            RenderTextureDescriptor intermediate = NewDescriptor(w, h, GraphicsFormat.R16G16B16A16_SFloat);
+
+            RenderTexture blurA = null;
+            RenderTexture blurB = null;
+            RenderTexture sharpDetail = null;
+            RenderTexture cleanedBase = null;
+
+            try
+            {
+                blurA = _pool.Lease(intermediate);
+                blurB = _pool.Lease(intermediate);
+                sharpDetail = _pool.Lease(intermediate);
+                cleanedBase = _pool.Lease(intermediate);
+
+                RunBlurAndSharpDetail(baseColorOut, w, h, blurA, blurB, sharpDetail);
+
+                _compute.SetFloat("_Strength", strength);
+                _compute.SetTexture(_kernelSharpRemoval, "_BaseColorOut", baseColorOut);
+                _compute.SetTexture(_kernelSharpRemoval, "_SharpDetail", sharpDetail);
+                _compute.SetTexture(_kernelSharpRemoval, "_CleanedBaseOut", cleanedBase);
+                Dispatch(_kernelSharpRemoval, w, h);
+
+                return cleanedBase;
+            }
+            finally
+            {
+                Release(blurA);
+                Release(blurB);
+                Release(sharpDetail);
+            }
+        }
+
+        /// <summary>
+        /// Returns an extracted-roughness (or cleaned-base) target to this pipeline's pool.
+        /// No-ops for null.
+        /// </summary>
+        public void ReleaseRoughness(RenderTexture roughness)
+        {
+            _pool.Release(roughness);
+        }
+
+        /// <summary>
+        /// True when a fit-driven strength for <paramref name="meshId"/>/<paramref name="estimator"/>
+        /// at <paramref name="w"/>×<paramref name="h"/> is already cached (3A).
+        /// </summary>
+        public bool HasCachedFit(int meshId, int estimator, int w, int h)
+        {
+            return _fitCache.ContainsKey((meshId, estimator, w, h));
+        }
+
+        /// <summary>
+        /// Runs (or reuses a cached) fit-driven strength search, then invokes
+        /// <paramref name="onComplete"/>. The off-debounce interactive path (3A) — mirrors
+        /// <c>NamerAOPipeline.RequestBake</c>. No-ops (and still invokes the callback) when a
+        /// fit is already cached or no mesh/objective exists. Returns <c>false</c> (and does
+        /// NOT cache or invoke <paramref name="onComplete"/>) when the search is cancelled via
+        /// <paramref name="shouldCancel"/>.
+        /// </summary>
+        public bool RequestFit(
+            NamerMaterialInspection inspection,
+            int w,
+            int h,
+            float maxErrorThreshold,
+            Func<float, float> evaluate,
+            Action onComplete,
+            Func<bool> shouldCancel = null)
+        {
+            if (inspection == null || inspection.BakeSourceMesh == null || evaluate == null)
+            {
+                onComplete?.Invoke();
+                return true;
+            }
+
+            (int meshId, int estimator, int w, int h) key = MakeFitKey(inspection, w, h);
+            if (_fitCache.ContainsKey(key))
+            {
+                onComplete?.Invoke();
+                return true;
+            }
+
+            NamerRoughnessFitResult fit = NamerRoughnessFitter.Fit(evaluate, shouldCancel, maxErrorThreshold);
+            if (fit.Cancelled)
+            {
+                // A cancelled fit must never be cached: no callback, so the caller falls back
+                // to the identity legacy path (mirrors NamerAOPipeline's cancelled-bake contract).
+                return false;
+            }
+
+            _fitCache[key] = fit;
+            onComplete?.Invoke();
+            return true;
+        }
+
+        /// <summary>Drops every cached fit (used by tests and <see cref="Dispose"/>).</summary>
+        public void ClearFitCache()
+        {
+            _fitCache.Clear();
+        }
+
+        public void Dispose()
+        {
+            ClearFitCache();
+            _pool.Dispose();
+        }
+
+        // ------------------------------------------------------------------
+        // Sobel (plan-01) path
+        // ------------------------------------------------------------------
+
+        private RenderTexture ExtractSobel(RenderTexture baseColorOut, int w, int h)
+        {
             RenderTextureDescriptor intermediate = NewDescriptor(w, h, GraphicsFormat.R16G16B16A16_SFloat);
             RenderTextureDescriptor unorm8 = NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm);
             int avgW = (w + AverageDownsampleFactor - 1) / AverageDownsampleFactor;
@@ -112,18 +296,131 @@ namespace GraffitiEntertainment.Namer.Editor
             }
         }
 
-        /// <summary>
-        /// Returns an extracted roughness target to this pipeline's pool. No-ops for null.
-        /// </summary>
-        public void ReleaseRoughness(RenderTexture roughness)
+        // ------------------------------------------------------------------
+        // Fit-driven (plan-02) path
+        // ------------------------------------------------------------------
+
+        private NamerRoughnessExtractResult ExtractFitDriven(
+            NamerMaterialInspection inspection,
+            RenderTexture baseColorOut,
+            int w,
+            int h,
+            Func<float, float> evaluate,
+            Func<bool> shouldCancel,
+            float maxErrorThreshold)
         {
-            _pool.Release(roughness);
+            if (evaluate == null)
+            {
+                // No refit objective => no fit => identity (1A). NamerComputePipeline gates on
+                // this before calling; this is a defensive no-op.
+                return new NamerRoughnessExtractResult();
+            }
+
+            (int meshId, int estimator, int w, int h) key = MakeFitKey(inspection, w, h);
+
+            NamerRoughnessFitResult fit;
+            if (_fitCache.TryGetValue(key, out fit))
+            {
+                // Cached strength: reuse it without re-running the search.
+            }
+            else
+            {
+                fit = NamerRoughnessFitter.Fit(evaluate, shouldCancel, maxErrorThreshold);
+                if (fit.Cancelled)
+                {
+                    return new NamerRoughnessExtractResult();
+                }
+
+                _fitCache[key] = fit;
+            }
+
+            return RunFrequencySeparation(baseColorOut, w, h, fit.Strength);
         }
 
-        public void Dispose()
+        /// <summary>
+        /// Produces the final fit-driven outputs at <paramref name="strength"/>: the
+        /// sharp-removal cleaned base AND the strength-scaled roughness, computing the
+        /// frequency-separation blur once.
+        /// </summary>
+        private NamerRoughnessExtractResult RunFrequencySeparation(RenderTexture baseColorOut, int w, int h, float strength)
         {
-            _pool.Dispose();
+            RenderTextureDescriptor intermediate = NewDescriptor(w, h, GraphicsFormat.R16G16B16A16_SFloat);
+            RenderTextureDescriptor unorm8 = NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm);
+
+            RenderTexture blurA = null;
+            RenderTexture blurB = null;
+            RenderTexture sharpDetail = null;
+            RenderTexture cleanedBase = null;
+            RenderTexture roughnessOut = null;
+
+            try
+            {
+                blurA = _pool.Lease(intermediate);
+                blurB = _pool.Lease(intermediate);
+                sharpDetail = _pool.Lease(intermediate);
+                cleanedBase = _pool.Lease(intermediate);
+                roughnessOut = _pool.Lease(unorm8);
+
+                RunBlurAndSharpDetail(baseColorOut, w, h, blurA, blurB, sharpDetail);
+
+                _compute.SetFloat("_Strength", strength);
+
+                _compute.SetTexture(_kernelSharpRemoval, "_BaseColorOut", baseColorOut);
+                _compute.SetTexture(_kernelSharpRemoval, "_SharpDetail", sharpDetail);
+                _compute.SetTexture(_kernelSharpRemoval, "_CleanedBaseOut", cleanedBase);
+                Dispatch(_kernelSharpRemoval, w, h);
+
+                _compute.SetTexture(_kernelRemap, "_SharpDetail", sharpDetail);
+                _compute.SetTexture(_kernelRemap, "_RoughnessOut", roughnessOut);
+                Dispatch(_kernelRemap, w, h);
+
+                return new NamerRoughnessExtractResult { Roughness = roughnessOut, CleanedBase = cleanedBase };
+            }
+            finally
+            {
+                Release(blurA);
+                Release(blurB);
+                Release(sharpDetail);
+            }
         }
+
+        /// <summary>
+        /// Runs the shared frequency-separation prelude: separable gaussian blur H/V over the
+        /// full-RGB base followed by the sharp-detail extraction. <paramref name="blurA"/>/<paramref name="blurB"/>
+        /// ping-pong the blur; <paramref name="sharpDetail"/> receives base - blurred.
+        /// </summary>
+        private void RunBlurAndSharpDetail(
+            RenderTexture baseColorOut,
+            int w,
+            int h,
+            RenderTexture blurA,
+            RenderTexture blurB,
+            RenderTexture sharpDetail)
+        {
+            int radius = Mathf.Clamp(Mathf.Max(w, h) / BlurRadiusDivisor, MinBlurRadius, MaxBlurRadius);
+            float sigma = Mathf.Max(radius / BlurSigmaDivisor, MinBlurSigma);
+
+            _compute.SetInts("_Size", new[] { w, h });
+            _compute.SetInt("_Radius", radius);
+            _compute.SetFloat("_Sigma", sigma);
+
+            _compute.SetTexture(_kernelBlurH, "_BaseColorOut", baseColorOut);
+            _compute.SetTexture(_kernelBlurH, "_BlurPing", blurA);
+            Dispatch(_kernelBlurH, w, h);
+
+            _compute.SetTexture(_kernelBlurV, "_BlurPing", blurA);
+            _compute.SetTexture(_kernelBlurV, "_Blurred", blurB);
+            Dispatch(_kernelBlurV, w, h);
+
+            _compute.SetTexture(_kernelSharpDetail, "_BaseColorOut", baseColorOut);
+            _compute.SetTexture(_kernelSharpDetail, "_Blurred", blurB);
+            _compute.SetTexture(_kernelSharpDetail, "_SharpDetail", sharpDetail);
+            Dispatch(_kernelSharpDetail, w, h);
+        }
+
+        // ------------------------------------------------------------------
+        // Shared reduction + dispatch helpers (plan-01 Sobel reduce)
+        // ------------------------------------------------------------------
 
         private float ReduceToGlobalMax(RenderTexture roughnessRaw, int w, int h, RenderTexture avgA, RenderTexture avgB)
         {
@@ -180,6 +477,12 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             return globalMax;
+        }
+
+        private static (int meshId, int estimator, int w, int h) MakeFitKey(NamerMaterialInspection inspection, int w, int h)
+        {
+            int meshId = inspection.BakeSourceMesh != null ? inspection.BakeSourceMesh.GetInstanceID() : 0;
+            return (meshId, (int)inspection.RoughnessEstimator, w, h);
         }
 
         private void Dispatch(int kernel, int w, int h)

@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 04.1
 current_phase_name: baked-response-roughness-extraction-zero-residual-one-textur
 status: executing
-stopped_at: Completed 04.1-01-PLAN.md
-last_updated: "2026-09-06T16:17:23.279Z"
+stopped_at: Completed 04.1-02-PLAN.md
+last_updated: "2026-09-06T17:02:04.109Z"
 last_activity: 2026-09-06
 last_activity_desc: Phase 04.1 execution started
 progress:
   total_phases: 6
   completed_phases: 5
   total_plans: 20
-  completed_plans: 18
+  completed_plans: 19
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 ## Current Position
 
 Phase: 04.1 (baked-response-roughness-extraction-zero-residual-one-textur) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-09-06 — Phase 04.1 execution started
 
-Progress: [█████████░] 90%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -79,6 +79,7 @@ Progress: [█████████░] 90%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 04.1 P01 | 10min | 3 tasks | 7 files |
+| Phase 04.1 P02 | 31 | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -142,6 +143,10 @@ Recent decisions affecting current work:
 - [Phase 04.1]: Rec.601 luminance weights (not Rec.709) for Blender-parity Sobel (RESEARCH Pitfall 4)
 - [Phase 04.1]: Extraction overrides the scalar roughness at PACK time in CSSurfacePack, not by re-dispatching CSNormalize (which would double-apply the AO un-multiply)
 - [Phase 04.1]: RoughnessExtractStrength has no inline default (0 = off) preserving the legacy scalar path; shipped default-on 1f arrives via settings in plan 02
+- [Phase ?]: NamerProcessor composes the Func<float,float> evaluate callback (owner of splitter/fitter/decomp state); NamerRoughnessPipeline owns only the GPU per-step sharp-removal (RunSharpRemoval) and the 3A fit cache
+- [Phase ?]: The fit-driven strength search runs synchronously on cache miss inside NamerProcessor.Process, reusing a pre-Process split; the refit consumes NormalizedBaseColor (already the D-05 cleaned base)
+- [Phase ?]: RoughnessExtractStrength/RoughnessEstimator settings + NamerEditorConstants defaults pulled into plan 02 (NamerProcessor settings copy + fit tests need them)
+- [Phase ?]: NamerComputeResult.NormalizedBaseColorOwnedByRoughnessPool tracks the D-05 repoint so ReleaseResult returns the cleaned base to the roughness pool (compute pool Release would no-op and leak)
 
 ### Pending Todos
 
@@ -172,6 +177,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-06T16:17:23.262Z
-Stopped at: Completed 04.1-01-PLAN.md
+Last session: 2026-09-06T17:02:04.101Z
+Stopped at: Completed 04.1-02-PLAN.md
 Resume file: None

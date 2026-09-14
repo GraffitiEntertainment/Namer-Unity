@@ -228,12 +228,10 @@ namespace GraffitiEntertainment.Namer.Tests
             Texture2D baseMap = new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, false, true);
             Shader shader = Shader.Find("GraffitiEntertainment.Namer/NAMER");
             Assert.IsNotNull(shader, "NAMER shader not found");
-            Texture2D offsetTex = new Texture2D(1, 1, TextureFormat.RGBA32, false, true);
+            Texture2D offsetTex = CreateImportedOffsetMap(TempFolder + "/RoughnessOffset.png");
             try
             {
                 FillSolid(baseMap, new Color(0.5f, 0.5f, 0.5f, 1.0f));
-                offsetTex.SetPixel(0, 0, new Color(0.25f, 0f, 0f, 1f));
-                offsetTex.Apply(false, false);
 
                 // Only the path-composition / overwrite fields are read by AssetGenerator.Generate
                 // (the offset is a per-material inspection input, not a settings key — D-06).
@@ -270,7 +268,7 @@ namespace GraffitiEntertainment.Namer.Tests
             }
             finally
             {
-                Destroy(baseMap, offsetTex);
+                Destroy(baseMap);
                 pipeline.Dispose();
                 RestorePrefs(prefs);
                 AssetDatabase.DeleteAsset(TempFolder);
@@ -474,6 +472,20 @@ namespace GraffitiEntertainment.Namer.Tests
                 }
             }
 
+            source.Apply(false, false);
+            File.WriteAllBytes(path, source.EncodeToPNG());
+            Destroy(source);
+            AssetDatabase.ImportAsset(path);
+            TextureImporter importer = (TextureImporter)AssetImporter.GetAtPath(path);
+            importer.sRGBTexture = false;
+            importer.SaveAndReimport();
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+
+        private static Texture2D CreateImportedOffsetMap(string path)
+        {
+            Texture2D source = new Texture2D(1, 1, TextureFormat.RGBA32, false, true);
+            source.SetPixel(0, 0, new Color(0.25f, 0f, 0f, 1f));
             source.Apply(false, false);
             File.WriteAllBytes(path, source.EncodeToPNG());
             Destroy(source);

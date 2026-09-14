@@ -398,13 +398,33 @@ namespace GraffitiEntertainment.Namer.Tests
             UnityEngine.SceneManagement.Scene scene = default;
             try
             {
-                scene = UnityEditor.SceneManagement.EditorSceneManager.NewScene(
-                    UnityEditor.SceneManagement.NewSceneSetup.EmptyScene,
-                    UnityEditor.SceneManagement.NewSceneMode.Additive);
-                UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene, TempFolder + "/SceneAssetProbe.unity");
-                AssetDatabase.ImportAsset(TempFolder + "/SceneAssetProbe.unity");
+                SceneAsset sceneAsset;
+                try
+                {
+                    // Hermetic probe scene (headless). Additive creation throws when the active
+                    // scene is untitled and unsaved (live editor) — fall back to any existing
+                    // project scene below; inspecting it is read-only (the guard rejects the
+                    // .unity path before any scene content is read).
+                    scene = UnityEditor.SceneManagement.EditorSceneManager.NewScene(
+                        UnityEditor.SceneManagement.NewSceneSetup.EmptyScene,
+                        UnityEditor.SceneManagement.NewSceneMode.Additive);
+                    UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene, TempFolder + "/SceneAssetProbe.unity");
+                    AssetDatabase.ImportAsset(TempFolder + "/SceneAssetProbe.unity");
+                    sceneAsset = AssetDatabase.LoadAssetAtPath<SceneAsset>(TempFolder + "/SceneAssetProbe.unity");
+                }
+                catch (System.InvalidOperationException)
+                {
+                    string[] existing = AssetDatabase.FindAssets("t:SceneAsset");
+                    if (existing.Length == 0)
+                    {
+                        Assert.Ignore(
+                            "cannot create a probe scene (untitled unsaved active scene) and no project scene exists");
+                    }
 
-                SceneAsset sceneAsset = AssetDatabase.LoadAssetAtPath<SceneAsset>(TempFolder + "/SceneAssetProbe.unity");
+                    sceneAsset = AssetDatabase.LoadAssetAtPath<SceneAsset>(
+                        AssetDatabase.GUIDToAssetPath(existing[0]));
+                }
+
                 Assert.IsNotNull(sceneAsset, "scene asset should load");
 
                 NamerSourceModel model = SourceInspector.Inspect(sceneAsset);

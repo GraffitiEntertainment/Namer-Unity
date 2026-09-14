@@ -245,6 +245,12 @@ namespace GraffitiEntertainment.Namer.Editor
             // asset): materials are sub-assets.
             if (!string.IsNullOrEmpty(path))
             {
+                if (path.EndsWith(".unity", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    warnings.Add("Unsupported selection '" + (selection != null ? selection.name : "null") + "' is a scene asset — select a model, prefab, material, or folder instead.");
+                    return;
+                }
+
                 AddSubAssetMaterials(path, materials, seen);
 
                 return;
@@ -285,8 +291,19 @@ namespace GraffitiEntertainment.Namer.Editor
             }
         }
 
+        /// <summary>
+        /// Enumerates a model/FBX asset's sub-asset materials. Scene assets (<c>.unity</c>)
+        /// are outside PRD selection scope (model, prefab, material, folder) and
+        /// <c>LoadAllAssetsAtPath</c> cannot read scene objects, so scene paths are rejected
+        /// here before the threaded sub-asset reader is ever invoked.
+        /// </summary>
         private static void AddSubAssetMaterials(string assetPath, List<Material> materials, HashSet<int> seen)
         {
+            if (string.IsNullOrEmpty(assetPath) || assetPath.EndsWith(".unity", System.StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
             // LoadAllAssetsAtPath is non-generic (returns Object[]); filter materials.
             foreach (Object subAsset in AssetDatabase.LoadAllAssetsAtPath(assetPath))
             {

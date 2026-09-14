@@ -1140,7 +1140,7 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             string path = AssetDatabase.GetAssetPath(selection);
-            return string.IsNullOrEmpty(path) ? null : FindMeshSubAsset(path);
+            return (string.IsNullOrEmpty(path) || path.EndsWith(".unity", StringComparison.OrdinalIgnoreCase)) ? null : FindMeshSubAsset(path);
         }
 
         private static Mesh FindMeshInGameObject(GameObject gameObject)

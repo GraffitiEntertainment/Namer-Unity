@@ -389,6 +389,43 @@ namespace GraffitiEntertainment.Namer.Tests
             }
         }
 
+        // -- Gap 3a: scene-asset selection degrades gracefully -----------------
+
+        [Test]
+        public void SceneAsset_Selection_DegradesGracefullyWithoutThrowing()
+        {
+            EnsureTempFolder();
+            UnityEngine.SceneManagement.Scene scene = default;
+            try
+            {
+                scene = UnityEditor.SceneManagement.EditorSceneManager.NewScene(
+                    UnityEditor.SceneManagement.NewSceneSetup.EmptyScene,
+                    UnityEditor.SceneManagement.NewSceneMode.Additive);
+                UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene, TempFolder + "/SceneAssetProbe.unity");
+                AssetDatabase.ImportAsset(TempFolder + "/SceneAssetProbe.unity");
+
+                SceneAsset sceneAsset = AssetDatabase.LoadAssetAtPath<SceneAsset>(TempFolder + "/SceneAssetProbe.unity");
+                Assert.IsNotNull(sceneAsset, "scene asset should load");
+
+                NamerSourceModel model = SourceInspector.Inspect(sceneAsset);
+
+                Assert.IsNotNull(model, "inspection must return a non-null model");
+                Assert.AreEqual(0, model.Materials.Count, "a scene asset must contribute no materials");
+                Assert.IsTrue(
+                    model.Warnings.Exists(w => w.IndexOf("scene asset", System.StringComparison.OrdinalIgnoreCase) >= 0),
+                    "scene asset selection must record a warning");
+            }
+            finally
+            {
+                if (scene.IsValid())
+                {
+                    UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, true);
+                }
+
+                AssetDatabase.DeleteAsset(TempFolder);
+            }
+        }
+
         // -- Pitfall 5: source immutability ----------------------------------
 
         [Test]

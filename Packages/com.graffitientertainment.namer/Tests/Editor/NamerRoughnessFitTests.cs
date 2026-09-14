@@ -42,11 +42,11 @@ namespace GraffitiEntertainment.Namer.Tests
             {
                 { 0.0f, 0.50f },
                 { 0.15f, 0.20f },
-                { 0.3f, 0.05f },
-                { 0.5f, 0.01f },
-                { 0.7f, 0.03f },
-                { 0.9f, 0.04f },
-                { 1.0f, 0.06f },
+                { 0.3f, 0.015f },
+                { 0.5f, 0.005f },
+                { 0.7f, 0.008f },
+                { 0.9f, 0.012f },
+                { 1.0f, 0.018f },
             };
 
             var visited = new List<float>();

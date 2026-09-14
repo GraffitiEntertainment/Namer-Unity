@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 04.1-04-PLAN.md
-last_updated: "2026-09-14T23:28:12.138Z"
-last_activity: 2026-09-14 -- Completed 04.1-04-PLAN.md
+status: verifying
+stopped_at: Completed 04.1-05-PLAN.md
+last_updated: "2026-09-14T23:49:53.206Z"
+last_activity: 2026-09-14
 progress:
   total_phases: 7
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 22
-  completed_plans: 21
-  percent: 71
+  completed_plans: 22
+  percent: 86
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 
 Phase: 04.1 (baked-response-roughness-extraction-zero-residual-one-textur) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
-Last activity: 2026-09-14 -- Completed 04.1-04-PLAN.md
+Status: Phase complete — ready for verification
+Last activity: 2026-09-14
 
-Progress: [██████████] 95%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -80,6 +80,7 @@ Progress: [██████████] 95%
 | Phase 04.1 P02 | 31 | 3 tasks | 15 files |
 | Phase 04.1 P03 | 10min | 2 tasks | 7 files |
 | Phase 04.1 P04 | 4min | 3 tasks | 6 files |
+| Phase 04.1 P05 | 2min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -152,6 +153,9 @@ Recent decisions affecting current work:
 - [Phase 04.1]: Scene guard = graceful rejection, not scene support — .unity assets are outside PRD selection scope and LoadAllAssetsAtPath cannot read scene objects; scene-instance GameObject selection (empty asset path) is unchanged
 - [Phase 04.1]: Preview wiring = option 1 — RecomputePreview supplies the 3A evaluate callback (composed exactly like NamerProcessor) rather than relying on the fit cache, which is empty on first preview; EvaluateRefitMaxError widened private->internal instead of duplicating the domain helper
 - [Phase 04.1]: Vanish guard = bindposes-before-boneWeights reorder (skinned-safe) + degenerate-bounds guard so a broken generated mesh is never bound; no speculative guards beyond the diagnosed static defect
+- [Phase 04.1]: Minimizer fixture rescaled (not a local threshold) so the shipped ErrorThreshold=0.02 stays meaningful and plan 04.1-02 Task 5 item 1 holds exactly
+- [Phase 04.1]: Collapse fixtures use fixture-local CollapseErrorThreshold=0.04 + BakedResponse gloss amplitude 0.10 (test-only); production D-13 gate / NamerRoughnessFitter / MinBlurRadius untouched
+- [Phase 04.1]: Offset fixture persists the roughness-offset texture as an imported asset (mirroring CreateImportedBaseMap), matching D-06 product intent of a user-assigned project texture
 
 ### Pending Todos
 
@@ -182,6 +186,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-14T23:27:43.471Z
-Stopped at: Completed 04.1-04-PLAN.md
+Last session: 2026-09-14T23:49:53.199Z
+Stopped at: Completed 04.1-05-PLAN.md
 Resume file: None

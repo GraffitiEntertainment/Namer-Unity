@@ -319,7 +319,33 @@ namespace GraffitiEntertainment.Namer.Editor
                 inspection.RoughnessExtractStrength = _roughnessExtractStrength;
                 inspection.RoughnessEstimator = (NamerRoughnessEstimator)_roughnessEstimator;
 
-                _liveResult = _pipeline.Process(inspection);
+                // 3A fit-driven preview wiring: supply the same evaluate callback
+                // NamerProcessor composes so the default FitDriven estimator actually extracts
+                // in the live preview. The 1A refit-precondition needs BakeSourceMesh != null
+                // AND a non-null evaluate; without this the preview packs the scalar roughness
+                // and the Extracted Roughness debug channel stays black.
+                inspection.BakeSourceMesh = _decompositionEnabled ? _previewMesh : null;
+                int baseW = inspection.BaseMap != null ? inspection.BaseMap.width : NamerComputePipeline.DefaultBaseResolution;
+                int baseH = inspection.BaseMap != null ? inspection.BaseMap.height : NamerComputePipeline.DefaultBaseResolution;
+                Func<float, float> evaluate = null;
+                if (_decompositionEnabled && _previewMesh != null && inspection.RoughnessEstimator == NamerRoughnessEstimator.FitDriven)
+                {
+                    NamerSplitResult fitSplit = MeshVertexSplitter.Split(_previewMesh);
+                    evaluate = strength =>
+                    {
+                        RenderTexture cleaned = _pipeline.ExtractSharpRemoval(baseW, baseH, strength);
+                        try
+                        {
+                            return NamerProcessor.EvaluateRefitMaxError(fitSplit, cleaned, baseW, baseH, _errorThreshold, _residualResolution);
+                        }
+                        finally
+                        {
+                            _pipeline.ReleaseExtractedRoughness(cleaned);
+                        }
+                    };
+                }
+
+                _liveResult = _pipeline.Process(inspection, evaluate, null, _errorThreshold);
 
                 RenderTexture previewBaseMap = ResolvePreviewBaseMap();
 

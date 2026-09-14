@@ -509,7 +509,7 @@ namespace GraffitiEntertainment.Namer.Editor
         /// generation, and returns the post-refit MaxError. The 3A evaluate callback invokes
         /// this per strength step; every intermediate allocation is disposed here.
         /// </summary>
-        private static float EvaluateRefitMaxError(
+        internal static float EvaluateRefitMaxError(
             NamerSplitResult split,
             RenderTexture cleanedBase,
             int w,

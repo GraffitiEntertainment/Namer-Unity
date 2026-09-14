@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04.1-03-PLAN.md
-last_updated: "2026-09-14T23:21:22.936Z"
-last_activity: 2026-09-14 -- Phase 04.1 execution started
+stopped_at: Completed 04.1-04-PLAN.md
+last_updated: "2026-09-14T23:28:12.138Z"
+last_activity: 2026-09-14 -- Completed 04.1-04-PLAN.md
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 22
-  completed_plans: 20
+  completed_plans: 21
   percent: 71
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 ## Current Position
 
 Phase: 04.1 (baked-response-roughness-extraction-zero-residual-one-textur) — EXECUTING
-Plan: 1 of 5
-Status: Executing Phase 04.1
-Last activity: 2026-09-14 -- Phase 04.1 execution started
+Plan: 5 of 5
+Status: Ready to execute
+Last activity: 2026-09-14 -- Completed 04.1-04-PLAN.md
 
-Progress: [██████████] 100%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -79,6 +79,7 @@ Progress: [██████████] 100%
 | Phase 04.1 P01 | 10min | 3 tasks | 7 files |
 | Phase 04.1 P02 | 31 | 3 tasks | 15 files |
 | Phase 04.1 P03 | 10min | 2 tasks | 7 files |
+| Phase 04.1 P04 | 4min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -148,6 +149,9 @@ Recent decisions affecting current work:
 - [Phase ?]: NamerComputeResult.NormalizedBaseColorOwnedByRoughnessPool tracks the D-05 repoint so ReleaseResult returns the cleaned base to the roughness pool (compute pool Release would no-op and leak)
 - [Phase ?]: [Phase 04.1 P03]: The one-texture _BaseResidualMap unbinding needs no code change — already delivered by the existing D-13 drop (baseResidualPath = decomp != null ? residualWritePath : basePath yields null when residualWritePath == null); no baseResidualPath edit is made, so the non-decomposed Phase-3 path keeps binding the Base PNG.
 - [Phase ?]: [Phase 04.1 P03]: D-06 _RoughnessOffsetMap is additive with a neutral 'black' {} default (offset .r == 0 => byte-identical decode), applied in InitializeNamerSurfaceData AFTER NAMER_DECODE_SURFACE so the macro signature and Meta-pass call site are untouched; the offset is a direct user-assigned Texture2D (no AssetDatabase.LoadAssetAtPath).
+- [Phase 04.1]: Scene guard = graceful rejection, not scene support — .unity assets are outside PRD selection scope and LoadAllAssetsAtPath cannot read scene objects; scene-instance GameObject selection (empty asset path) is unchanged
+- [Phase 04.1]: Preview wiring = option 1 — RecomputePreview supplies the 3A evaluate callback (composed exactly like NamerProcessor) rather than relying on the fit cache, which is empty on first preview; EvaluateRefitMaxError widened private->internal instead of duplicating the domain helper
+- [Phase 04.1]: Vanish guard = bindposes-before-boneWeights reorder (skinned-safe) + degenerate-bounds guard so a broken generated mesh is never bound; no speculative guards beyond the diagnosed static defect
 
 ### Pending Todos
 
@@ -178,6 +182,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-06T17:18:33.057Z
-Stopped at: Completed 04.1-03-PLAN.md
+Last session: 2026-09-14T23:27:43.471Z
+Stopped at: Completed 04.1-04-PLAN.md
 Resume file: None

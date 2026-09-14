@@ -236,5 +236,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 3. Asset Generation + Editor Workflow + Preview | 3/3 | Complete    | 2026-08-28 |
 | 03.1. AO Extraction (INSERTED) | 3/3 | Complete | 2026-08-31 |
 | 4. Vertex-Color Decomposition + Residual | 5/5 | Complete   | 2026-09-01 |
-| 04.1. Roughness Extraction + One-Texture (INSERTED) | 5/5 | In Progress (2 gap-closure plans pending) |  |
+| 04.1. Roughness Extraction + One-Texture (INSERTED) | 3/5 | In Progress (2 gap-closure plans pending) |  |
 | 5. Stylization | 0/3 | Not started | - |

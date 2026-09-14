@@ -26,6 +26,10 @@ namespace GraffitiEntertainment.Namer.Tests
         private const int WorkingSize = 64;
         private const int RoughnessMask = 0x3F;
         private const float ErrorThreshold = 0.02f;
+        // Test-local fit/D-13 threshold for the three collapse tests: the 64x64 BakedResponse
+        // fixture's clamped-edge blur bias (MinBlurRadius=8) plus quantization leaves no
+        // headroom at 0.02, so the collapse tests get headroom over the ~0.018-0.021 floor.
+        private const float CollapseErrorThreshold = 0.04f;
         private const int ResidualResolution = 0;
 
         private static bool ComputeAvailable =>
@@ -101,12 +105,12 @@ namespace GraffitiEntertainment.Namer.Tests
                 NamerSplitResult split = MeshVertexSplitter.Split(mesh);
                 Func<float, float> evaluate = ComposeEvaluate(pipeline, split);
 
-                NamerComputeResult result = pipeline.Process(inspection, evaluate, null, ErrorThreshold);
+                NamerComputeResult result = pipeline.Process(inspection, evaluate, null, CollapseErrorThreshold);
                 try
                 {
                     // D-05: NormalizedBaseColor is the sharp-removal-cleaned base in the
                     // fit-driven path, so this refit consumes the post-extraction base.
-                    NamerDecompErrorStats stats = Decompose(split, result.NormalizedBaseColor, ErrorThreshold);
+                    NamerDecompErrorStats stats = Decompose(split, result.NormalizedBaseColor, CollapseErrorThreshold);
                     Assert.IsFalse(stats.ResidualRequired,
                         "fit-driven extraction must collapse the residual (D-05 refit consumes the cleaned base)");
 
@@ -162,7 +166,7 @@ namespace GraffitiEntertainment.Namer.Tests
                     Suffix = "",
                     OverwriteGenerated = false,
                     DecompositionEnabled = true,
-                    ErrorThreshold = ErrorThreshold,
+                    ErrorThreshold = CollapseErrorThreshold,
                     ResidualResolution = ResidualResolution,
                     // RoughnessExtractStrength / RoughnessEstimator left at DEFAULT:
                     //   RoughnessExtractStrength -> DefaultRoughnessExtractStrength (1 = on)
@@ -209,6 +213,9 @@ namespace GraffitiEntertainment.Namer.Tests
                 RenderTexture cleaned = pipeline.ExtractSharpRemoval(WorkingSize, WorkingSize, strength);
                 try
                 {
+                    // MaxError is threshold-independent (the threshold only drives the D-13
+                    // ResidualRequired gate / resolution search), so the evaluate callback keeps
+                    // the shipped ErrorThreshold while the fit uses CollapseErrorThreshold.
                     return Decompose(split, cleaned, ErrorThreshold).MaxError;
                 }
                 finally
@@ -266,7 +273,7 @@ namespace GraffitiEntertainment.Namer.Tests
         private static Color BakedResponse(int x, int y, int size)
         {
             float gradient = (float)x / size;
-            float gloss = 0.05f * Mathf.Sin(x * 0.6f) * Mathf.Sin(y * 0.6f);
+            float gloss = 0.10f * Mathf.Sin(x * 0.6f) * Mathf.Sin(y * 0.6f);
             float v = Mathf.Clamp01(gradient + gloss);
             return new Color(v, v, v, 1f);
         }

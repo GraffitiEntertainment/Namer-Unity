@@ -84,6 +84,8 @@ namespace GraffitiEntertainment.Namer.Tests
                 Assert.AreEqual(generatedMesh, filter.sharedMesh,
                     "decomposition ON must swap the scene renderer's sharedMesh to the split mesh");
                 Assert.AreNotEqual(sourceMesh, filter.sharedMesh, "the renderer must no longer wear the source mesh");
+                Assert.Greater(generatedMesh.vertexCount, 0, "generated split mesh must have vertices");
+                Assert.Greater(generatedMesh.bounds.size.sqrMagnitude, 0f, "generated split mesh bounds must be non-degenerate");
             }
             finally
             {

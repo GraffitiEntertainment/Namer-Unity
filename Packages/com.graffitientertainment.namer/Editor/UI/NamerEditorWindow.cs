@@ -609,6 +609,13 @@ namespace GraffitiEntertainment.Namer.Editor
             mesh.SetUVs(0, split.Uvs);
             mesh.colors32 = colors;
 
+            // bindposes must be assigned before boneWeights on a skinned mesh or a
+            // SkinnedMeshRenderer may not render the swapped sharedMesh (gap 3b).
+            if (split.Bindposes != null)
+            {
+                mesh.bindposes = split.Bindposes;
+            }
+
             if (split.BoneWeights != null)
             {
                 mesh.boneWeights = split.BoneWeights;
@@ -618,11 +625,6 @@ namespace GraffitiEntertainment.Namer.Editor
             for (int i = 0; i < split.SubMeshTriangles.Length; i++)
             {
                 mesh.SetTriangles(split.SubMeshTriangles[i], i);
-            }
-
-            if (split.Bindposes != null)
-            {
-                mesh.bindposes = split.Bindposes;
             }
 
             mesh.RecalculateBounds();

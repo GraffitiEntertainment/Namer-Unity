@@ -340,7 +340,14 @@ namespace GraffitiEntertainment.Namer.Editor
                     Mesh generatedMesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
                     if (generatedMesh != null)
                     {
-                        generatedMeshBySourceMeshId[sourceMesh.GetInstanceID()] = generatedMesh;
+                        if (generatedMesh.bounds.size.sqrMagnitude > 0f)
+                        {
+                            generatedMeshBySourceMeshId[sourceMesh.GetInstanceID()] = generatedMesh;
+                        }
+                        else
+                        {
+                            result.Warnings.Add("Generated mesh for material '" + (source != null ? source.name : "(null)") + "' has degenerate bounds and was not bound to the scene instance — the source mesh stays.");
+                        }
                     }
                 }
             }

@@ -7,6 +7,7 @@ using NUnit.Framework;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.TestTools;
 
 namespace GraffitiEntertainment.Namer.Tests

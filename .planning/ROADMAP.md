@@ -172,13 +172,15 @@ Plans:
 **Goal:** Extract material response (gloss/shading/cavity) baked into the base texture as 6-bit roughness (surface alpha bits 0-5) when no authored roughness map exists — via a Sobel Blender-parity estimator and a fit-driven strength search — then refit the sharp-removal-cleaned base into vertex colors so the Phase-4 D-13 residual auto-drop becomes the primary one-texture path (one RGBA8 surface PNG + vertex-colored mesh, no residual), with a D-06 optional roughness-offset escape hatch.
 **Requirements**: ENCD-02, NORM-01, NORM-03, VCOL-03, VCOL-04, VCOL-05, UI-03, SHDR-02 (boundary-aware IDs strengthened by this phase; no dedicated IDs — success criteria derived from CONTEXT.md D-01..D-06)
 **Depends on:** Phase 4
-**Plans:** 3/3 plans executed
+**Plans:** 5 plans (3 executed + 2 gap-closure)
 
 Plans:
 
 - [x] 04.1-01-PLAN.md
 - [x] 04.1-02-PLAN.md
 - [x] 04.1-03-PLAN.md
+- [ ] 04.1-04-PLAN.md
+- [ ] 04.1-05-PLAN.md
 
 **Wave 1**
 
@@ -191,6 +193,14 @@ Plans:
 **Wave 3** *(blocked on Waves 1-2 completion)*
 
 - [x] 04.1-03: One-texture material binding + D-06 roughness-offset input + honest-gate/switch-back acceptance tests
+
+**Wave 4** *(gap closure)*
+
+- [ ] 04.1-04: Production gap closure — scene-asset selection guard + fit-driven preview wiring + safe scene-instance bind (bindposes order + degenerate-bounds guard)
+
+**Wave 5** *(gap closure, blocked on Wave 4)*
+
+- [ ] 04.1-05: Test-fixture gap closure — minimizer rescale + collapse-fixture threshold/gloss + persisted offset texture (13/13 suites)
 
 ### Phase 5: Stylization
 
@@ -226,5 +236,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 3. Asset Generation + Editor Workflow + Preview | 3/3 | Complete    | 2026-08-28 |
 | 03.1. AO Extraction (INSERTED) | 3/3 | Complete | 2026-08-31 |
 | 4. Vertex-Color Decomposition + Residual | 5/5 | Complete   | 2026-09-01 |
-| 04.1. Roughness Extraction + One-Texture (INSERTED) | 3/3 | In Progress|  |
+| 04.1. Roughness Extraction + One-Texture (INSERTED) | 5/5 | In Progress (2 gap-closure plans pending) |  |
 | 5. Stylization | 0/3 | Not started | - |

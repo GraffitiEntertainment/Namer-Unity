@@ -30,10 +30,12 @@ namespace GraffitiEntertainment.Namer.Tests
         private const int WorkingSize = 64;
         private const int RoughnessMask = 0x3F;
         private const float ErrorThreshold = 0.02f;
-        // Test-local fit/D-13 threshold for the collapse acceptance test: the 64x64
-        // BakedResponse fixture's clamped-edge blur bias (MinBlurRadius=8) plus quantization
-        // leaves no headroom at 0.02, so this test gets headroom over the ~0.018-0.021 floor.
-        private const float CollapseErrorThreshold = 0.04f;
+        // Test-local fit/D-13 threshold for the collapse acceptance test. Measured on the
+        // white-occlusion BakedResponse fixture: the fit ladder's first passing strength is
+        // 0.70 with a fit-only maxError of 0.0438, so 0.06 gates the collapse with margin
+        // while the un-extracted error is 0.1098 (the full gloss amplitude) — passing still
+        // requires genuine extraction. The honest-gate test keeps the shipped 0.02.
+        private const float CollapseErrorThreshold = 0.06f;
         private const int ResidualResolution = 0;
 
         private static bool ComputeAvailable =>
@@ -59,7 +61,8 @@ namespace GraffitiEntertainment.Namer.Tests
             {
                 Mesh sourceMesh = CreateQuadMeshAsset(TempFolder + "/SourceQuad.asset");
                 Texture2D baseMap = CreateImportedBaseMap(TempFolder + "/SourceBase.png", WorkingSize, BakedResponse);
-                Material source = CreateSourceMaterial(TempFolder, "SourceMat", baseMap);
+                Texture2D occlusion = CreateImportedWhiteOcclusion(TempFolder + "/SourceOcclusion.png");
+                Material source = CreateSourceMaterial(TempFolder, "SourceMat", baseMap, occlusion);
                 gameObject = CreateSceneObject(sourceMesh, source, "OneTextureTarget");
 
                 var settings = new NamerProcessorSettings
@@ -143,14 +146,12 @@ namespace GraffitiEntertainment.Namer.Tests
                 // saturate(roughness + offset.r) == roughness == (a & 0x3F) / 63 for every
                 // packed roughness value — byte-identical to the pre-04.1 decode (D-06 A3).
                 // A "white" {} default would sample .r == 1 and saturate every unset
-                // material's roughness to 1.0 (non-neutral) — this asserts the neutral case.
-                for (int a = 0; a < 64; a++)
-                {
-                    float roughness = (float)a / 63f;
-                    float withNeutralOffset = Mathf.Clamp01(roughness + 0f); // offset.r == 0
-                    Assert.AreEqual(roughness, withNeutralOffset, 1e-6f,
-                        "unset (black) offset must decode roughness " + a + "/63 identically");
-                }
+                // material's roughness to 1.0 (non-neutral). Pin the DECLARED default so a
+                // {} default regression fails here instead of silently passing (WR-05).
+                int offsetPropertyIndex = shader.FindPropertyIndex("_RoughnessOffsetMap");
+                Assert.AreEqual("black", shader.GetPropertyTextureDefaultName(offsetPropertyIndex),
+                    "the _RoughnessOffsetMap texture default must be black — any other default "
+                    + "makes every unset material decode non-neutral roughness (D-06 A3)");
             }
             finally
             {
@@ -496,13 +497,34 @@ namespace GraffitiEntertainment.Namer.Tests
             return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
         }
 
-        private static Material CreateSourceMaterial(string folder, string name, Texture2D baseMap)
+        private static Texture2D CreateImportedWhiteOcclusion(string path)
+        {
+            Texture2D source = new Texture2D(1, 1, TextureFormat.RGBA32, false, true);
+            source.SetPixel(0, 0, Color.white);
+            source.Apply(false, false);
+            File.WriteAllBytes(path, source.EncodeToPNG());
+            Destroy(source);
+            AssetDatabase.ImportAsset(path);
+            TextureImporter importer = (TextureImporter)AssetImporter.GetAtPath(path);
+            importer.sRGBTexture = false;
+            importer.SaveAndReimport();
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+
+        private static Material CreateSourceMaterial(string folder, string name, Texture2D baseMap, Texture2D occlusionMap = null)
         {
             Shader shader = Shader.Find("Universal Render Pipeline/Lit");
             Assert.IsNotNull(shader, "URP Lit shader not found");
 
             Material material = new Material(shader) { name = name };
             material.SetTexture("_BaseMap", baseMap);
+            if (occlusionMap != null)
+            {
+                // Same D-07 isolation as NamerRoughnessFitTests: a null occlusion map makes
+                // the pipeline EXTRACT AO from the base's own luminance and un-multiply it,
+                // destroying the BakedResponse gradient. Authored white keeps it neutral.
+                material.SetTexture("_OcclusionMap", occlusionMap);
+            }
             material.SetFloat("_Metallic", 0f);
             material.SetFloat("_Smoothness", 0f);
             material.SetFloat("_SmoothnessTextureChannel", 0f);

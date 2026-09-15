@@ -193,6 +193,33 @@ namespace GraffitiEntertainment.Namer.Editor
                     Height = h,
                 };
             }
+            catch
+            {
+                // WR-03: on a mid-pipeline throw the caller never receives the result, so
+                // ReleaseResult never runs — release the un-returned output leases here
+                // (inputs stay in finally). The window's persistent pipeline would otherwise
+                // accumulate live RTs per failed preview recompute. cleanedBase/roughnessTex
+                // belong to the ROUGHNESS pool (compute-pool Release would silently no-op);
+                // baseColorOut is either released here (no cleaned base yet) or by finally's
+                // cleanedBase branch — never both.
+                if (surfaceOut != null)
+                {
+                    Release(surfaceOut);
+                }
+                if (roughnessTex != null)
+                {
+                    ReleaseExtractedRoughness(roughnessTex);
+                }
+                if (cleanedBase != null)
+                {
+                    ReleaseExtractedRoughness(cleanedBase);
+                }
+                else if (baseColorOut != null)
+                {
+                    Release(baseColorOut);
+                }
+                throw;
+            }
             finally
             {
                 _currentBaseColorOut = null;
@@ -310,19 +337,6 @@ namespace GraffitiEntertainment.Namer.Editor
         public void ReleaseExtractedRoughness(RenderTexture rt)
         {
             _roughnessPipeline?.ReleaseRoughness(rt);
-        }
-
-        /// <summary>
-        /// Thin forwarder to <see cref="NamerRoughnessPipeline.HasCachedFit"/> — true when a
-        /// fit-driven strength for this inspection is already cached (3A). The
-        /// <paramref name="maxErrorThreshold"/> participates in the cache key (WR-02) — a
-        /// strength fitted against one threshold is not reusable under a different one.
-        /// </summary>
-        public bool HasCachedFit(NamerMaterialInspection inspection, int w, int h, float maxErrorThreshold = 0f)
-        {
-            int meshId = inspection != null && inspection.BakeSourceMesh != null ? inspection.BakeSourceMesh.GetInstanceID() : 0;
-            int estimator = inspection != null ? (int)inspection.RoughnessEstimator : 0;
-            return EnsureRoughnessPipeline().HasCachedFit(meshId, estimator, w, h, maxErrorThreshold);
         }
 
         /// <summary>

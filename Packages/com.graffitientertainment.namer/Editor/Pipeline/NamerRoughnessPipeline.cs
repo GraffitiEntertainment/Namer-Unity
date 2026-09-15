@@ -61,15 +61,15 @@ namespace GraffitiEntertainment.Namer.Editor
         private readonly int _kernelSharpRemoval;
         private readonly int _kernelRemap;
 
-        // 3A fit cache keyed by (source mesh id, estimator, w, h, maxErrorThreshold) — mirrors
-        // NamerAOPipeline's bake cache. Stores the SELECTED strength so a later Process call
-        // reuses it without re-running the strength search. The threshold is part of the key
-        // (WR-02): a strength that passes one threshold may not pass another, so a fit must be
-        // re-searched when the threshold changes. Only a PASSED search is cached — a failed
-        // search re-runs on the next request instead of reusing the honest-but-invalid max
-        // ladder strength.
-        private readonly Dictionary<(int meshId, int estimator, int w, int h, float maxErrorThreshold), NamerRoughnessFitResult> _fitCache =
-            new Dictionary<(int, int, int, int, float), NamerRoughnessFitResult>();
+        // 3A fit cache keyed by the full fit identity (mesh, base-map content, AO controls,
+        // estimator, dimensions, threshold — see MakeFitKey, WR-01) — mirrors NamerAOPipeline's
+        // bake cache. Stores the SELECTED strength so a later Process call reuses it without
+        // re-running the strength search. The threshold is part of the key: a strength that
+        // passes one threshold may not pass another, so a fit must be re-searched when the
+        // threshold changes. Only a PASSED search is cached — a failed search re-runs on the
+        // next request instead of reusing the honest-but-invalid max ladder strength.
+        private readonly Dictionary<(int meshId, int baseMapId, float aoStrength, float aoContrast, float aoBlurRadius, float aoUnmultiplyStrength, int estimator, int w, int h, float maxErrorThreshold), NamerRoughnessFitResult> _fitCache =
+            new();
 
         public NamerRoughnessPipeline()
         {
@@ -187,17 +187,6 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// True when a fit-driven strength for <paramref name="meshId"/>/<paramref name="estimator"/>
-        /// at <paramref name="w"/>×<paramref name="h"/> and <paramref name="maxErrorThreshold"/>
-        /// is already cached (3A). The threshold participates in the cache key (WR-02) — a
-        /// strength fitted against one threshold is not reusable under a different one.
-        /// </summary>
-        public bool HasCachedFit(int meshId, int estimator, int w, int h, float maxErrorThreshold)
-        {
-            return _fitCache.ContainsKey((meshId, estimator, w, h, maxErrorThreshold));
-        }
-
-        /// <summary>
         /// Runs (or reuses a cached) fit-driven strength search, then invokes
         /// <paramref name="onComplete"/>. The off-debounce interactive path (3A) — mirrors
         /// <c>NamerAOPipeline.RequestBake</c>. No-ops (and still invokes the callback) when a
@@ -220,8 +209,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 return true;
             }
 
-            (int meshId, int estimator, int w, int h, float maxErrorThreshold) key =
-                MakeFitKey(inspection, w, h, maxErrorThreshold);
+            var key = MakeFitKey(inspection, w, h, maxErrorThreshold);
             if (_fitCache.ContainsKey(key))
             {
                 onComplete?.Invoke();
@@ -301,6 +289,16 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 return roughnessOut;
             }
+            catch
+            {
+                // WR-03: the lease this method RETURNS must not leak when a Sobel/reduce/
+                // normalize stage throws — finally only owns the intermediates.
+                if (roughnessOut != null)
+                {
+                    Release(roughnessOut);
+                }
+                throw;
+            }
             finally
             {
                 Release(roughnessRaw);
@@ -329,8 +327,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 return new NamerRoughnessExtractResult();
             }
 
-            (int meshId, int estimator, int w, int h, float maxErrorThreshold) key =
-                MakeFitKey(inspection, w, h, maxErrorThreshold);
+            var key = MakeFitKey(inspection, w, h, maxErrorThreshold);
 
             NamerRoughnessFitResult fit;
             if (_fitCache.TryGetValue(key, out fit))
@@ -505,11 +502,19 @@ namespace GraffitiEntertainment.Namer.Editor
             }
         }
 
-        private static (int meshId, int estimator, int w, int h, float maxErrorThreshold) MakeFitKey(
+        // WR-01 (04.1 review): the fit drives on the base map's baked response sampled at
+        // the mesh's UVs, and the evaluate callback re-runs the pipeline under the current
+        // AO controls — so the key must identify the base-map CONTENT and the AO settings,
+        // not just mesh + dimensions. A mesh + dimensions-only key let a persistent window
+        // pipeline reuse a stale fitted strength across different materials sharing a mesh.
+        private static (int meshId, int baseMapId, float aoStrength, float aoContrast, float aoBlurRadius, float aoUnmultiplyStrength, int estimator, int w, int h, float maxErrorThreshold) MakeFitKey(
             NamerMaterialInspection inspection, int w, int h, float maxErrorThreshold)
         {
             int meshId = inspection.BakeSourceMesh != null ? inspection.BakeSourceMesh.GetInstanceID() : 0;
-            return (meshId, (int)inspection.RoughnessEstimator, w, h, maxErrorThreshold);
+            int baseMapId = inspection.BaseMap != null ? inspection.BaseMap.GetInstanceID() : 0;
+            return (meshId, baseMapId, inspection.AoStrength, inspection.AoContrast,
+                inspection.AoBlurRadius, inspection.AoUnmultiplyStrength,
+                (int)inspection.RoughnessEstimator, w, h, maxErrorThreshold);
         }
 
         private void Dispatch(int kernel, int w, int h)

@@ -515,7 +515,13 @@ namespace GraffitiEntertainment.Namer.Editor
         private RenderTexture Resample(RenderTexture source, int dstW, int dstH)
         {
             RenderTexture dst = _pool.Lease(NewDescriptor(dstW, dstH, GraphicsFormat.R16G16B16A16_SFloat));
-            Graphics.Blit(source, dst, NamerComputePipeline.RawCopyMaterial());
+            // WR-02: RawCopyMaterial() is a shared static whose _REENCODE_SRGB keyword is
+            // toggled by Upload — a blit here with the keyword left enabled would gamma-
+            // encode the linear float residual. Resampled residual data is always linear:
+            // force the keyword off around the blit.
+            Material rawCopy = NamerComputePipeline.RawCopyMaterial();
+            rawCopy.DisableKeyword(NamerComputePipeline.ReencodeSrgbKeyword);
+            Graphics.Blit(source, dst, rawCopy);
             return dst;
         }
 

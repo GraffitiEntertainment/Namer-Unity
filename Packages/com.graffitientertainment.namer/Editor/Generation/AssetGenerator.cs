@@ -182,7 +182,8 @@ namespace GraffitiEntertainment.Namer.Editor
                     // D-06: the split mesh is ALWAYS written (even when the residual is
                     // auto-dropped) so the output mesh carries the fitted vertex colors.
                     WriteMeshAsset(
-                        BuildSplitMesh(decomp.Split, decomp.Colors, meshPath),
+                        decomp.Split,
+                        decomp.Colors,
                         meshPath,
                         settings.OverwriteGenerated);
 
@@ -459,10 +460,30 @@ namespace GraffitiEntertainment.Namer.Editor
             Stamp(AssetDatabase.LoadAssetAtPath<Texture2D>(path));
         }
 
-        private static void WriteMeshAsset(Mesh outMesh, string path, bool overwriteGenerated)
+        private static void WriteMeshAsset(NamerSplitResult split, Color32[] colors, string path, bool overwriteGenerated)
         {
             EnsureWritableTarget(path, overwriteGenerated);
-            AssetDatabase.CreateAsset(outMesh, path);
+            Mesh existing = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+            if (existing != null)
+            {
+                // Idempotent reprocess (04.1 UAT regression): CreateAsset over an existing
+                // path replaces — i.e. DESTROYS — the asset instance, so a live renderer
+                // wearing the previous generated split mesh reads sharedMesh == null and
+                // the model vanishes from the scene. Overwrite the EXISTING asset's data
+                // in place instead so scene references keep pointing at valid geometry
+                // (the mesh-side analogue of the material D-04 idempotency).
+                existing.Clear(false);
+                ApplySplitStreams(existing, split, colors);
+                EditorUtility.SetDirty(existing);
+                AssetDatabase.SaveAssets();
+            }
+            else
+            {
+                Mesh outMesh = new Mesh { name = Path.GetFileNameWithoutExtension(path) };
+                ApplySplitStreams(outMesh, split, colors);
+                AssetDatabase.CreateAsset(outMesh, path);
+            }
+
             Stamp(AssetDatabase.LoadAssetAtPath<Mesh>(path));
         }
 
@@ -502,46 +523,43 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Builds the seam-split mesh from the 04-01 split result + fitted vertex colors
-        /// using the HIGH-LEVEL <see cref="Mesh"/> API (RESEARCH Pitfall 6: the low-level
-        /// index-buffer write leaves sub-mesh descriptors unset). UInt32 indexing when the
-        /// split exceeds 65535 vertices; bone weights / bindposes preserved for skinned
-        /// sources.
+        /// Assigns every split-mesh stream (positions/normals/tangents/UVs, fitted vertex
+        /// colors, bindposes-before-boneWeights, sub-mesh triangles, bounds) onto the given
+        /// mesh — used both for a fresh asset and for the in-place overwrite path of
+        /// <see cref="WriteMeshAsset"/>. The target must be empty (fresh or cleared).
         /// </summary>
-        private static Mesh BuildSplitMesh(NamerSplitResult split, Color32[] colors, string path)
+        private static void ApplySplitStreams(Mesh target, NamerSplitResult split, Color32[] colors)
         {
-            Mesh outMesh = new Mesh { name = Path.GetFileNameWithoutExtension(path) };
             if (split.VertexCount > ushort.MaxValue)
             {
-                outMesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+                target.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
             }
 
-            outMesh.SetVertices(split.Positions);
-            outMesh.SetNormals(split.Normals);
-            outMesh.SetTangents(split.Tangents);
-            outMesh.SetUVs(0, split.Uvs);
-            outMesh.colors32 = colors;
+            target.SetVertices(split.Positions);
+            target.SetNormals(split.Normals);
+            target.SetTangents(split.Tangents);
+            target.SetUVs(0, split.Uvs);
+            target.colors32 = colors;
 
             // bindposes must be assigned before boneWeights on a skinned mesh or a
             // SkinnedMeshRenderer may not render the swapped sharedMesh (gap 3b).
             if (split.Bindposes != null)
             {
-                outMesh.bindposes = split.Bindposes;
+                target.bindposes = split.Bindposes;
             }
 
             if (split.BoneWeights != null)
             {
-                outMesh.boneWeights = split.BoneWeights;
+                target.boneWeights = split.BoneWeights;
             }
 
-            outMesh.subMeshCount = split.SubMeshTriangles.Length;
+            target.subMeshCount = split.SubMeshTriangles.Length;
             for (int i = 0; i < split.SubMeshTriangles.Length; i++)
             {
-                outMesh.SetTriangles(split.SubMeshTriangles[i], i);
+                target.SetTriangles(split.SubMeshTriangles[i], i);
             }
 
-            outMesh.RecalculateBounds();
-            return outMesh;
+            target.RecalculateBounds();
         }
 
         // ---------------------------------------------------------------------

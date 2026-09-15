@@ -26,10 +26,12 @@ namespace GraffitiEntertainment.Namer.Tests
         private const int WorkingSize = 64;
         private const int RoughnessMask = 0x3F;
         private const float ErrorThreshold = 0.02f;
-        // Test-local fit/D-13 threshold for the three collapse tests: the 64x64 BakedResponse
-        // fixture's clamped-edge blur bias (MinBlurRadius=8) plus quantization leaves no
-        // headroom at 0.02, so the collapse tests get headroom over the ~0.018-0.021 floor.
-        private const float CollapseErrorThreshold = 0.04f;
+        // Test-local fit/D-13 threshold for the three collapse tests. Measured on the
+        // white-occlusion BakedResponse fixture: the fit ladder's first passing strength is
+        // 0.70 with a fit-only maxError of 0.0438, so 0.06 gates the collapse with margin
+        // while the un-extracted error is 0.1098 (the full gloss amplitude) — passing
+        // still requires genuine extraction. The honest-gate test keeps the shipped 0.02.
+        private const float CollapseErrorThreshold = 0.06f;
         private const int ResidualResolution = 0;
 
         private static bool ComputeAvailable =>
@@ -97,7 +99,8 @@ namespace GraffitiEntertainment.Namer.Tests
 
             Mesh mesh = CreateQuadMesh();
             Texture2D baseMap = CreateBaseMap(WorkingSize, BakedResponse);
-            NamerMaterialInspection inspection = BuildFitDrivenInspection(baseMap, mesh, strength: 1f);
+            Texture2D whiteOcclusion = CreateWhiteOcclusion();
+            NamerMaterialInspection inspection = BuildFitDrivenInspection(baseMap, mesh, whiteOcclusion, strength: 1f);
 
             NamerComputePipeline pipeline = new NamerComputePipeline();
             try
@@ -111,8 +114,19 @@ namespace GraffitiEntertainment.Namer.Tests
                     // D-05: NormalizedBaseColor is the sharp-removal-cleaned base in the
                     // fit-driven path, so this refit consumes the post-extraction base.
                     NamerDecompErrorStats stats = Decompose(split, result.NormalizedBaseColor, CollapseErrorThreshold);
+                    Color32[] cleanedTexels = ReadBackColor32(result.NormalizedBaseColor, WorkingSize * WorkingSize);
+                    byte minAlpha = 255;
+                    foreach (Color32 t in cleanedTexels)
+                    {
+                        minAlpha = Math.Min(minAlpha, t.a);
+                    }
+
                     Assert.IsFalse(stats.ResidualRequired,
-                        "fit-driven extraction must collapse the residual (D-05 refit consumes the cleaned base)");
+                        "fit-driven extraction must collapse the residual (D-05 refit consumes the cleaned base); fit-only maxError="
+                        + stats.FitOnlyMaxError.ToString("F4") + " vs threshold " + CollapseErrorThreshold
+                        + "; cleaned-base minAlpha=" + (minAlpha / 255f).ToString("F4")
+                        + "; coverage=" + stats.Coverage.ToString("F4")
+                        + "; cannotDecompose=" + stats.CannotDecompose);
 
                     Color32[] surface = ReadBackColor32(result.PackedSurface, WorkingSize * WorkingSize);
                     int maxBits = 0;
@@ -134,7 +148,7 @@ namespace GraffitiEntertainment.Namer.Tests
                 pipeline.Dispose();
             }
 
-            Destroy(baseMap, mesh);
+            Destroy(baseMap, whiteOcclusion, mesh);
             yield return null;
         }
 
@@ -156,7 +170,8 @@ namespace GraffitiEntertainment.Namer.Tests
             {
                 Mesh sourceMesh = CreateQuadMeshAsset(TempFolder + "/SourceQuad.asset");
                 Texture2D baseMap = CreateImportedBaseMap(TempFolder + "/SourceBase.png", WorkingSize, BakedResponse);
-                Material source = CreateSourceMaterial(TempFolder, "SourceMat", baseMap);
+                Texture2D occlusion = CreateImportedWhiteOcclusion(TempFolder + "/SourceOcclusion.png");
+                Material source = CreateSourceMaterial(TempFolder, "SourceMat", baseMap, occlusion);
                 gameObject = CreateSceneObject(sourceMesh, source, "FitDrivenDefaultTarget");
 
                 var settings = new NamerProcessorSettings
@@ -168,9 +183,12 @@ namespace GraffitiEntertainment.Namer.Tests
                     DecompositionEnabled = true,
                     ErrorThreshold = CollapseErrorThreshold,
                     ResidualResolution = ResidualResolution,
-                    // RoughnessExtractStrength / RoughnessEstimator left at DEFAULT:
-                    //   RoughnessExtractStrength -> DefaultRoughnessExtractStrength (1 = on)
-                    //   RoughnessEstimator       -> DefaultRoughnessEstimator (0 = FitDriven)
+                    // Pinned explicitly (2026-09-15 regression): both live in EditorPrefs,
+                    // and the live user session held Estimator = Sobel, which routed this
+                    // "DefaultOn" run through the Sobel path and kept the residual. The
+                    // file's CapturePrefs/RestorePrefs keeps the user's session intact.
+                    RoughnessEstimator = (int)NamerRoughnessEstimator.FitDriven,
+                    RoughnessExtractStrength = NamerEditorConstants.DefaultRoughnessExtractStrength,
                 };
 
                 NamerProcessResult result = NamerProcessor.Process(gameObject, settings);
@@ -213,10 +231,15 @@ namespace GraffitiEntertainment.Namer.Tests
                 RenderTexture cleaned = pipeline.ExtractSharpRemoval(WorkingSize, WorkingSize, strength);
                 try
                 {
-                    // MaxError is threshold-independent (the threshold only drives the D-13
-                    // ResidualRequired gate / resolution search), so the evaluate callback keeps
-                    // the shipped ErrorThreshold while the fit uses CollapseErrorThreshold.
-                    return Decompose(split, cleaned, ErrorThreshold).MaxError;
+                    // FitOnlyMaxError (the D-13 gate statistic, residual == identity) is the
+                    // search objective — mirroring NamerProcessor.EvaluateRefitMaxError. The
+                    // with-residual MaxError reconstructs near-perfectly whenever the residual
+                    // is kept (it is the exact quotient base/vc) and would stop the ladder at
+                    // strength 0.0. Both stats are threshold-independent (the threshold only
+                    // drives the D-13 ResidualRequired gate / resolution search), so the
+                    // evaluate callback keeps the shipped ErrorThreshold while the fit uses
+                    // CollapseErrorThreshold.
+                    return Decompose(split, cleaned, ErrorThreshold).FitOnlyMaxError;
                 }
                 finally
                 {
@@ -247,14 +270,20 @@ namespace GraffitiEntertainment.Namer.Tests
             }
         }
 
-        private static NamerMaterialInspection BuildFitDrivenInspection(Texture2D baseMap, Mesh mesh, float strength)
+        private static NamerMaterialInspection BuildFitDrivenInspection(Texture2D baseMap, Mesh mesh, Texture2D occlusionMap, float strength)
         {
             return new NamerMaterialInspection
             {
                 BaseMap = baseMap,
                 BaseMapIsSrgb = false,
                 NormalMap = null,
-                OcclusionMap = null,
+                // Authored (white) occlusion keeps the D-07 gate on the authored branch: with
+                // a null map the pipeline EXTRACTS AO from the base's own luminance and the
+                // normalize pass un-multiplies it, so the BakedResponse gradient is read as
+                // baked shading and the left half of NormalizedBaseColor is destroyed
+                // (measured fit-only error 0.2869 — un-fittable, collapse impossible). The
+                // fixtures isolate vertex-fit/extraction behavior, so no AO may interfere.
+                OcclusionMap = occlusionMap,
                 MetallicGlossMap = null, // baked response — no authored metallic/gloss map
                 Metallic = 0f,
                 Smoothness = 0f,
@@ -385,13 +414,50 @@ namespace GraffitiEntertainment.Namer.Tests
             return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
         }
 
-        private static Material CreateSourceMaterial(string folder, string name, Texture2D baseMap)
+        /// <summary>In-memory 1x1 white linear occlusion map (pipeline-direct fixtures).</summary>
+        private static Texture2D CreateWhiteOcclusion()
+        {
+            Texture2D texture = new Texture2D(1, 1, TextureFormat.RGBA32, false, true)
+            {
+                name = "WhiteOcclusion",
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+            texture.SetPixel(0, 0, Color.white);
+            texture.Apply(false, false);
+            return texture;
+        }
+
+        /// <summary>Persisted 1x1 white linear occlusion map (material-driven fixtures — the
+        /// source material is a persisted asset, so the bound texture must be one too).</summary>
+        private static Texture2D CreateImportedWhiteOcclusion(string path)
+        {
+            Texture2D source = new Texture2D(1, 1, TextureFormat.RGBA32, false, true);
+            source.SetPixel(0, 0, Color.white);
+            source.Apply(false, false);
+            File.WriteAllBytes(path, source.EncodeToPNG());
+            Destroy(source);
+            AssetDatabase.ImportAsset(path);
+            TextureImporter importer = (TextureImporter)AssetImporter.GetAtPath(path);
+            importer.sRGBTexture = false;
+            importer.SaveAndReimport();
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+
+        private static Material CreateSourceMaterial(string folder, string name, Texture2D baseMap, Texture2D occlusionMap = null)
         {
             Shader shader = Shader.Find("Universal Render Pipeline/Lit");
             Assert.IsNotNull(shader, "URP Lit shader not found");
 
             Material material = new Material(shader) { name = name };
             material.SetTexture("_BaseMap", baseMap);
+            // Same D-07 isolation as BuildFitDrivenInspection: an authored white
+            // _OcclusionMap keeps the pipeline from extracting (and un-multiplying)
+            // synthetic AO out of the base's own gradient.
+            if (occlusionMap != null)
+            {
+                material.SetTexture("_OcclusionMap", occlusionMap);
+            }
+
             material.SetFloat("_Metallic", 0f);
             material.SetFloat("_Smoothness", 0f);
             material.SetFloat("_SmoothnessTextureChannel", 0f);

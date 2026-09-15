@@ -116,11 +116,11 @@ namespace GraffitiEntertainment.Namer.Editor
                 // non-decomposed output plus a warning instead of silent garbage.
                 int distinctSourceMeshes = decomposeSourceMesh != null ? CountDistinctSourceMeshes(selection) : 0;
                 bool decompGuardTripped = false;
-                if (decomposeSourceMesh != null && (model.Materials.Count > 1 || distinctSourceMeshes > 1))
+                string skipReason = DecompositionSkipReason(selection, model, decomposeSourceMesh, distinctSourceMeshes);
+                if (skipReason != null)
                 {
                     result.Warnings.Add("Vertex-color decomposition skipped for '" + selection.name
-                        + "': the selection maps " + model.Materials.Count + " material(s) to "
-                        + distinctSourceMeshes + " source mesh(es) — generating the non-decomposed Phase-3 shape instead.");
+                        + "': " + skipReason + " — generating the non-decomposed Phase-3 shape instead.");
                     decomposeSourceMesh = null;
                     decompGuardTripped = true;
                 }
@@ -641,6 +641,37 @@ namespace GraffitiEntertainment.Namer.Editor
         /// what the renderers actually wear — the CR-01 silent-wrong-render failure mode —
         /// so the mismatch itself must trip the guard.
         /// </summary>
+        /// <summary>
+        /// The CR-01 predicate shared by <see cref="Process"/> and the processor window's
+        /// preview: the reason vertex-color decomposition cannot run for this selection
+        /// (one vertex-color stream per source mesh cannot carry N materials' fits), or
+        /// null when decomposition may run. A null <paramref name="resolvedSourceMesh"/>
+        /// (nothing resolvable) is NOT a skip reason here — Process reports the missing
+        /// mesh separately and the window's preview null-gates on it — so the return
+        /// only covers the multi-material/multi-mesh guard.
+        /// </summary>
+        internal static string DecompositionSkipReason(
+            UnityEngine.Object selection, NamerSourceModel model, Mesh resolvedSourceMesh, int distinctSourceMeshes = -1)
+        {
+            if (resolvedSourceMesh == null)
+            {
+                return null;
+            }
+
+            if (distinctSourceMeshes < 0)
+            {
+                distinctSourceMeshes = CountDistinctSourceMeshes(selection);
+            }
+
+            if (model.Materials.Count > 1 || distinctSourceMeshes > 1)
+            {
+                return "the selection maps " + model.Materials.Count + " material(s) to "
+                    + distinctSourceMeshes + " source mesh(es)";
+            }
+
+            return null;
+        }
+
         private static int CountDistinctSourceMeshes(UnityEngine.Object selection)
         {
             if (selection == null)

@@ -51,10 +51,22 @@ namespace GraffitiEntertainment.Namer.Editor
             var seen = new HashSet<int>();
             CollectMaterials(selection, materials, seen, model.Warnings);
 
+            // Deduplicate on the RESOLVED source (D-04): a hierarchy can legitimately
+            // wear the same source twice — one renderer still on the original while
+            // another already wears its generated NAMER material. Both collected
+            // instances resolve to the same source, so deduping only the collected
+            // instances (the `seen` set above) double-counted the model as 2 materials
+            // and tripped the CR-01 decomposition skip on every reprocess.
+            var resolvedSeen = new HashSet<int>();
             foreach (Material material in materials)
             {
                 Material source = ResolveSourceMaterial(material, model.Warnings);
                 if (source == null)
+                {
+                    continue;
+                }
+
+                if (!resolvedSeen.Add(source.GetInstanceID()))
                 {
                     continue;
                 }

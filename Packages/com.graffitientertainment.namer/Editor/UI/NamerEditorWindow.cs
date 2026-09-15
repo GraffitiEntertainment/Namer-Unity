@@ -56,6 +56,11 @@ namespace GraffitiEntertainment.Namer.Editor
         private UnityEngine.Object _selection;
         private NamerSourceModel _model;
         private Mesh _previewMesh;
+        // CR-01 mirror: why Process would SKIP decomposition for the current selection
+        // (multi-material/multi-mesh), or null when decomposition may run. The preview
+        // must not promise an extraction Process will not deliver (04.1 UAT regression:
+        // the fit-driven preview showed extraction while Process fell back to Phase-3).
+        private string _decompGuardReason;
 
         private float _aoUnmultiplyStrength = 1f;
         private float _aoBlurRadius;
@@ -207,6 +212,7 @@ namespace GraffitiEntertainment.Namer.Editor
             _roughnessEstimator = _settings.RoughnessEstimator;
 
             _previewMesh = ResolvePreviewMesh(_selection);
+            _decompGuardReason = NamerProcessor.DecompositionSkipReason(_selection, _model, _previewMesh);
             if (_previewMesh != null)
             {
                 _preview.Frame(_previewMesh);
@@ -319,16 +325,22 @@ namespace GraffitiEntertainment.Namer.Editor
                 inspection.RoughnessExtractStrength = _roughnessExtractStrength;
                 inspection.RoughnessEstimator = (NamerRoughnessEstimator)_roughnessEstimator;
 
+                // CR-01 mirror: when Process would skip decomposition for this selection
+                // (multi-material/multi-mesh), the preview must show the non-decomposed
+                // Phase-3 result Process actually generates — not a fit-driven extraction
+                // Process will never deliver.
+                bool decompWillRun = _decompositionEnabled && string.IsNullOrEmpty(_decompGuardReason);
+
                 // 3A fit-driven preview wiring: supply the same evaluate callback
                 // NamerProcessor composes so the default FitDriven estimator actually extracts
                 // in the live preview. The 1A refit-precondition needs BakeSourceMesh != null
                 // AND a non-null evaluate; without this the preview packs the scalar roughness
                 // and the Extracted Roughness debug channel stays black.
-                inspection.BakeSourceMesh = _decompositionEnabled ? _previewMesh : null;
+                inspection.BakeSourceMesh = decompWillRun ? _previewMesh : null;
                 int baseW = inspection.BaseMap != null ? inspection.BaseMap.width : NamerComputePipeline.DefaultBaseResolution;
                 int baseH = inspection.BaseMap != null ? inspection.BaseMap.height : NamerComputePipeline.DefaultBaseResolution;
                 Func<float, float> evaluate = null;
-                if (_decompositionEnabled && _previewMesh != null && inspection.RoughnessEstimator == NamerRoughnessEstimator.FitDriven)
+                if (decompWillRun && _previewMesh != null && inspection.RoughnessEstimator == NamerRoughnessEstimator.FitDriven)
                 {
                     NamerSplitResult fitSplit = MeshVertexSplitter.Split(_previewMesh);
                     evaluate = strength =>
@@ -351,8 +363,9 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 // D-08/D-12: run the in-memory fit + residual when decomposition is enabled
                 // and bind the decomposed representation (residual at _BaseResidualMap, split
-                // mesh in the after pane). Never writes to disk.
-                if (_decompositionEnabled)
+                // mesh in the after pane). Never writes to disk. Gated on decompWillRun so a
+                // CR-01-guarded selection previews the Phase-3 shape Process generates.
+                if (decompWillRun)
                 {
                     RunDecompPreview(inspection);
                 }
@@ -950,6 +963,18 @@ namespace GraffitiEntertainment.Namer.Editor
                 _settings.DecompositionEnabled = newDecomp;
                 _afterPanelState.MarkTweaking();
                 MarkDirty();
+            }
+
+            // CR-01 truth-telling: tell the user up front (the preview and Process both
+            // show/generate the non-decomposed shape) instead of letting Process silently
+            // fall back while the preview looked extracted.
+            if (_decompositionEnabled && !string.IsNullOrEmpty(_decompGuardReason))
+            {
+                EditorGUILayout.HelpBox(
+                    "Vertex-color decomposition will be skipped when processing this selection: "
+                    + _decompGuardReason
+                    + ". The preview shows the non-decomposed result Process generates.",
+                    MessageType.Warning);
             }
 
             EditorGUI.BeginDisabledGroup(!_decompositionEnabled);

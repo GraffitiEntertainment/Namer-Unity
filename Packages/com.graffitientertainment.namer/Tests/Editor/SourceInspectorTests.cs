@@ -225,6 +225,52 @@ namespace GraffitiEntertainment.Namer.Tests
             }
         }
 
+        // -- D-04: source + its generated material on one hierarchy ----------
+
+        [Test]
+        public void Dedupe_SourceAndItsGeneratedMaterialCountOnce()
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+            Assert.IsNotNull(shader, "URP Lit shader not found");
+
+            EnsureTempFolder();
+
+            // A persisted source so the generated material's NamerSource tag has a
+            // guid|localFileId to resolve back to (CreateGeneratedMaterial pattern).
+            Material source = new Material(shader) { name = "DedupeSource" };
+            AssetDatabase.CreateAsset(source, TempFolder + "/DedupeSource.mat");
+            Material generated = new Material(shader) { name = "DedupeGenerated" };
+            Assert.IsTrue(
+                AssetDatabase.TryGetGUIDAndLocalFileIdentifier(source, out string guid, out long localId),
+                "source material must resolve a guid + localFileId");
+            generated.SetOverrideTag(NamerEditorConstants.SourceTag, guid + "|" + localId);
+            AssetDatabase.CreateAsset(generated, TempFolder + "/DedupeGenerated.mat");
+            AssetDatabase.SetLabels(generated, new[] { NamerEditorConstants.GeneratedLabel });
+
+            GameObject parent = new GameObject("DedupeMixedParent");
+            GameObject childSource = new GameObject("ChildSource");
+            GameObject childGenerated = new GameObject("ChildGenerated");
+            childSource.transform.SetParent(parent.transform);
+            childGenerated.transform.SetParent(parent.transform);
+            try
+            {
+                // Reprocess state after a partial bind: one renderer still wears the
+                // original while another already wears the generated NAMER material.
+                childSource.AddComponent<MeshRenderer>().sharedMaterial = source;
+                childGenerated.AddComponent<MeshRenderer>().sharedMaterial = generated;
+
+                NamerSourceModel model = SourceInspector.Inspect(parent);
+                Assert.AreEqual(1, model.Materials.Count,
+                    "source + its generated material are ONE inspection unit — double-counting trips the CR-01 decomposition skip on reprocess");
+                Assert.AreEqual(source.GetInstanceID(), model.Materials[0].Material.GetInstanceID());
+            }
+            finally
+            {
+                Destroy(parent);
+                AssetDatabase.DeleteAsset(TempFolder);
+            }
+        }
+
         // -- D-06: unknown shader --------------------------------------------
 
         [Test]

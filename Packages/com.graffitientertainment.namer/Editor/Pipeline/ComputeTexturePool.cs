@@ -117,6 +117,15 @@ namespace GraffitiEntertainment.Namer.Editor
                 return;
             }
 
+            // Graphics.Blit leaves RenderTexture.active pointing at its destination, so a
+            // pooled target can still be the global active render target when the pool
+            // disposes it (e.g. the fit search's per-step probe decomp pipeline). Unbind it
+            // before release so the graphics device is never left on a destroyed target.
+            if (RenderTexture.active == rt)
+            {
+                RenderTexture.active = null;
+            }
+
             rt.Release();
             UnityEngine.Object.DestroyImmediate(rt);
         }

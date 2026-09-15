@@ -511,10 +511,15 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Measures the post-refit residual MaxError for the fit-driven strength search: reads
+        /// Measures the fit-only refit MaxError for the fit-driven strength search: reads
         /// the (sharp-removal cleaned) base back, runs the vertex-color fit + residual
-        /// generation, and returns the post-refit MaxError. The 3A evaluate callback invokes
-        /// this per strength step; every intermediate allocation is disposed here.
+        /// generation, and returns the FIT-ONLY MaxError (<see cref="NamerDecompErrorStats.FitOnlyMaxError"/>
+        /// — the D-13 gate statistic, residual == identity). The with-residual
+        /// <see cref="NamerDecompErrorStats.MaxError"/> must NOT feed the search: whenever the
+        /// residual is kept it is the exact quotient base/vc, so it reconstructs the base
+        /// near-perfectly and the ladder would stop at strength 0.0 without extracting. The
+        /// 3A evaluate callback invokes this per strength step; every intermediate allocation
+        /// is disposed here.
         /// </summary>
         internal static float EvaluateRefitMaxError(
             NamerSplitResult split,
@@ -534,7 +539,7 @@ namespace GraffitiEntertainment.Namer.Editor
                     using (NamerDecompOutput probeOutput = probeDecomp.GenerateResidual(
                         split, probeColors, cleanedBase, w, h, errorThreshold, residualResolution))
                     {
-                        return probeOutput.Stats.MaxError;
+                        return probeOutput.Stats.FitOnlyMaxError;
                     }
                 }
             }

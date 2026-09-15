@@ -17,12 +17,20 @@ namespace GraffitiEntertainment.Namer.Editor
     /// covered texels; <see cref="ResidualRequired"/> is the D-13 gate; and
     /// <see cref="ChosenResolution"/> is 0 when the residual is not required, otherwise the
     /// chosen residual width.
+    ///
+    /// <see cref="FitOnlyMaxError"/> is the D-13 gate statistic itself: the max error of the
+    /// FIT-ONLY reconstruction (<c>residual == identity</c>), captured BEFORE the residual is
+    /// generated. It is the strength-search objective for the fit-driven roughness estimator
+    /// — a search that consumed <see cref="MaxError"/> instead would always pass, because the
+    /// generated residual is the exact quotient <c>base / vc</c> and reconstructs the base
+    /// near-perfectly whenever it is kept.
     /// </summary>
     public sealed class NamerDecompErrorStats
     {
         public float Coverage;
         public float AvgError;
         public float MaxError;
+        public float FitOnlyMaxError;
         public bool ResidualRequired;
         public int ChosenResolution;
         public bool CannotDecompose;
@@ -221,6 +229,7 @@ namespace GraffitiEntertainment.Namer.Editor
                         Coverage = 0f,
                         AvgError = 0f,
                         MaxError = 0f,
+                        FitOnlyMaxError = 0f,
                         ResidualRequired = false,
                         ChosenResolution = 0,
                         CannotDecompose = true,
@@ -233,7 +242,8 @@ namespace GraffitiEntertainment.Namer.Editor
                 if (fitStats.MaxError <= errorThreshold && opaque)
                 {
                     ReduceStats coverage = ReduceToStats(coverageStat, w, h, avgA, avgB);
-                    return new NamerDecompOutput(null, BuildStats(fitStats, coverage, required: false, chosenResolution: 0), this);
+                    return new NamerDecompOutput(null,
+                        BuildStats(fitStats, coverage, required: false, chosenResolution: 0, fitOnlyMaxError: fitStats.MaxError), this);
                 }
 
                 // 4. Residual required: compute the full-resolution quotient residual.
@@ -273,7 +283,8 @@ namespace GraffitiEntertainment.Namer.Editor
                     RunErrorHeatmap(vcInterp, eval, baseLinear, heatmap, errorStat, coverageStat, 0f, w, h);
                     ReduceStats errorStats = ReduceToStats(errorStat, w, h, avgA, avgB);
                     ReduceStats covStats = ReduceToStats(coverageStat, w, h, avgA, avgB);
-                    return new NamerDecompOutput(returnedResidual, BuildStats(errorStats, covStats, required: true, chosenResolution), this);
+                    return new NamerDecompOutput(returnedResidual,
+                        BuildStats(errorStats, covStats, required: true, chosenResolution, fitOnlyMaxError: fitStats.MaxError), this);
                 }
                 finally
                 {
@@ -485,7 +496,7 @@ namespace GraffitiEntertainment.Namer.Editor
             }
         }
 
-        private static NamerDecompErrorStats BuildStats(ReduceStats error, ReduceStats coverage, bool required, int chosenResolution)
+        private static NamerDecompErrorStats BuildStats(ReduceStats error, ReduceStats coverage, bool required, int chosenResolution, float fitOnlyMaxError)
         {
             float fractionCovered = error.CoverageFraction;
             float avgError = fractionCovered > 0f ? error.MeanErr / fractionCovered : 0f;
@@ -495,6 +506,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 Coverage = coveragePct,
                 AvgError = avgError,
                 MaxError = error.MaxError,
+                FitOnlyMaxError = fitOnlyMaxError,
                 ResidualRequired = required,
                 ChosenResolution = chosenResolution,
             };

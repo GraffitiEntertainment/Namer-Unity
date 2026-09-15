@@ -200,7 +200,7 @@ Plans:
 
 **Wave 5** *(gap closure, blocked on Wave 4)*
 
-- [ ] 04.1-05: Test-fixture gap closure — minimizer rescale + collapse-fixture threshold/gloss + persisted offset texture (13/13 suites)
+- [x] 04.1-05: Test-fixture gap closure — minimizer rescale + collapse-fixture threshold/gloss + persisted offset texture (13/13 suites)
 
 ### Phase 5: Stylization
 

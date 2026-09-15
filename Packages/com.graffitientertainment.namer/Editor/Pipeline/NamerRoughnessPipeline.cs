@@ -24,8 +24,9 @@ namespace GraffitiEntertainment.Namer.Editor
     /// <summary>
     /// GPU dispatch harness for the NAMER image-space roughness extraction stage (Phase 04.1).
     /// Plan 01 delivered the Sobel (Blender-parity) estimator; plan 02 adds the fit-driven
-    /// estimator and its frequency-separation kernels (blur H/V -> sharp-detail -> sharp-removal
-    /// -> remap) plus the 3A AO-three-way fit cache.
+    /// estimator and its frequency-separation kernels (blur H/V -> sharp-detail -> sharp-removal;
+    /// roughness = the Sobel signal adopted by the searched strength, plan 04.1-06) plus the
+    /// 3A AO-three-way fit cache.
     ///
     /// The fit-driven path runs the strength search synchronously on cache miss: it calls
     /// <see cref="NamerRoughnessFitter.Fit"/> with the <c>Func&lt;float,float&gt;</c> evaluate
@@ -241,6 +242,29 @@ namespace GraffitiEntertainment.Namer.Editor
             _fitCache.Clear();
         }
 
+        /// <summary>
+        /// Returns the cached searched strength for this inspection's fit key when a PASSED
+        /// fit is cached. The window surfaces this as a readout — the user slider does NOT
+        /// drive the fit-driven strength (it only gates extraction on with a value > 0).
+        /// </summary>
+        public bool TryGetFitStrength(
+            NamerMaterialInspection inspection,
+            int w,
+            int h,
+            float maxErrorThreshold,
+            out float strength)
+        {
+            if (inspection != null
+                && _fitCache.TryGetValue(MakeFitKey(inspection, w, h, maxErrorThreshold), out NamerRoughnessFitResult fit))
+            {
+                strength = fit.Strength;
+                return true;
+            }
+
+            strength = 0f;
+            return false;
+        }
+
         public void Dispose()
         {
             ClearFitCache();
@@ -350,23 +374,26 @@ namespace GraffitiEntertainment.Namer.Editor
                 }
             }
 
-            return RunFrequencySeparation(baseColorOut, w, h, fit.Strength);
+            return RunFrequencySeparation(baseColorOut, w, h, fit.Strength, inspection.Roughness);
         }
 
         /// <summary>
         /// Produces the final fit-driven outputs at <paramref name="strength"/>: the
-        /// sharp-removal cleaned base AND the strength-scaled roughness, computing the
-        /// frequency-separation blur once.
+        /// sharp-removal cleaned base AND the roughness texture — the Sobel edge signal
+        /// (same Blender-parity estimator as the standalone path) adopted by the strength
+        /// via lerp(scalarRoughness, sobel, strength) — computing the frequency-separation
+        /// blur once (plan 04.1-06).
         /// </summary>
-        private NamerRoughnessExtractResult RunFrequencySeparation(RenderTexture baseColorOut, int w, int h, float strength)
+        private NamerRoughnessExtractResult RunFrequencySeparation(
+            RenderTexture baseColorOut, int w, int h, float strength, float scalarRoughness)
         {
             RenderTextureDescriptor intermediate = NewDescriptor(w, h, GraphicsFormat.R16G16B16A16_SFloat);
-            RenderTextureDescriptor unorm8 = NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm);
 
             RenderTexture blurA = null;
             RenderTexture blurB = null;
             RenderTexture sharpDetail = null;
             RenderTexture cleanedBase = null;
+            RenderTexture sobelRoughness = null;
             RenderTexture roughnessOut = null;
 
             try
@@ -375,7 +402,6 @@ namespace GraffitiEntertainment.Namer.Editor
                 blurB = _pool.Lease(intermediate);
                 sharpDetail = _pool.Lease(intermediate);
                 cleanedBase = _pool.Lease(intermediate);
-                roughnessOut = _pool.Lease(unorm8);
 
                 RunBlurAndSharpDetail(baseColorOut, w, h, blurA, blurB, sharpDetail);
 
@@ -386,17 +412,33 @@ namespace GraffitiEntertainment.Namer.Editor
                 _compute.SetTexture(_kernelSharpRemoval, "_CleanedBaseOut", cleanedBase);
                 Dispatch(_kernelSharpRemoval, w, h);
 
-                _compute.SetTexture(_kernelRemap, "_SharpDetail", sharpDetail);
+                // Roughness = the Sobel signal of the SAME base the standalone estimator
+                // reads (NOT the cleaned base — the removed detail must not re-enter the
+                // roughness), adopted by the searched strength.
+                sobelRoughness = ExtractSobel(baseColorOut, w, h);
+                roughnessOut = _pool.Lease(NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm));
+
+                _compute.SetFloat("_ScalarRoughness", scalarRoughness);
+                _compute.SetTexture(_kernelRemap, "_SobelRoughness", sobelRoughness);
                 _compute.SetTexture(_kernelRemap, "_RoughnessOut", roughnessOut);
                 Dispatch(_kernelRemap, w, h);
 
                 return new NamerRoughnessExtractResult { Roughness = roughnessOut, CleanedBase = cleanedBase };
+            }
+            catch
+            {
+                // WR-03: the leases this method RETURNS must not leak when a stage throws —
+                // the finally only owns the intermediates (incl. the sobel input lease).
+                Release(cleanedBase);
+                Release(roughnessOut);
+                throw;
             }
             finally
             {
                 Release(blurA);
                 Release(blurB);
                 Release(sharpDetail);
+                Release(sobelRoughness);
             }
         }
 

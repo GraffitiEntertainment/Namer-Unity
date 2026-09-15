@@ -177,9 +177,16 @@ namespace GraffitiEntertainment.Namer.Editor
                 // else: identity legacy path — fit-driven without a refit (1A) or strength == 0.
 
                 // (c) Surface pack, overriding the scalar roughness with the extracted texture.
+                // Fit-driven packs at FULL adoption: RunFrequencySeparation already baked the
+                // SEARCHED strength into both the roughness texture and the cleaned base, and
+                // the fit validated that exact pairing — re-blending by the user slider
+                // (the Sobel-only D-02 control) under-applied the searched response (a live
+                // slider of 0.25 packed only ~25% of it) and made the slider look like it
+                // drives the fit. It does not; it only gates extraction on (> 0).
                 BindAndDispatchSurfacePack(octahedral, packInputs, surfaceOut,
                     roughnessTex != null ? (Texture)roughnessTex : WhiteFill(),
-                    roughnessTex != null, inspection.RoughnessExtractStrength, w, h);
+                    roughnessTex != null,
+                    isFitDriven ? 1f : inspection.RoughnessExtractStrength, w, h);
 
                 // D-05: the fit-driven path repoints NormalizedBaseColor at the sharp-removal
                 // cleaned base so the refit consumes the post-extraction base.
@@ -337,6 +344,15 @@ namespace GraffitiEntertainment.Namer.Editor
         public void ReleaseExtractedRoughness(RenderTexture rt)
         {
             _roughnessPipeline?.ReleaseRoughness(rt);
+        }
+
+        /// <summary>
+        /// Thin forwarder to <see cref="NamerRoughnessPipeline.TryGetFitStrength"/> — the
+        /// window's fit-driven readout of the strength the search picked.
+        /// </summary>
+        public bool TryGetFitStrength(NamerMaterialInspection inspection, int w, int h, float maxErrorThreshold, out float strength)
+        {
+            return EnsureRoughnessPipeline().TryGetFitStrength(inspection, w, h, maxErrorThreshold, out strength);
         }
 
         /// <summary>

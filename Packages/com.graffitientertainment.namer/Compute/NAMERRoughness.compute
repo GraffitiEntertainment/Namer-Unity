@@ -42,15 +42,17 @@ RWTexture2D<float4> _SharpDetail;  // R16G16B16A16_SFloat: high-frequency detail
 RWTexture2D<float4> _CleanedBaseOut; // R16G16B16A16_SFloat: sharp-removal cleaned base (full RGB, alpha 1)
 
 // Blit-uploaded / kernel-read inputs.
-Texture2D<float4> _BaseColorOut; // the already-linear cleaned base (CSNormalize output)
-Texture2D<float4> _SrcAvg;       // generic max-reduce read target
+Texture2D<float4> _BaseColorOut;   // the already-linear cleaned base (CSNormalize output)
+Texture2D<float4> _SrcAvg;         // generic max-reduce read target
+Texture2D<float4> _SobelRoughness; // CSRoughnessNormalize output the fit-driven remap adopts (plan 04.1-06)
 
 // Uniforms.
-uint2 _Size;       // unsigned: compared against SV_DispatchThreadID (uint) in the kernel guards
+uint2 _Size;           // unsigned: compared against SV_DispatchThreadID (uint) in the kernel guards
 uint2 _AvgSrcSize;
 uint2 _AvgDstSize;
-float _GlobalMax;  // reduced global Sobel max (uploaded back for the normalize pass)
-float _Strength;   // fit-driven sharp-removal / roughness-remap strength (0..1)
+float _GlobalMax;      // reduced global Sobel max (uploaded back for the normalize pass)
+float _Strength;       // fit-driven sharp-removal / Sobel-adoption strength (0..1)
+float _ScalarRoughness; // scalar roughness the fit-driven adoption lerps FROM (inspection.Roughness)
 int _Radius;       // separable-blur radius (frequency-separation low-pass)
 float _Sigma;      // separable-blur sigma
 
@@ -212,8 +214,13 @@ void CSRoughnessSharpRemoval(uint3 id : SV_DispatchThreadID)
     _CleanedBaseOut[id.xy] = float4(cleaned, 1.0);
 }
 
-// Fit-driven roughness = strength-scaled sharp-detail magnitude, emitted in the roughness
-// domain (NO 1 - x inversion — RESEARCH Pitfall 1).
+// Fit-driven roughness = the Blender-parity Sobel edge signal (CSRoughnessNormalize output)
+// adopted by the searched strength: lerp(_ScalarRoughness, sobel, _Strength). At strength 0
+// this is exactly the scalar (identity); at 1 it fully adopts the Sobel look. Emitted in the
+// roughness domain (NO 1 - x inversion — RESEARCH Pitfall 1). The high-pass detail remap
+// (saturate(strength * length(_SharpDetail))) is retired: noise/freckle detail read as
+// "patchy" roughness patches while the globally-max-normalized Sobel concentrates the
+// response at real edges (live UAT round 3, plan 04.1-06).
 [numthreads(8,8,1)]
 void CSRoughnessRemap(uint3 id : SV_DispatchThreadID)
 {
@@ -222,5 +229,6 @@ void CSRoughnessRemap(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    _RoughnessOut[id.xy] = float4(saturate(_Strength * length(_SharpDetail[id.xy].rgb)), 0.0, 0.0, 1.0);
+    float roughness = lerp(_ScalarRoughness, _SobelRoughness[id.xy].r, _Strength);
+    _RoughnessOut[id.xy] = float4(saturate(roughness), 0.0, 0.0, 1.0);
 }

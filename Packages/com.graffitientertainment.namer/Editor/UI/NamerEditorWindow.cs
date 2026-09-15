@@ -845,7 +845,9 @@ namespace GraffitiEntertainment.Namer.Editor
             float newStrength = EditorGUILayout.Slider(
                 new GUIContent(
                     "Roughness Extract Strength",
-                    "Strength of the roughness extraction (0 = off, 1 = full). Automatically recomputes the preview in memory "
+                    "Sobel: how much of the extracted roughness to adopt (0 = off, 1 = full). Fit-driven: any value > 0 "
+                        + "ENABLES the auto strength search — the strength itself is picked by the fit (see the readout "
+                        + "below), not by this slider. Recomputes the preview in memory "
                         + NamerEditorConstants.DebounceSeconds + " s after the slider stops — nothing is written to disk."),
                 _roughnessExtractStrength, 0f, 1f);
             if (!Mathf.Approximately(newStrength, _roughnessExtractStrength))
@@ -859,7 +861,7 @@ namespace GraffitiEntertainment.Namer.Editor
             int newEstimator = EditorGUILayout.Popup(
                 new GUIContent(
                     "Roughness Estimator",
-                    "How roughness is extracted: Fit-driven searches for the minimal strength that collapses the residual (default); Sobel is the standalone Blender-parity edge estimator. Sobel mode does NOT sharp-remove the base, so Sobel-mode assets do not reach the one-texture outcome (parity-only)."),
+                    "How roughness is extracted: Fit-driven searches for the minimal strength that collapses the residual and adopts the Blender-parity Sobel edge signal by that strength (default); Sobel is the standalone edge estimator with the manual strength slider. Sobel mode does NOT sharp-remove the base, so Sobel-mode assets do not reach the one-texture outcome (parity-only)."),
                 _roughnessEstimator,
                 new[] { "Fit-driven", "Sobel" });
             if (newEstimator != _roughnessEstimator)
@@ -868,6 +870,23 @@ namespace GraffitiEntertainment.Namer.Editor
                 _settings.RoughnessEstimator = newEstimator;
                 _afterPanelState.MarkTweaking();
                 MarkDirty();
+            }
+
+            // Fit-driven honesty readout: the strength slider does not drive the fit —
+            // the search does. Say so, and show what it picked, so a slider that
+            // (correctly) changes nothing is never mistaken for a dead control.
+            if (_roughnessEstimator == (int)NamerRoughnessEstimator.FitDriven)
+            {
+                int fitW = inspection.BaseMap != null ? inspection.BaseMap.width : NamerComputePipeline.DefaultBaseResolution;
+                int fitH = inspection.BaseMap != null ? inspection.BaseMap.height : NamerComputePipeline.DefaultBaseResolution;
+                EnsurePipeline();
+                string message = _pipeline != null
+                    && _pipeline.TryGetFitStrength(inspection, fitW, fitH, _errorThreshold, out float picked)
+                        ? "Fit-driven: strength auto-searched — picked " + picked.ToString("0.##")
+                            + " for this material. The slider only enables the search (> 0); it does not set the strength."
+                        : "Fit-driven: the strength is auto-searched on the next preview/Process. The slider only enables "
+                            + "the search (> 0); it does not set the strength.";
+                EditorGUILayout.HelpBox(message, MessageType.Info);
             }
 
             EditorGUI.EndDisabledGroup();

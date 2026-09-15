@@ -152,6 +152,154 @@ namespace GraffitiEntertainment.Namer.Tests
             yield return null;
         }
 
+        [UnityTest]
+        public IEnumerator FitDriven_PackedRoughness_AdoptsSearchedStrengthNotSliderBlend()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU pack-adoption test (D-15).");
+                yield break;
+            }
+
+            // The fit-driven roughness texture already carries the SEARCHED strength
+            // (RunFrequencySeparation bakes fit.Strength into both the cleaned base
+            // and the remap), and the fit validated that exact pairing. Re-blending
+            // the packed result by the user slider (NAMERPack _RoughnessExtractStrength
+            // lerp) under-applies the extraction the fit chose — with a live slider of
+            // 0.25 the packed surface adopts only ~25% of the searched response. The
+            // slider blend belongs to the Sobel path only (strength-free texture);
+            // fit-driven must pack at full adoption regardless of the slider.
+            Mesh mesh = CreateQuadMesh();
+            Texture2D baseMap = CreateBaseMap(WorkingSize, BakedResponse);
+            Texture2D whiteOcclusion = CreateWhiteOcclusion();
+            NamerMaterialInspection inspection = BuildFitDrivenInspection(baseMap, mesh, whiteOcclusion, strength: 0.3f);
+
+            NamerComputePipeline pipeline = new NamerComputePipeline();
+            try
+            {
+                NamerSplitResult split = MeshVertexSplitter.Split(mesh);
+                Func<float, float> evaluate = ComposeEvaluate(pipeline, split);
+
+                NamerComputeResult result = pipeline.Process(inspection, evaluate, null, CollapseErrorThreshold);
+                try
+                {
+                    Assert.IsNotNull(result.ExtractedRoughness, "fit-driven branch must produce an extracted roughness texture");
+
+                    Color32[] extracted = ReadBackColor32(result.ExtractedRoughness, WorkingSize * WorkingSize);
+                    Color32[] surface = ReadBackColor32(result.PackedSurface, WorkingSize * WorkingSize);
+
+                    int maxBitDelta = 0;
+                    int nonZero = 0;
+                    for (int i = 0; i < surface.Length; i++)
+                    {
+                        int expectedBits = Mathf.RoundToInt((extracted[i].r / 255f) * RoughnessMask);
+                        int packedBits = surface[i].a & RoughnessMask;
+                        maxBitDelta = Mathf.Max(maxBitDelta, Mathf.Abs(packedBits - expectedBits));
+                        if (packedBits > 0)
+                        {
+                            nonZero++;
+                        }
+                    }
+
+                    Assert.Greater(nonZero, 0, "fixture must exercise non-zero extracted roughness");
+                    Assert.LessOrEqual(maxBitDelta, 1,
+                        "fit-driven packed alpha bits 0-5 must FULLY adopt the searched-strength texture (within 1 quantization step), "
+                        + "not lerp(scalar, extracted, userSlider). Max 6-bit delta was " + maxBitDelta);
+                }
+                finally
+                {
+                    pipeline.ReleaseResult(result);
+                }
+            }
+            finally
+            {
+                pipeline.Dispose();
+            }
+
+            Destroy(baseMap, whiteOcclusion, mesh);
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator FitDriven_Roughness_UsesSobelEdgeSignal()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU Sobel-signal test (D-15).");
+                yield break;
+            }
+
+            // Design decision (UAT round 3, 2026-09-15): the fit-driven roughness TEXTURE
+            // is the Blender-parity Sobel edge signal adopted by the SEARCHED strength —
+            // lerp(scalar, sobelNormalized, fit.Strength) — not the retired high-pass
+            // detail remap. Proven by equality against the independently produced
+            // standalone-Sobel texture: same base, same deterministic kernels.
+            Mesh mesh = CreateQuadMesh();
+            Texture2D baseMap = CreateBaseMap(WorkingSize, BakedResponse);
+            Texture2D whiteOcclusion = CreateWhiteOcclusion();
+            NamerMaterialInspection fitInspection = BuildFitDrivenInspection(baseMap, mesh, whiteOcclusion, strength: 0.3f);
+            NamerMaterialInspection sobelInspection = BuildFitDrivenInspection(baseMap, mesh, whiteOcclusion, strength: 1f);
+            sobelInspection.RoughnessEstimator = NamerRoughnessEstimator.Sobel;
+
+            NamerComputePipeline pipeline = new NamerComputePipeline();
+            try
+            {
+                NamerSplitResult split = MeshVertexSplitter.Split(mesh);
+                Func<float, float> evaluate = ComposeEvaluate(pipeline, split);
+
+                NamerComputeResult fitResult = pipeline.Process(fitInspection, evaluate, null, CollapseErrorThreshold);
+                NamerComputeResult sobelResult = pipeline.Process(sobelInspection, null, null, CollapseErrorThreshold);
+                try
+                {
+                    Assert.IsNotNull(fitResult.ExtractedRoughness, "fit-driven branch must extract");
+                    Assert.IsNotNull(sobelResult.ExtractedRoughness, "standalone Sobel branch must extract");
+
+                    Assert.IsTrue(
+                        pipeline.TryGetFitStrength(fitInspection, WorkingSize, WorkingSize, CollapseErrorThreshold, out float fitStrength),
+                        "a PASSED fit must be cached for the readback");
+                    Assert.Greater(fitStrength, 0f,
+                        "the fixture must adopt a non-zero strength, or the signal assertion below is vacuous");
+
+                    Color32[] fitTex = ReadBackColor32(fitResult.ExtractedRoughness, WorkingSize * WorkingSize);
+                    Color32[] sobelTex = ReadBackColor32(sobelResult.ExtractedRoughness, WorkingSize * WorkingSize);
+
+                    // scalar for the fit path is inspection.Roughness (the CSNormalize no-map
+                    // branch) — BuildFitDrivenInspection pins it to 1f.
+                    const float scalar = 1f;
+                    const float tolerance = 2f / 255f;
+                    int violations = 0;
+                    float worst = 0f;
+                    for (int i = 0; i < fitTex.Length; i++)
+                    {
+                        float expected = Mathf.Lerp(scalar, sobelTex[i].r / 255f, fitStrength);
+                        float delta = Mathf.Abs(fitTex[i].r / 255f - expected);
+                        if (delta > tolerance)
+                        {
+                            violations++;
+                            worst = Mathf.Max(worst, delta);
+                        }
+                    }
+
+                    Assert.AreEqual(0, violations,
+                        "fit-driven roughness must be lerp(scalar, standaloneSobel, fitStrength=" + fitStrength.ToString("0.##")
+                        + ") within " + tolerance.ToString("F3") + " per texel; " + violations + " violations, worst delta "
+                        + worst.ToString("F3") + " (the high-pass detail remap is retired)");
+                }
+                finally
+                {
+                    pipeline.ReleaseResult(fitResult);
+                    pipeline.ReleaseResult(sobelResult);
+                }
+            }
+            finally
+            {
+                pipeline.Dispose();
+            }
+
+            Destroy(baseMap, whiteOcclusion, mesh);
+            yield return null;
+        }
+
         // -- 2A: default-on end-to-end acceptance ---------------------------
 
         [UnityTest]

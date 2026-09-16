@@ -1,30 +1,39 @@
 ---
-title: Plan the Sobel-led, residual-guided roughness redesign
+title: Plan the Gouraud-projection one-texture + roughness-transfer redesign
 date: 2026-09-16
 priority: high
 ---
 
-# Plan the Sobel-led, residual-guided roughness redesign
+# Plan the Gouraud-projection one-texture + roughness-transfer redesign
 
-Turn `.planning/notes/sobel-led-residual-guided-roughness.md` into an executable plan:
-sever the global removal↔dip coupling (slider owns dip, ladder owns removal), add the
-residual-derived correction mask (one mask softening removal + dip locally), add the
-residual on/off checkbox, and resolve the precomputed-slider-default open question
-(removal-strength exposure vs. a gloss-side criterion — a dip search against the residual
-is degenerate).
+Turn `.planning/notes/sobel-led-residual-guided-roughness.md` (round-2 design) into an
+executable plan:
+
+1. **Projection kernel** — cleaned base := per-triangle Gouraud-representable projection
+   of the albedo (reuses the 16×16 barycentric fit machinery, writing the fitted surface
+   back), so the residual quotient is white by construction; ladder search and the honest
+   threshold gamble retire.
+2. **Roughness transfer kernel** — luminance-split of (albedo − projected) modulates the
+   roughness map via the surviving D-08 consume site; dip depth = pure taste slider (no
+   precompute); one decided polarity treatment for dark baked response.
+3. **Residual on/off checkbox** — explicit override; with projection it defaults to
+   near-always-passing.
+4. **Estimator dropdown consolidation** — one extraction path + decomposition on/off;
+   decide whether Sobel-of-base survives as an alternate dip source.
+5. **UV-overlap handling** — depends on the research question filed in
+   `.planning/research/questions.md`; at minimum an honest "these spots stay" statement.
 
 ## Entry point
 
-Likely a gap-closure plan feeding off Phase 04.1's UAT round-5 verdict once the phase
-closes (`04.1-UAT.md` round 5 is still pending and this exploration is its substance:
-fit-driven look rejected, new direction chosen). Route via `/gsd-plan-phase --gaps` or
-`/gsd-quick` for the UI-only slice (checkbox) if it lands first.
+Gap-closure plan feeding off Phase 04.1's UAT round-5 verdict once the phase closes
+(`04.1-UAT.md` round 5 is still pending; this exploration is its substance). Route via
+`/gsd-plan-phase --gaps`.
 
 ## Acceptance sketch
 
-- Fit-driven and Sobel modes produce the same slider-driven dip character; the ladder
-  result no longer changes gloss depth.
-- Neo: residual hotspots shrink measurably after the correction pass; one-texture outcome
-  reachable without a strength-1.0 global character.
-- Existing pinned tests updated intentionally (the dip-coupling tests from 04.1-07 flip
-  again, by design).
+- A processed asset's residual measures white everywhere except UV-overlap texels and
+  ≤8-bit quantization dust — no threshold tuning required.
+- The removed detail is visibly re-expressed as gloss variation (slider-controlled), not
+  lost; chroma grain loss is bounded and documented.
+- One-texture outcome (no EXR) with the checkbox off-by-default override.
+- Existing 04.1-07 dip-coupling tests flip again, intentionally.

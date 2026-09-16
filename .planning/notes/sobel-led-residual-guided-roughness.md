@@ -1,65 +1,81 @@
 ---
-title: Sobel-led, residual-guided roughness — slider owns the dip, the residual mask owns the hotspots
-date: 2026-09-16
-context: Exploration session (/gsd-explore) mid-Phase-04.1, triggered by the UAT round-5-early verdict that the fit-driven map (rung ~1.0 on Neo ⇒ ≈ 1−sobel) looks bad; revises the strength ownership of [[anchored-inverted-roughness-polarity]]
-source: Socratic exploration; Neo residual EXR inspected on disk (Assets/NAMERGenerated/Neo-T-Pose/tripo_mat_d83278e6_Namer_Residual.exr)
+title: Gouraud-projection one-texture with roughness transfer (round-2 design; supersedes the round-1 sobel-led/mask design in this same note's history)
+date: 2026-09-16 (round 2, same session)
+context: /gsd-explore continuation during Phase 04.1; round 1 captured the ladder+mask design, round 2 replaced its core after code-verified research; revises the strength ownership of [[anchored-inverted-roughness-polarity]]
+source: Socratic exploration; code findings verified by gsd-phase-researcher with file:line evidence; Neo residual EXR inspected on disk (Assets/NAMERGenerated/Neo-T-Pose/tripo_mat_d83278e6_Namer_Residual.exr)
 ---
 
-# Sobel-led, residual-guided roughness
+# Gouraud-projection one-texture with roughness transfer
 
-Verdict that motivated this: the fit-driven estimator's map — dip depth = the searched
-sharp-removal rung, ~0.9–1.0 on Neo — reads as an inverted Sobel edge map and "looks like
-shit" next to the Sobel-mode map tuned by the slider. Root cause is not the D-08 formula but
-**strength ownership**: one `_Strength` uniform (NamerRoughnessPipeline.cs:416) drives both
-`CSSharpRemoval` and `CSRoughnessRemap`, so the rung that collapses the base silently also
-sets global gloss depth — and the fit has no gloss signal at all
-(`EvaluateRefitMaxError` never reads the roughness texture).
+## Motivation (both rounds)
 
-## The redesign
+The fit-driven map (dip = the searched sharp-removal rung, ~0.9–1.0 on Neo) reads as an
+inverted Sobel edge map and loses the look comparison against the slider-tuned Sobel map.
+Root cause is **strength ownership**: one `_Strength` uniform
+(`NamerRoughnessPipeline.cs:416`) drives both `CSSharpRemoval` and `CSRoughnessRemap`, while
+the fit has no gloss signal (`EvaluateRefitMaxError` never reads the roughness texture).
 
-| Concern | Owner |
+## Research-verified mechanics (round 2)
+
+- **The residual quotient is `cleanedBase / vcInterp`** in linear space with a 1e-3 vc
+  floor (`Compute/NAMERDecomp.compute:130-141`); the dividend is the **cleaned base, not
+  the source albedo**. The residual measures Gouraud-reconstruction of whatever base is
+  handed in — it never measured source fidelity. `FitOnlyMaxError` = per-texel mean-channel
+  MAE of vcInterp vs base (`NAMERDecomp.compute:166-167`).
+- VCs are per-triangle barycentric LSQ on a 16×16 interior grid, vertex-aggregated by
+  unweighted mean, output piecewise-linear (Gouraud) at vertex density, Color32-quantized
+  (`VertexColorFitter.cs:104,265-270,389-415`). **Mid frequencies — coarser than texel
+  clusters, finer than a triangle's UV footprint — are structurally unrepresentable.**
+- The current smoother is a single global texel-space gaussian (radius
+  `clamp(max(w,h)/32, 8, 64)`, σ = radius/3 ≈ 21 texels at 2K; `NamerRoughnessPipeline.cs:48-51`),
+  not island- or triangle-aware; it under-smooths large-triangle regions and bleeds across
+  UV seams. `CSRoughnessSharpRemoval`'s `saturate()` is mathematically inert (convex
+  combination `(1−s)·base + s·blurred`).
+- **Overlapping UVs rasterize first-covering-triangle-wins**
+  (`NAMERDecomp.compute:111-113`) — on tripo/AI meshes one triangle's vcInterp lands on
+  another's texels; guaranteed mismatch no smoothing can fix. Likely part of Neo's
+  scattered non-white spots.
+- Literature pointers [ASSUMED, unverified — search rate-limited]: bilateral filtering
+  (Tomasi & Manduchi 1998); Mesh Colors (Yuksel et al. 2010) for the per-triangle
+  hybrid representation gap; xatlas-style seam-aware dilation.
+
+## The round-2 design (decided)
+
+| Element | Design |
 |---|---|
-| Residual collapse (one-texture) | Ladder search — unchanged machinery: first-passing minimal sharp-removal rung, honest `FitOnlyMaxError` gate |
-| Gloss look | **The user slider** — dip depth is taste, not a search artifact; the Sobel-mode map character becomes the default everywhere |
-| Local over-fire | **Residual correction mask** — `soften = 1 − blur(|residual − 1|)` derived from the already-computed residual; locally reduces removal *and* dip together (D-08 coupling preserved locally, severed globally) |
-| Honest gate | Unchanged — residual is dropped only when the post-correction re-fit measures within threshold |
+| Residual collapse | **By construction**: the cleaned base is the projection of the albedo onto the Gouraud-representable space (per-triangle) — the base says exactly what the VCs can say, so `base/vcInterp` ≡ white up to Color32 quantization. Ladder search, threshold gamble, and the round-1 correction mask all retire |
+| Removed signal (albedo − projected) | Luminance component **transfers to the roughness map** (dip where baked response was bright). Chroma grain: accepted loss — a scalar gloss channel has no home for it |
+| Dip depth | **Pure taste slider** (user decision, round 2) — no precompute, no search; the round-1 "precomputed for whitest residual" question dissolves (nothing left to precompute) |
+| Residual checkbox | Explicit on/off override of the (now near-always-passing) gate — "drop it, I accept the quantization dust" |
+| Estimator split | Largely retires: one extraction path + decomposition on/off. Whether Sobel-of-base survives as an alternate dip source is a planning call |
+| D-08 formula | Survives as the consume site (`saturate(scalar − strength·mag)`); the *source signal* changes from Sobel-of-base to the transferred removed-detail luminance |
 
-Supersedes the *global* half of D-08's one-scalar coupling (the formula
-`saturate(scalar − strength·mag/p90)` survives; who owns `strength` changes). D-10's
-full-adoption pin (`isFitDriven ? 1f`) becomes moot once the slider owns the dip — the
-`_RoughnessDipApplied` pack-branch semantics need re-derivation in the implementing plan.
+## Transfer caveats (decided constraints, details for planning)
 
-## Evidence
-
-- Neo's residual is ~99% white with small, scattered, mild-gray hotspots on the figure
-  surfaces (inspected via sips EXR→PNG, 2026-09-16). Dark-on-white ⇒ reconstruction
-  *overshoots* the original at those texels (quotient < 1). The collapse is nearly there —
-  a local touch-up, not a higher global rung, is the missing piece.
-- The hotspots coincide (per user read) with over-extraction — the same edges where dip ≈ 1
-  and strength-1.0 sharp-removal over-fires, because both share the rung.
-
-## UI additions requested in the same session
-
-1. **Residual on/off checkbox** — explicit user override of the honest gate: force the
-   residual texture off (accept the visual error, ship one texture anyway) or on (keep the
-   EXR even when the fit passed). The gate stays the *default*, the checkbox is the escape
-   hatch.
-2. **A precomputed slider default** — "precomputed for the most white residual texture".
-   Open question for planning: **dip is albedo-residual-invariant** (the residual is a
-   quotient on `cleanedBase × vc`; gloss never enters it), so a whitest-residual criterion
-   cannot select a dip value — the search would be flat. Candidate coherent readings:
-   (a) expose the ladder-picked *removal* strength as a visible slider pre-set to the
-   searched value (precompute exists, just hidden today); (b) define a gloss-side criterion
-   for the dip default (new statistic — needs a spec). Planning must pick one; do not
-   implement a dip search against the residual.
+1. **Luminance-only transfer** — the high-pass signal needs a luminance/chroma split; chroma
+   cannot cross into the scalar gloss channel.
+2. **Polarity by phenomenon** — bright baked speckle → dip toward gloss is physical; dark
+   baked occlusion → matte is a stylization choice, not physics. The transfer function
+   needs one decided sign treatment for dark response.
+3. 6-bit roughness saturation headroom: heavy transfer can clip at both ends.
 
 ## Open details deferred to planning
 
-- Single correction pass (correct → re-fit VCs → re-measure) vs. iterate-until-white loop.
-  Start single-pass; the re-fit/re-measure cycle already exists as ladder machinery.
-- Mask threshold and blur radius; whether the mask also gates the VC refit.
-- Estimator dropdown meaning after the change — degenerates to "one-texture machinery
-  on/off"; renaming is a UX decision.
+- Exact projection form (per-triangle fitted Gouraud surface evaluated into the base —
+  likely reuses the existing 16×16 fit machinery, writing the fitted surface back).
+- UV-overlap texels: unaffected by projection; needs detection/repair (see research
+  question) or an honest "these spots stay" statement.
+- What the estimator dropdown becomes; renaming is a UX decision.
+- Existing pinned tests flip intentionally again (04.1-07's dip-coupling tests).
+
+## Provenance
+
+Round 1 (same session, superseded core): slider-owns-dip + ladder-owns-removal +
+residual-mask correction pass. Survivors into round 2: the taste slider, the checkbox, the
+root-cause analysis. Superseded: the mask pass and the ladder's role in gloss — the
+projection makes them unnecessary. Round 1 evidence (Neo residual ~99% white, mild
+scattered dark spots = reconstruction overshoot) directly motivated asking why rung 1.0
+stalled, which the research answered (frequency-band mismatch + UV overlaps).
 
 ---
 *Related: [[anchored-inverted-roughness-polarity]] (formula survives, ownership revised),

@@ -225,7 +225,27 @@ Plans:
   4. Estimator dropdown consolidates to one extraction path + decomposition on/off (Sobel-of-base's survival as alternate dip source is a planning call)
   5. Existing 04.1-07 dip-coupling tests flip again, intentionally, and the full EditMode suite is green
 
-**Plans**: TBD (planning pending)
+**Plans**: 5 plans
+
+Plans:
+
+**Wave 1**
+
+- [ ] 04.2-01: Decomposition engine — CSProjectBase projection write-back + symmetric VcFloor + NamerResidualMode (AlwaysKeep/NeverKeep) + projection identity/mode tests
+
+- [ ] 04.2-02: Removed-luminance transfer — CSRemovedLuma + CSRoughnessTransferRemap (signed Rec.601, p90-normalized dip) + ExtractTransferRoughness + polarity/headroom tests
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 04.2-03: The rewire + retirement — projection hook through NamerComputePipeline.Process, NamerDipSource/Write Residual/dip-depth UI, fitter/ladder/cache/frequency-separation deletion, intentional test flips
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 04.2-04: UI honesty + acceptance — end-to-end criteria tests (one-texture default, source-dividend EXR, whiteness identity, taste slider), stats relabel + chroma/overlap honesty copy, full regression + flip audit
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 04.2-05: Orthographic synced side-by-side preview — ortho PreviewRenderUtility camera, synced yaw+pitch rotation (one shared quaternion, ±89° pitch clamp), orthographic-size zoom, both-objects-wide-plus-gap initial framing (UI-03/UI-04; the acceptance instrument for the transferred-roughness LOOK)
 
 ### Phase 5: Stylization
 

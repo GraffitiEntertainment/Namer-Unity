@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
@@ -74,14 +75,15 @@ namespace GraffitiEntertainment.Namer.Editor
         private readonly int _kernelSharpRemoval;
         private readonly int _kernelRemap;
 
-        // 3A fit cache keyed by the full fit identity (mesh, base-map content, AO controls,
-        // estimator, dimensions, threshold — see MakeFitKey, WR-01) — mirrors NamerAOPipeline's
+        // 3A fit cache keyed by the full fit identity (mesh, base-map identity + content
+        // stamp, occlusion-map identity, AO controls, estimator, dimensions, threshold —
+        // see MakeFitKey, WR-01) — mirrors NamerAOPipeline's
         // bake cache. Stores the SELECTED strength so a later Process call reuses it without
         // re-running the strength search. The threshold is part of the key: a strength that
         // passes one threshold may not pass another, so a fit must be re-searched when the
         // threshold changes. Only a PASSED search is cached — a failed search re-runs on the
         // next request instead of reusing the honest-but-invalid max ladder strength.
-        private readonly Dictionary<(int meshId, int baseMapId, float aoStrength, float aoContrast, float aoBlurRadius, float aoUnmultiplyStrength, int estimator, int w, int h, float maxErrorThreshold), NamerRoughnessFitResult> _fitCache =
+        private readonly Dictionary<(int meshId, int baseMapId, long baseMapStamp, int occlusionMapId, float aoStrength, float aoContrast, float aoBlurRadius, float aoUnmultiplyStrength, int estimator, int w, int h, float maxErrorThreshold), NamerRoughnessFitResult> _fitCache =
             new();
 
         public NamerRoughnessPipeline()
@@ -617,14 +619,52 @@ namespace GraffitiEntertainment.Namer.Editor
         // AO controls — so the key must identify the base-map CONTENT and the AO settings,
         // not just mesh + dimensions. A mesh + dimensions-only key let a persistent window
         // pipeline reuse a stale fitted strength across different materials sharing a mesh.
-        private static (int meshId, int baseMapId, float aoStrength, float aoContrast, float aoBlurRadius, float aoUnmultiplyStrength, int estimator, int w, int h, float maxErrorThreshold) MakeFitKey(
+        // WR-02 (04.1 review): the authored occlusion map also feeds CSNormalize's
+        // un-multiply of the base the Sobel estimator reads, so its identity belongs in
+        // the key too — swapping _OcclusionMap on the source material must invalidate the
+        // cached strength — and the base map carries a content stamp because re-importing
+        // changed pixels into the SAME Texture2D instance keeps the instance ID stable.
+        private static (int meshId, int baseMapId, long baseMapStamp, int occlusionMapId, float aoStrength, float aoContrast, float aoBlurRadius, float aoUnmultiplyStrength, int estimator, int w, int h, float maxErrorThreshold) MakeFitKey(
             NamerMaterialInspection inspection, int w, int h, float maxErrorThreshold)
         {
             int meshId = inspection.BakeSourceMesh != null ? inspection.BakeSourceMesh.GetInstanceID() : 0;
             int baseMapId = inspection.BaseMap != null ? inspection.BaseMap.GetInstanceID() : 0;
-            return (meshId, baseMapId, inspection.AoStrength, inspection.AoContrast,
+            int occlusionMapId = inspection.OcclusionMap != null ? inspection.OcclusionMap.GetInstanceID() : 0;
+            return (meshId, baseMapId, AssetContentStamp(inspection.BaseMap), occlusionMapId,
+                inspection.AoStrength, inspection.AoContrast,
                 inspection.AoBlurRadius, inspection.AoUnmultiplyStrength,
                 (int)inspection.RoughnessEstimator, w, h, maxErrorThreshold);
+        }
+
+        /// <summary>
+        /// Cheap content stamp for a fit-key texture (WR-02, 04.1 review): the imported
+        /// file's last-write UTC ticks, so re-importing/rebaking changed pixels into the
+        /// SAME <c>Texture2D</c> instance (whose instance ID stays stable) invalidates a
+        /// cached fit instead of reusing a stale strength. Zero for non-persistent
+        /// textures (test fixtures, in-memory instances), which the instance ID already
+        /// distinguishes.
+        /// </summary>
+        private static long AssetContentStamp(Texture2D texture)
+        {
+            if (texture == null)
+            {
+                return 0L;
+            }
+
+            string path = AssetDatabase.GetAssetPath(texture);
+            if (string.IsNullOrEmpty(path))
+            {
+                return 0L;
+            }
+
+            try
+            {
+                return File.GetLastWriteTimeUtc(path).Ticks;
+            }
+            catch (IOException)
+            {
+                return 0L;
+            }
         }
 
         private void Dispatch(int kernel, int w, int h)

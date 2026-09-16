@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: phase-complete
-stopped_at: Completed 04.1-07-PLAN.md — anchored-inverted dip-depth remap (D-08..D-10)
-last_updated: "2026-09-16T19:10:21Z"
+status: ready_to_plan
+stopped_at: Phase 4.1 complete (7/7) — ready to discuss Phase 5
+last_updated: 2026-09-16T21:29:53.742Z
 last_activity: 2026-09-16 -- Phase 04.1 complete (7/7 plans)
 progress:
   total_phases: 7
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-25)
 
 **Core value:** A user can select a textured FBX in Unity, run `Process with NAMER`, and get a correctly rendering, source-compatible NAMER material without ever modifying the imported source assets or leaving the Unity Editor.
-**Current focus:** Phase 04.1 — baked-response-roughness-extraction-zero-residual-one-textur
+**Current focus:** Phase 5 — stylization
 
 ## Current Position
 
-Phase: 04.1 (baked-response-roughness-extraction-zero-residual-one-textur) — COMPLETE
-Plan: 7 of 7
-Status: Phase complete — ready for verification
-Last activity: 2026-09-16 -- Phase 04.1 complete (7/7 plans, anchored-inverted dip-depth remap)
+Phase: 5
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-09-16
 
 Progress: [██████████] 100%
 
@@ -36,7 +36,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 14
+- Total plans completed: 21
 - Average duration: - min
 - Total execution time: 0.0 hours
 
@@ -48,6 +48,7 @@ Progress: [██████████] 100%
 | 3 | 3 | - | - |
 | 03.1 | 3 | - | - |
 | 04 | 5 | - | - |
+| 4.1 | 7 | - | - |
 
 **Recent Trend:**
 

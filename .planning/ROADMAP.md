@@ -172,7 +172,7 @@ Plans:
 **Goal:** Extract material response (gloss/shading/cavity) baked into the base texture as 6-bit roughness (surface alpha bits 0-5) when no authored roughness map exists — via a Sobel Blender-parity estimator and a fit-driven strength search — then refit the sharp-removal-cleaned base into vertex colors so the Phase-4 D-13 residual auto-drop becomes the primary one-texture path (one RGBA8 surface PNG + vertex-colored mesh, no residual), with a D-06 optional roughness-offset escape hatch.
 **Requirements**: ENCD-02, NORM-01, NORM-03, VCOL-03, VCOL-04, VCOL-05, UI-03, SHDR-02 (boundary-aware IDs strengthened by this phase; no dedicated IDs — success criteria derived from CONTEXT.md D-01..D-06)
 **Depends on:** Phase 4
-**Plans:** 7 plans (6 complete + 1 revision)
+**Plans:** 7 plans (7 complete)
 
 Plans:
 
@@ -182,7 +182,7 @@ Plans:
 - [x] 04.1-04-PLAN.md
 - [x] 04.1-05-PLAN.md
 - [x] 04.1-06-PLAN.md
-- [ ] 04.1-07-PLAN.md
+- [x] 04.1-07-PLAN.md
 
 **Wave 1**
 
@@ -210,7 +210,7 @@ Plans:
 
 **Wave 7** *(gap closure — UAT round 5 revision, blocked on Wave 6)*
 
-- [ ] 04.1-07: Anchored-inverted roughness mapping — CSRoughnessRemap + Sobel-pack blend become dip-depth (saturate(scalar − strength · mag/p90)); CSRoughnessNormalize stays direct; three Sobel premises flip; D-09 tooltip drops Blender-parity; D-10 full adoption stays pinned
+- [x] 04.1-07: Anchored-inverted roughness mapping — CSRoughnessRemap + Sobel-pack blend become dip-depth (saturate(scalar − strength · mag/p90)); CSRoughnessNormalize stays direct; three Sobel premises flip; D-09 tooltip drops Blender-parity; D-10 full adoption stays pinned
 
 ### Phase 5: Stylization
 
@@ -246,5 +246,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 3. Asset Generation + Editor Workflow + Preview | 3/3 | Complete    | 2026-08-28 |
 | 03.1. AO Extraction (INSERTED) | 3/3 | Complete | 2026-08-31 |
 | 4. Vertex-Color Decomposition + Residual | 5/5 | Complete   | 2026-09-01 |
-| 04.1. Roughness Extraction + One-Texture (INSERTED) | 6/6 | Complete   | 2026-09-15 |
+| 04.1. Roughness Extraction + One-Texture (INSERTED) | 7/7 | Complete   | 2026-09-16 |
 | 5. Stylization | 0/3 | Not started | - |

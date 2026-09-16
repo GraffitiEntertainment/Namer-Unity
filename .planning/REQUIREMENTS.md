@@ -147,7 +147,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GEN-04 | Phase 3 | Complete |
 | UI-01 | Phase 3 | Complete |
 | UI-02 | Phase 3 | Complete |
-| UI-03 | Phase 3 (slice) / 4-5 | In Progress — AO control delivered in Phase 3 |
+| UI-03 | Phase 3 (slice) / 4-5 | In Progress — AO un-multiply control (Phase 3) + roughness-extraction estimator/strength controls (Phase 04.1) delivered; style strength/smoothing/palette/normal detail/roughness simplification remain Phase 5 scope |
 | UI-04 | Phase 3 (slice) / 5 | In Progress — original+NAMER preview delivered in Phase 3 |
 | UI-05 | Phase 3 (slice) / 4 | In Progress — 6 channels delivered in Phase 3 |
 | UI-06 | Phase 3 | Complete |

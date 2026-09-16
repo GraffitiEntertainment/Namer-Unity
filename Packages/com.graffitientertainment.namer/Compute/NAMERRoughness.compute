@@ -2,8 +2,8 @@
 // GPU image-space roughness extraction kernels (Phase 04.1, plan 01).
 //
 // Three staged kernels turn the already-cleaned linear base color (_BaseColorOut from
-// CSNormalize) into a per-texel roughness texture for the Sobel (Blender-parity)
-// estimator: CSRoughnessSobel -> hierarchical max-reduce -> CSRoughnessNormalize.
+// CSNormalize) into a per-texel roughness texture for the Sobel estimator:
+// CSRoughnessSobel -> hierarchical max-reduce -> CSRoughnessNormalize.
 //
 // CSRoughnessSobel computes the Rec.601 luminance of the cleaned base (NAMERRoughness.hlsl,
 // deliberately NOT the Rec.709 NAMER_LUMA_* — RESEARCH Pitfall 4), then the 3x3 Sobel edge
@@ -12,7 +12,7 @@
 //
 // CSRoughnessMaxReduce reuses the CSReduce `.g = max` hierarchical body (overflow-free 8x8
 // block max, no atomics) to reduce the Sobel magnitude to a tiny RT, so the GLOBAL max is
-// available for Blender's np.max normalization (RESEARCH Pitfall 3).
+// available as the ceiling of the robust p90 normalization scale (UAT round 4).
 //
 // CSRoughnessNormalize emits the final roughness directly in the roughness domain:
 // saturate(mag / max(globalMax, 1e-4)) — NO 1 - x inversion (RESEARCH Pitfall 1).
@@ -50,9 +50,9 @@ Texture2D<float4> _SobelRoughness; // CSRoughnessNormalize output the fit-driven
 uint2 _Size;           // unsigned: compared against SV_DispatchThreadID (uint) in the kernel guards
 uint2 _AvgSrcSize;
 uint2 _AvgDstSize;
-float _GlobalMax;      // reduced global Sobel max (uploaded back for the normalize pass)
+float _GlobalMax;      // Sobel normalization scale (robust p90 of the magnitude, UAT round 4) uploaded for the normalize pass
 float _Strength;       // fit-driven sharp-removal / Sobel-adoption strength (0..1)
-float _ScalarRoughness; // scalar roughness the fit-driven adoption lerps FROM (inspection.Roughness)
+float _ScalarRoughness; // authored scalar roughness that anchors the fit-driven dip (inspection.Roughness)
 int _Radius;       // separable-blur radius (frequency-separation low-pass)
 float _Sigma;      // separable-blur sigma
 
@@ -118,9 +118,11 @@ void CSRoughnessMaxReduce(uint3 id : SV_DispatchThreadID)
     _DstAvg[id.xy] = float4(0.0, maxG, 0.0, 1.0);
 }
 
-// Final normalization: roughness = saturate(mag / globalMax). Emits roughness directly in
-// the roughness domain (NO 1 - x inversion, RESEARCH Pitfall 1). Blender:
-// np.clip(edge / np.max(edge), 0, 1).
+// Final normalization: roughness = saturate(mag / scale). Emits roughness directly in
+// the roughness domain (NO 1 - x inversion, RESEARCH Pitfall 1). Blender normalizes by
+// np.max(edge); the C# side instead uploads the robust p90 of the magnitude (clamped to
+// the true max) — a deliberate parity deviation, because np.max lets a few extreme edges
+// collapse smooth regions of heavy-tailed AI albedos to mirror gloss (UAT round 4).
 [numthreads(8,8,1)]
 void CSRoughnessNormalize(uint3 id : SV_DispatchThreadID)
 {
@@ -214,13 +216,14 @@ void CSRoughnessSharpRemoval(uint3 id : SV_DispatchThreadID)
     _CleanedBaseOut[id.xy] = float4(cleaned, 1.0);
 }
 
-// Fit-driven roughness = the Blender-parity Sobel edge signal (CSRoughnessNormalize output)
-// adopted by the searched strength: lerp(_ScalarRoughness, sobel, _Strength). At strength 0
-// this is exactly the scalar (identity); at 1 it fully adopts the Sobel look. Emitted in the
-// roughness domain (NO 1 - x inversion — RESEARCH Pitfall 1). The high-pass detail remap
-// (saturate(strength * length(_SharpDetail))) is retired: noise/freckle detail read as
-// "patchy" roughness patches while the globally-max-normalized Sobel concentrates the
-// response at real edges (live UAT round 3, plan 04.1-06).
+// Fit-driven roughness = the authored scalar anchors the map and the direct-polarity Sobel
+// edge signal (CSRoughnessNormalize output, mag/p90 in .r) DIPS texels toward gloss:
+// saturate(_ScalarRoughness - _Strength * _SobelRoughness[id.xy].r) (D-08 anchored-inverted).
+// The scalar anchor holds at every strength (strength 0 => exactly the scalar); at higher
+// strength edges dip toward 0 (gloss). The round-3 lerp-to-Sobel is retired. The high-pass
+// detail remap (saturate(strength * length(_SharpDetail))) was already retired in plan
+// 04.1-06. CSRoughnessNormalize stays direct-polarity (mag/p90); the inversion lives ONLY
+// here and in CSSurfacePack's Sobel branch (D-08).
 [numthreads(8,8,1)]
 void CSRoughnessRemap(uint3 id : SV_DispatchThreadID)
 {
@@ -229,6 +232,6 @@ void CSRoughnessRemap(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    float roughness = lerp(_ScalarRoughness, _SobelRoughness[id.xy].r, _Strength);
-    _RoughnessOut[id.xy] = float4(saturate(roughness), 0.0, 0.0, 1.0);
+    float roughness = saturate(_ScalarRoughness - _Strength * _SobelRoughness[id.xy].r);
+    _RoughnessOut[id.xy] = float4(roughness, 0.0, 0.0, 1.0);
 }

@@ -861,7 +861,7 @@ namespace GraffitiEntertainment.Namer.Editor
             int newEstimator = EditorGUILayout.Popup(
                 new GUIContent(
                     "Roughness Estimator",
-                    "How roughness is extracted: Fit-driven searches for the minimal strength that collapses the residual and adopts the Blender-parity Sobel edge signal by that strength (default); Sobel is the standalone edge estimator with the manual strength slider. Sobel mode does NOT sharp-remove the base, so Sobel-mode assets do not reach the one-texture outcome (parity-only)."),
+                    "How roughness is extracted: both routes share the anchored-inverted mapping — the authored roughness scalar anchors the map and the Sobel edge magnitude dips texels toward gloss. This dropdown only chooses who picks the strength: Fit-driven auto-searches the strength that collapses the residual (default); Sobel uses the manual strength slider. Sobel mode does NOT sharp-remove the base, so Sobel-mode assets do not reach the one-texture outcome."),
                 _roughnessEstimator,
                 new[] { "Fit-driven", "Sobel" });
             if (newEstimator != _roughnessEstimator)

@@ -229,11 +229,12 @@ namespace GraffitiEntertainment.Namer.Tests
                 yield break;
             }
 
-            // Design decision (UAT round 3, 2026-09-15): the fit-driven roughness TEXTURE
-            // is the Blender-parity Sobel edge signal adopted by the SEARCHED strength —
-            // lerp(scalar, sobelNormalized, fit.Strength) — not the retired high-pass
-            // detail remap. Proven by equality against the independently produced
-            // standalone-Sobel texture: same base, same deterministic kernels.
+            // Design decision (D-08 anchored-inverted, 2026-09-16): the fit-driven roughness
+            // TEXTURE is saturate(scalar - fitStrength * standaloneSobel) — the authored scalar
+            // anchors the map and the direct-polarity Sobel signal dips texels toward gloss —
+            // not the retired high-pass detail remap. Proven by equality against the
+            // independently produced standalone-Sobel texture: same base, same deterministic
+            // kernels.
             Mesh mesh = CreateQuadMesh();
             Texture2D baseMap = CreateBaseMap(WorkingSize, BakedResponse);
             Texture2D whiteOcclusion = CreateWhiteOcclusion();
@@ -271,7 +272,7 @@ namespace GraffitiEntertainment.Namer.Tests
                     float worst = 0f;
                     for (int i = 0; i < fitTex.Length; i++)
                     {
-                        float expected = Mathf.Lerp(scalar, sobelTex[i].r / 255f, fitStrength);
+                        float expected = Mathf.Clamp01(scalar - fitStrength * (sobelTex[i].r / 255f));
                         float delta = Mathf.Abs(fitTex[i].r / 255f - expected);
                         if (delta > tolerance)
                         {
@@ -281,9 +282,9 @@ namespace GraffitiEntertainment.Namer.Tests
                     }
 
                     Assert.AreEqual(0, violations,
-                        "fit-driven roughness must be lerp(scalar, standaloneSobel, fitStrength=" + fitStrength.ToString("0.##")
+                        "fit-driven roughness must be saturate(scalar - fitStrength * standaloneSobel, fitStrength=" + fitStrength.ToString("0.##")
                         + ") within " + tolerance.ToString("F3") + " per texel; " + violations + " violations, worst delta "
-                        + worst.ToString("F3") + " (the high-pass detail remap is retired)");
+                        + worst.ToString("F3") + " (anchored-inverted D-08; the high-pass detail remap is retired)");
                 }
                 finally
                 {

@@ -186,7 +186,8 @@ namespace GraffitiEntertainment.Namer.Editor
                 BindAndDispatchSurfacePack(octahedral, packInputs, surfaceOut,
                     roughnessTex != null ? (Texture)roughnessTex : WhiteFill(),
                     roughnessTex != null,
-                    isFitDriven ? 1f : inspection.RoughnessExtractStrength, w, h);
+                    isFitDriven ? 1f : inspection.RoughnessExtractStrength,
+                    isFitDriven, w, h);
 
                 // D-05: the fit-driven path repoints NormalizedBaseColor at the sharp-removal
                 // cleaned base so the refit consumes the post-extraction base.
@@ -420,6 +421,7 @@ namespace GraffitiEntertainment.Namer.Editor
             Texture roughnessTex,
             bool hasExtractedRoughness,
             float roughnessExtractStrength,
+            bool roughnessDipApplied,
             int w,
             int h)
         {
@@ -428,6 +430,7 @@ namespace GraffitiEntertainment.Namer.Editor
             _compute.SetTexture(_kernelSurfacePack, "_SurfaceOut", surfaceOut);
             _compute.SetFloat("_HasExtractedRoughness", hasExtractedRoughness ? 1f : 0f);
             _compute.SetFloat("_RoughnessExtractStrength", roughnessExtractStrength);
+            _compute.SetFloat("_RoughnessDipApplied", roughnessDipApplied ? 1f : 0f);
             _compute.SetTexture(_kernelSurfacePack, "_RoughnessTex", roughnessTex);
 
             Dispatch(_kernelSurfacePack, w, h);

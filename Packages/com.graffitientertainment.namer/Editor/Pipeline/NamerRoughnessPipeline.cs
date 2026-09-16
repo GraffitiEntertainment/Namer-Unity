@@ -51,6 +51,11 @@ namespace GraffitiEntertainment.Namer.Editor
         private const float BlurSigmaDivisor = 3.0f;
         private const float MinBlurSigma = 1e-3f;
 
+        // Robust Sobel normalization (UAT round 4): the normalization scale is the p90 of the
+        // Sobel magnitude over a fixed-size subsample, not the global max — see RobustSobelScale.
+        private const int SobelScaleSubsampleSize = 256;
+        private const float SobelScalePercentile = 0.9f;
+
         private readonly ComputeTexturePool _pool = new ComputeTexturePool();
         private readonly ComputeShader _compute;
         private readonly int _kernelSobel;
@@ -302,11 +307,14 @@ namespace GraffitiEntertainment.Namer.Editor
                 _compute.SetTexture(_kernelSobel, "_RoughnessRaw", roughnessRaw);
                 Dispatch(_kernelSobel, w, h);
 
-                // 2. Hierarchical max-reduce -> global Sobel max (Blender np.max normalization).
-                float globalMax = ReduceToGlobalMax(roughnessRaw, w, h, avgA, avgB);
+                // 2. Hierarchical max-reduce -> true global Sobel max, then the robust p90 scale
+                //    that keeps smooth regions matte when a few extreme edges would otherwise
+                //    own the normalization (UAT round 4; deliberate np.max parity deviation).
+                float trueMax = ReduceToGlobalMax(roughnessRaw, w, h, avgA, avgB);
+                float robustScale = RobustSobelScale(roughnessRaw, trueMax);
 
-                // 3. Normalize: roughness = saturate(mag / globalMax), in the roughness domain.
-                _compute.SetFloat("_GlobalMax", globalMax);
+                // 3. Normalize: roughness = saturate(mag / robustScale), in the roughness domain.
+                _compute.SetFloat("_GlobalMax", robustScale);
                 _compute.SetTexture(_kernelNormalize, "_RoughnessRaw", roughnessRaw);
                 _compute.SetTexture(_kernelNormalize, "_RoughnessOut", roughnessOut);
                 Dispatch(_kernelNormalize, w, h);
@@ -541,6 +549,59 @@ namespace GraffitiEntertainment.Namer.Editor
             finally
             {
                 data.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Robust Sobel normalization scale: the p90 of the Sobel magnitude, read back from a
+        /// <see cref="SobelScaleSubsampleSize"/>² blit subsample of the raw magnitude and
+        /// clamped to (1e-4, trueMax). Blender's np.max normalization lets a few extreme edges
+        /// set the scale, collapsing the smooth majority of heavy-tailed AI albedo textures to
+        /// mirror gloss (UAT round 4 — accepted parity deviation). The 1e-4 floor keeps a flat
+        /// base at ~0 roughness (a percentile of all-zero magnitudes must not divide by zero);
+        /// the trueMax ceiling is belt-and-braces (a percentile of a distribution never exceeds
+        /// its max, and it keeps an all-uniform texture normalizing to exactly 1).
+        /// </summary>
+        private float RobustSobelScale(RenderTexture roughnessRaw, float trueMax)
+        {
+            RenderTexture subsample = null;
+            try
+            {
+                subsample = _pool.Lease(NewDescriptor(
+                    SobelScaleSubsampleSize, SobelScaleSubsampleSize, GraphicsFormat.R32G32B32A32_SFloat));
+                Graphics.Blit(roughnessRaw, subsample);
+
+                AsyncGPUReadbackRequest request = AsyncGPUReadback.Request(subsample, 0, TextureFormat.RGBAFloat);
+                request.WaitForCompletion();
+                if (request.hasError)
+                {
+                    throw new InvalidOperationException("NAMER roughness p90-scale readback failed.");
+                }
+
+                NativeArray<float> data = request.GetData<float>();
+                try
+                {
+                    int texelCount = data.Length / 4;
+                    float[] magnitudes = new float[texelCount];
+                    for (int i = 0; i < texelCount; i++)
+                    {
+                        // RGBAFloat is 4 floats per texel, row-major; the Sobel magnitude is in .g.
+                        magnitudes[i] = data[i * 4 + 1];
+                    }
+
+                    Array.Sort(magnitudes);
+                    int percentileIndex = Mathf.Clamp(
+                        Mathf.FloorToInt(texelCount * SobelScalePercentile), 0, texelCount - 1);
+                    return Mathf.Clamp(magnitudes[percentileIndex], 1e-4f, Mathf.Max(trueMax, 1e-4f));
+                }
+                finally
+                {
+                    data.Dispose();
+                }
+            }
+            finally
+            {
+                Release(subsample);
             }
         }
 

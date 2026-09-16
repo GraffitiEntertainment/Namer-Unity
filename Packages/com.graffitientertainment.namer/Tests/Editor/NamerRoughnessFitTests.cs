@@ -153,6 +153,54 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         [UnityTest]
+        public IEnumerator FitDriven_CancelledFit_SurfacesCancelledFlag()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU fit-cancel test (D-15).");
+                yield break;
+            }
+
+            // WR-01 (04.1 review): a cancelled strength search must not vanish silently —
+            // the cancellation has to propagate out of NamerRoughnessFitter.Fit, through
+            // NamerRoughnessPipeline.ExtractRoughness, onto NamerComputeResult so asset-
+            // writing callers can warn that the output carries NO extraction.
+            Mesh mesh = CreateQuadMesh();
+            Texture2D baseMap = CreateBaseMap(WorkingSize, BakedResponse);
+            Texture2D whiteOcclusion = CreateWhiteOcclusion();
+            NamerMaterialInspection inspection = BuildFitDrivenInspection(baseMap, mesh, whiteOcclusion, strength: 1f);
+
+            NamerComputePipeline pipeline = new NamerComputePipeline();
+            try
+            {
+                NamerSplitResult split = MeshVertexSplitter.Split(mesh);
+                Func<float, float> evaluate = ComposeEvaluate(pipeline, split);
+
+                NamerComputeResult result = pipeline.Process(inspection, evaluate, () => true, CollapseErrorThreshold);
+                try
+                {
+                    Assert.IsTrue(result.RoughnessFitCancelled,
+                        "a cancelled fit must surface NamerComputeResult.RoughnessFitCancelled");
+                    Assert.IsNull(result.ExtractedRoughness,
+                        "a cancelled fit must not produce an extracted roughness texture");
+                    Assert.IsFalse(result.NormalizedBaseColorOwnedByRoughnessPool,
+                        "a cancelled fit must fall back to the identity (non-cleaned) normalized base");
+                }
+                finally
+                {
+                    pipeline.ReleaseResult(result);
+                }
+            }
+            finally
+            {
+                pipeline.Dispose();
+            }
+
+            Destroy(baseMap, whiteOcclusion, mesh);
+            yield return null;
+        }
+
+        [UnityTest]
         public IEnumerator FitDriven_PackedRoughness_AdoptsSearchedStrengthNotSliderBlend()
         {
             if (!ComputeAvailable)

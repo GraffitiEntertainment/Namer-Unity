@@ -212,6 +212,21 @@ Plans:
 
 - [x] 04.1-07: Anchored-inverted roughness mapping — CSRoughnessRemap + Sobel-pack blend become dip-depth (saturate(scalar − strength · mag/p90)); CSRoughnessNormalize stays direct; three Sobel premises flip; D-09 tooltip drops Blender-parity; D-10 full adoption stays pinned
 
+### Phase 4.2: Gouraud-projection one-texture with roughness transfer (residual white by construction) (INSERTED)
+
+**Goal:** Replace the fit-driven sharp-removal search with a by-construction residual collapse — the cleaned base becomes the per-triangle Gouraud-representable projection of the albedo (residual quotient ≡ white up to quantization, no ladder search or threshold gamble), while the removed detail's luminance transfers into the 6-bit roughness map via the surviving D-08 dip consume site with a pure-taste dip-depth slider, a residual on/off override checkbox, and a consolidated estimator path; UV-overlap texels handled honestly (research-gated).
+**Depends on**: Phase 4.1
+**Requirements**: strengthens VCOL-03, VCOL-04, VCOL-05, UI-03, SHDR-02 (design-change follow-up from 04.1 UAT round 5; source design note `.planning/notes/sobel-led-residual-guided-roughness.md`)
+**Success Criteria** (what must be TRUE):
+
+  1. A processed asset's residual measures white everywhere except UV-overlap texels and ≤8-bit quantization dust — no threshold tuning required (D-13 auto-drop becomes near-always-passing)
+  2. The removed detail (albedo − projected) is visibly re-expressed as gloss variation via the dip-depth taste slider — not lost; chroma grain loss bounded and documented
+  3. One-texture outcome by default (no residual EXR) with an explicit residual on/off override checkbox
+  4. Estimator dropdown consolidates to one extraction path + decomposition on/off (Sobel-of-base's survival as alternate dip source is a planning call)
+  5. Existing 04.1-07 dip-coupling tests flip again, intentionally, and the full EditMode suite is green
+
+**Plans**: TBD (planning pending)
+
 ### Phase 5: Stylization
 
 **Goal**: Let users apply reference-image-driven, hue-preserving stylization via a reusable NAMERStyleProfile with edge-preserving smoothing and AO/normal/roughness controls

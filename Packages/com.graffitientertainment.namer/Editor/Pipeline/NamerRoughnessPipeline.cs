@@ -19,6 +19,13 @@ namespace GraffitiEntertainment.Namer.Editor
     {
         public RenderTexture Roughness;
         public RenderTexture CleanedBase;
+
+        /// <summary>
+        /// True when the strength search was aborted via the cancel poll (WR-01, 04.1
+        /// review): no roughness or cleaned base was produced — the caller fell back to
+        /// the identity (scalar) path and must surface that to the user.
+        /// </summary>
+        public bool Cancelled;
     }
 
     /// <summary>
@@ -371,7 +378,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 fit = NamerRoughnessFitter.Fit(evaluate, shouldCancel, maxErrorThreshold);
                 if (fit.Cancelled)
                 {
-                    return new NamerRoughnessExtractResult();
+                    return new NamerRoughnessExtractResult { Cancelled = true };
                 }
 
                 // WR-02: only a PASSED search is cached — a failed search re-runs on the next

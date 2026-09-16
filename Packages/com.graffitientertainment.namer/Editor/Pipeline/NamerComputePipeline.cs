@@ -112,6 +112,7 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture cleanedBase = null;
             bool usesExtractedAo = false;
             bool usesBakedAo = false;
+            bool roughnessFitCancelled = false;
             bool shouldExtract = inspection.MetallicGlossMap == null && inspection.RoughnessExtractStrength > 0f;
             bool isFitDriven = inspection.RoughnessEstimator == NamerRoughnessEstimator.FitDriven;
 
@@ -173,6 +174,7 @@ namespace GraffitiEntertainment.Namer.Editor
                         inspection, baseColorOut, w, h, evaluate, shouldCancel, maxErrorThreshold);
                     roughnessTex = fitDriven.Roughness;
                     cleanedBase = fitDriven.CleanedBase;
+                    roughnessFitCancelled = fitDriven.Cancelled;
                 }
                 // else: identity legacy path — fit-driven without a refit (1A) or strength == 0.
 
@@ -197,6 +199,7 @@ namespace GraffitiEntertainment.Namer.Editor
                     PackedSurface = surfaceOut,
                     ExtractedRoughness = roughnessTex,
                     NormalizedBaseColorOwnedByRoughnessPool = cleanedBase != null,
+                    RoughnessFitCancelled = roughnessFitCancelled,
                     Width = w,
                     Height = h,
                 };
@@ -572,6 +575,14 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <see cref="NamerComputePipeline.ReleaseResult"/> (D-05).
         /// </summary>
         internal bool NormalizedBaseColorOwnedByRoughnessPool;
+
+        /// <summary>
+        /// True when the fit-driven strength search was cancelled via its cancel poll
+        /// (WR-01, 04.1 review): extraction produced nothing and this result carries the
+        /// identity (scalar roughness) path. Callers that persist assets must surface this
+        /// so a cancelled fit never silently writes un-extracted output.
+        /// </summary>
+        public bool RoughnessFitCancelled;
 
         public int Width;
         public int Height;

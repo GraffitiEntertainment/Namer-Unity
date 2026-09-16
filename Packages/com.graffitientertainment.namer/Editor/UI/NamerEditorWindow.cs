@@ -357,7 +357,10 @@ namespace GraffitiEntertainment.Namer.Editor
                     };
                 }
 
-                _liveResult = _pipeline.Process(inspection, evaluate, null, _errorThreshold);
+                // WR-01 (04.1 review): the debounced preview recompute must never show an
+                // interactive cancelable progress bar on slider drags — pass a
+                // non-interactive shouldCancel so Fit skips EditorUtility progress entirely.
+                _liveResult = _pipeline.Process(inspection, evaluate, () => false, _errorThreshold);
 
                 RenderTexture previewBaseMap = ResolvePreviewBaseMap();
 

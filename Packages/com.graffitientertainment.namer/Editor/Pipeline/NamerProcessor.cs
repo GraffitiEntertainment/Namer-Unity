@@ -172,6 +172,15 @@ namespace GraffitiEntertainment.Namer.Editor
                     }
 
                     NamerComputeResult computeResult = pipeline.Process(inspection, evaluate, null, settings.ErrorThreshold);
+                    if (computeResult.RoughnessFitCancelled)
+                    {
+                        // WR-01 (04.1 review): a cancelled fit falls back to the identity
+                        // path, so every asset below is still written — WITHOUT the roughness
+                        // extraction the user expects. Never let that vanish silently.
+                        Debug.LogWarning("NAMER: roughness fit cancelled for material '"
+                            + (inspection.Material != null ? inspection.Material.name : "(null)")
+                            + "' — assets written WITHOUT roughness extraction.");
+                    }
                     try
                     {
                         NamerDecompData decomp = null;

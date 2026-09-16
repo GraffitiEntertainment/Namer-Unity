@@ -77,6 +77,11 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             float lastMaxError = 0f;
+            // WR-01 (04.1 review): only the interactive fallback below displays a progress
+            // bar, so only that branch may clear it — a non-interactive shouldCancel caller
+            // (tests, batch, debounced preview recomputes) never shows one, and clearing
+            // here would dismiss whatever progress bar the host had up.
+            bool interactive = shouldCancel == null;
             try
             {
                 for (int i = 0; i < StrengthLadder.Length; i++)
@@ -105,7 +110,10 @@ namespace GraffitiEntertainment.Namer.Editor
             }
             finally
             {
-                EditorUtility.ClearProgressBar();
+                if (interactive)
+                {
+                    EditorUtility.ClearProgressBar();
+                }
             }
         }
     }

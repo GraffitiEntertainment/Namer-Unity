@@ -375,9 +375,20 @@ namespace GraffitiEntertainment.Namer.Editor
                 {
                     _namerMaterial.SetTexture(BaseResidualMapId, _decompOutput.Residual);
                 }
+                else if (_decompOutput == null)
+                {
+                    // No decomposition ran (off or guard-skipped): the saved Phase-3
+                    // material binds the base PNG at _BaseResidualMap, so the preview does too.
+                    _namerMaterial.SetTexture(BaseResidualMapId, previewBaseMap);
+                }
                 else
                 {
-                    _namerMaterial.SetTexture(BaseResidualMapId, previewBaseMap);
+                    // CR-01 (04.1 review): decomposition ran and the residual collapsed —
+                    // the one-texture outcome. The saved material leaves _BaseResidualMap
+                    // unbound (white) so albedo = _BaseColor * vertexColor; binding the base
+                    // here would double-multiply it with the split mesh's fitted vertex
+                    // colors and render the preview darker than the generated .mat.
+                    _namerMaterial.SetTexture(BaseResidualMapId, null);
                 }
                 _namerMaterial.SetColor(BaseColorId, inspection.BaseColor);
                 _namerMaterial.SetColor(EmissionColorId, inspection.EmissionColor);

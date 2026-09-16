@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using GraffitiEntertainment.Namer.Editor;
 using NUnit.Framework;
 using Unity.Collections;
@@ -26,7 +27,7 @@ namespace GraffitiEntertainment.Namer.Tests
             SystemInfo.supportsComputeShaders && SystemInfo.supportsAsyncGPUReadback;
 
         [UnityTest]
-        public IEnumerator Sobel_FlatBase_YieldsNearZeroRoughness()
+        public IEnumerator Sobel_FlatBase_YieldsAuthoredScalarRoughness()
         {
             if (!ComputeAvailable)
             {
@@ -58,8 +59,8 @@ namespace GraffitiEntertainment.Namer.Tests
                             maxBits = Mathf.Max(maxBits, surface[i].a & RoughnessMask);
                         }
 
-                        Assert.LessOrEqual(maxBits, 1,
-                            "flat base must yield near-zero roughness (no Sobel edges) in alpha bits 0-5");
+                        Assert.GreaterOrEqual(maxBits, 62,
+                            "flat base must yield approximately the authored scalar roughness (1.0 → 63 bits): zero Sobel → no dip → scalar anchor (D-08)");
                     }
                     finally
                     {
@@ -82,7 +83,7 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         [UnityTest]
-        public IEnumerator Sobel_SharpEdge_YieldsHighRoughness()
+        public IEnumerator Sobel_SharpEdge_DipsBelowFlatRoughness()
         {
             if (!ComputeAvailable)
             {
@@ -128,8 +129,101 @@ namespace GraffitiEntertainment.Namer.Tests
                         int flatBits = surface[flatIndex].a & RoughnessMask;
                         int edgeBits = surface[edgeIndex].a & RoughnessMask;
 
-                        Assert.Greater(edgeBits, flatBits,
-                            "edge texel roughness must exceed flat-region texel roughness (Sobel extracts the baked edge)");
+                        Assert.Less(edgeBits, flatBits,
+                            "edge texel must dip BELOW flat texels (anchored-inverted D-08: sharp edge = gloss dip)");
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(result);
+                    }
+
+                    Assert.AreEqual(0, pipeline.LiveRenderTargetCount, "pool must return to baseline after extraction (no leak)");
+                }
+                finally
+                {
+                    Destroy(baseMap);
+                }
+            }
+            finally
+            {
+                pipeline.Dispose();
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Sobel_SparseExtremeEdges_SmoothMedianStaysAtScalar()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU roughness sparse-edge test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            NamerComputePipeline pipeline = new NamerComputePipeline();
+            try
+            {
+                Texture2D baseMap = new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, false, true);
+                try
+                {
+                    Color[] pixels = new Color[WorkingSize * WorkingSize];
+                    for (int y = 0; y < WorkingSize; y++)
+                    {
+                        for (int x = 0; x < WorkingSize; x++)
+                        {
+                            // QUIET fill: a flat mid-gray has zero Sobel magnitude, so under
+                            // the anchored-inverted map it stays exactly at the authored scalar
+                            // (the "smooth median ≈ scalar" premise, D-08). The hash-grain body
+                            // was retired because grain survives the AO un-multiply (±0.022) and
+                            // dips BELOW the scalar, which cannot satisfy the flipped premise.
+                            // One sparse extreme-contrast dark line at x = 32 punches a
+                            // ~35x-larger Sobel response — the heavy-tail shape of real AI
+                            // albedos.
+                            float value = 0.5f;
+                            if (x == WorkingSize / 2)
+                            {
+                                value = 0.02f;
+                            }
+
+                            pixels[y * WorkingSize + x] = new Color(value, value, value, 1.0f);
+                        }
+                    }
+
+                    baseMap.SetPixels(pixels);
+                    baseMap.Apply(false, false);
+
+                    NamerMaterialInspection inspection = BuildInspection(
+                        baseMap, baseIsSrgb: false, metallicGlossMap: null,
+                        smoothness: 0f, roughness: 1f,
+                        roughnessExtractStrength: 1f, roughnessEstimator: NamerRoughnessEstimator.Sobel);
+
+                    NamerComputeResult result = pipeline.Process(inspection);
+                    try
+                    {
+                        Color32[] surface = ReadBackColor32(result.PackedSurface, WorkingSize * WorkingSize);
+
+                        // Smooth population = interior strip away from the stamped line; its
+                        // MEDIAN texel must stay matte. The peak Sobel response sits one column
+                        // RIGHT of the line (x = 33 — Sobel's gx skips the center column, so
+                        // the line texel itself stays at grain magnitude).
+                        List<int> smoothBits = new List<int>();
+                        for (int y = 0; y < WorkingSize; y++)
+                        {
+                            for (int x = 8; x <= 24; x++)
+                            {
+                                smoothBits.Add(surface[y * WorkingSize + x].a & RoughnessMask);
+                            }
+                        }
+
+                        smoothBits.Sort();
+                        int medianBits = smoothBits[smoothBits.Count / 2];
+                        int edgeBits = surface[(WorkingSize / 2) * WorkingSize + (WorkingSize / 2 + 1)].a & RoughnessMask;
+
+                        Assert.GreaterOrEqual(medianBits, 62,
+                            "smooth median must stay approximately at the authored scalar (quiet regions are anchored, not collapsed)");
+                        Assert.Less(edgeBits, medianBits,
+                            "the sparse extreme edge must dip strictly BELOW the smooth anchor (gloss dip)");
                     }
                     finally
                     {

@@ -875,7 +875,7 @@ namespace GraffitiEntertainment.Namer.Editor
             // Fit-driven honesty readout: the strength slider does not drive the fit —
             // the search does. Say so, and show what it picked, so a slider that
             // (correctly) changes nothing is never mistaken for a dead control.
-            if (_roughnessEstimator == (int)NamerRoughnessEstimator.FitDriven)
+            if (_roughnessEstimator == (int)NamerRoughnessEstimator.FitDriven && inspection != null)
             {
                 int fitW = inspection.BaseMap != null ? inspection.BaseMap.width : NamerComputePipeline.DefaultBaseResolution;
                 int fitH = inspection.BaseMap != null ? inspection.BaseMap.height : NamerComputePipeline.DefaultBaseResolution;

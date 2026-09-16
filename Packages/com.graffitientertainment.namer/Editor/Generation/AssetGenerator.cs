@@ -475,7 +475,11 @@ namespace GraffitiEntertainment.Namer.Editor
                 existing.Clear(false);
                 ApplySplitStreams(existing, split, colors);
                 EditorUtility.SetDirty(existing);
-                AssetDatabase.SaveAssets();
+                // WR-04 (04.1 review): persist ONLY this mesh. SaveAssets() flushes every
+                // dirty asset in the project — unrelated in-progress user edits included —
+                // contradicting WriteMaterial's discipline above (a NAMER run must never
+                // force-commit the user's unsaved work).
+                AssetDatabase.SaveAssetIfDirty(existing);
             }
             else
             {

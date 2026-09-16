@@ -860,8 +860,9 @@ namespace GraffitiEntertainment.Namer.Editor
                 new GUIContent(
                     "Roughness Extract Strength",
                     "Sobel: how much of the extracted roughness to adopt (0 = off, 1 = full). Fit-driven: any value > 0 "
-                        + "ENABLES the auto strength search — the strength itself is picked by the fit (see the readout "
-                        + "below), not by this slider. Recomputes the preview in memory "
+                        + "enables the auto strength search, which requires Vertex Color Decomposition to be enabled — "
+                        + "with decomposition off, the scalar roughness is used unchanged. The strength itself is picked "
+                        + "by the fit (see the readout below), not by this slider. Recomputes the preview in memory "
                         + NamerEditorConstants.DebounceSeconds + " s after the slider stops — nothing is written to disk."),
                 _roughnessExtractStrength, 0f, 1f);
             if (!Mathf.Approximately(newStrength, _roughnessExtractStrength))

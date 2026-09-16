@@ -44,8 +44,10 @@ namespace GraffitiEntertainment.Namer.Editor
         public const float DefaultAoContrast = 1f;
 
         /// <summary>Default roughness-extraction strength (D-01/D-02; 1 = extraction ON by
-        /// default, matching the AO precedent so extraction "runs automatically when no authored
-        /// map"; 0 = the user turns it off).</summary>
+        /// default, matching the AO precedent — extraction runs when no authored metallic/
+        /// roughness map exists, and the default fit-driven estimator additionally requires
+        /// vertex-color decomposition to be enabled (otherwise the scalar roughness is used
+        /// unchanged); 0 = the user turns it off).</summary>
         public const float DefaultRoughnessExtractStrength = 1f;
 
         /// <summary>Default roughness estimator popup index (D-03; 0 = fit-driven default).</summary>

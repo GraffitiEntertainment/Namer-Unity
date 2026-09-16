@@ -574,7 +574,7 @@ namespace GraffitiEntertainment.Namer.Editor
         /// normalize output. Drives the correct release in
         /// <see cref="NamerComputePipeline.ReleaseResult"/> (D-05).
         /// </summary>
-        internal bool NormalizedBaseColorOwnedByRoughnessPool;
+        public bool NormalizedBaseColorOwnedByRoughnessPool;
 
         /// <summary>
         /// True when the fit-driven strength search was cancelled via its cancel poll

@@ -27,6 +27,25 @@ namespace GraffitiEntertainment.Namer.Editor
             "Vertex Colors", "Residual", "Error Heatmap", "Extracted Roughness",
         };
 
+        /// <summary>
+        /// Decomposition statistics row labels (D-09 / VCOL-04), relabeled in 04.2 to
+        /// removed-detail semantics: Coverage / Avg Error / Max Error / Removed-detail max
+        /// error / Residual. Read via reflection by <c>NamerUIControlsTests</c> (mirrors
+        /// <see cref="DebugChannelLabels"/>); the Residual row value is dynamic — see
+        /// <see cref="ResidualNotWrittenLabel"/>.
+        /// </summary>
+        internal static readonly string[] DecompStatLabels =
+        {
+            "Coverage",
+            "Avg Error",
+            "Max Error",
+            "Removed-detail max error",
+            "Residual",
+        };
+
+        /// <summary>Residual-row value when no residual is written (04.2 one-texture outcome).</summary>
+        internal const string ResidualNotWrittenLabel = "not written (one-texture)";
+
         private static readonly int SurfaceMapId = Shader.PropertyToID("_SurfaceMap");
         private static readonly int BaseResidualMapId = Shader.PropertyToID("_BaseResidualMap");
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
@@ -897,7 +916,10 @@ namespace GraffitiEntertainment.Namer.Editor
                     "Roughness Dip Depth",
                     "Taste control — how strongly removed-detail luminance is re-expressed as gloss (bright "
                         + "speckle dips toward gloss, dark occlusion raises toward matte; 0 = keep the authored "
-                        + "roughness scalar). Recomputes the preview in memory " + NamerEditorConstants.DebounceSeconds
+                        + "roughness scalar). Luminance carries roughly half of the removed signal's energy "
+                        + "(Neo: ~55%, p10 37%); the discarded chroma grain averages ~0.07 linear — an accepted "
+                        + "loss, because a scalar gloss channel has no home for color. Recomputes the preview in "
+                        + "memory " + NamerEditorConstants.DebounceSeconds
                         + " s after the slider stops — nothing is written to disk."),
                 _roughnessExtractStrength, 0f, 1f);
             if (!Mathf.Approximately(newStrength, _roughnessExtractStrength))
@@ -1044,8 +1066,10 @@ namespace GraffitiEntertainment.Namer.Editor
                     "OFF (default) = one-texture outcome: no residual EXR — the Gouraud projection already makes the "
                         + "base ÷ vertex-color interpolation white by construction. ON = additionally write source ÷ "
                         + "vertex-color interpolation as an EXR carrying the removed detail (including its luminance, "
-                        + "which is also re-expressed as gloss). UV-overlap texels use whichever triangle rasterized "
-                        + "first, so overlapped regions may carry interpolation of the winning triangle only."),
+                        + "which is also re-expressed as gloss). On stacked-UV assets most covered texels are covered "
+                        + "by more than one triangle (Neo: 87.9%), and the rasterized surface keeps only the "
+                        + "first-covering triangle's interpolation — so the EXR reads honestly but cannot attribute "
+                        + "overlap blending."),
                 _writeResidual);
             if (newWriteResidual != _writeResidual)
             {
@@ -1057,39 +1081,47 @@ namespace GraffitiEntertainment.Namer.Editor
 
             // Error Threshold + Residual Resolution only act when residual writing is on
             // (04.2: the checkbox is the residual gate now; the threshold/resolution search
-            // keys on source-reconstruction error for the written EXR).
-            EditorGUI.BeginDisabledGroup(!_writeResidual);
-
-            float newThreshold = EditorGUILayout.Slider(
-                new GUIContent(
-                    "Error Threshold",
-                    "Maximum acceptable reconstruction error for the adaptive residual-resolution search (used when "
-                        + "Write Residual is on). Recomputes the preview in memory "
-                        + NamerEditorConstants.DebounceSeconds + " s after the slider stops — nothing is written to disk."),
-                _errorThreshold, 0f, 0.10f);
-            if (!Mathf.Approximately(newThreshold, _errorThreshold))
+            // keys on source-reconstruction error for the written EXR). They are rendered
+            // disabled (EditorGUI.DisabledScope) with a one-line hint when Write Residual is
+            // off — matching the phase's disable-state conventions.
+            using (new EditorGUI.DisabledScope(!_writeResidual))
             {
-                _errorThreshold = newThreshold;
-                _settings.ErrorThreshold = newThreshold;
-                _afterPanelState.MarkTweaking();
-                MarkDirty();
+                float newThreshold = EditorGUILayout.Slider(
+                    new GUIContent(
+                        "Error Threshold",
+                        "Maximum acceptable reconstruction error for the adaptive residual-resolution search (used when "
+                            + "Write Residual is on). Recomputes the preview in memory "
+                            + NamerEditorConstants.DebounceSeconds + " s after the slider stops — nothing is written to disk."),
+                    _errorThreshold, 0f, 0.10f);
+                if (!Mathf.Approximately(newThreshold, _errorThreshold))
+                {
+                    _errorThreshold = newThreshold;
+                    _settings.ErrorThreshold = newThreshold;
+                    _afterPanelState.MarkTweaking();
+                    MarkDirty();
+                }
+
+                int newResolution = EditorGUILayout.Popup(
+                    new GUIContent(
+                        "Residual Resolution",
+                        "Residual texture resolution. Auto adaptively halves from the source resolution while error stays within the threshold; manual options snap to the same halving steps."),
+                    _residualResolution,
+                    new[] { "Auto", "2048", "1024", "512", "256", "128" });
+                if (newResolution != _residualResolution)
+                {
+                    _residualResolution = newResolution;
+                    _settings.ResidualResolution = newResolution;
+                    _afterPanelState.MarkTweaking();
+                    MarkDirty();
+                }
             }
 
-            int newResolution = EditorGUILayout.Popup(
-                new GUIContent(
-                    "Residual Resolution",
-                    "Residual texture resolution. Auto adaptively halves from the source resolution while error stays within the threshold; manual options snap to the same halving steps."),
-                _residualResolution,
-                new[] { "Auto", "2048", "1024", "512", "256", "128" });
-            if (newResolution != _residualResolution)
+            if (!_writeResidual)
             {
-                _residualResolution = newResolution;
-                _settings.ResidualResolution = newResolution;
-                _afterPanelState.MarkTweaking();
-                MarkDirty();
+                EditorGUILayout.LabelField(
+                    new GUIContent("Only applies when Write Residual is on."),
+                    EditorStyles.miniLabel);
             }
-
-            EditorGUI.EndDisabledGroup();
 
             if (_decompositionEnabled)
             {
@@ -1112,28 +1144,50 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Renders the five read-only decomposition statistics rows (D-09). Values show "—"
-        /// until the first fit completes; the residual row reads "not required" when the
-        /// D-13 gate dropped the residual.
+        /// Renders the five read-only decomposition statistics rows (D-09 / VCOL-04), relabeled
+        /// in 04.2 to removed-detail semantics. Values show "—" until the first fit completes;
+        /// the residual row reads <see cref="ResidualNotWrittenLabel"/> when the residual is not
+        /// written (one-texture) and "written @ Npx" when the EXR is written.
         /// </summary>
         private void DrawDecompStats()
         {
             if (_decompStats == null)
             {
-                EditorGUILayout.LabelField("Coverage", "—");
-                EditorGUILayout.LabelField("Avg Error", "—");
-                EditorGUILayout.LabelField("Max Error", "—");
-                EditorGUILayout.LabelField("Residual", "—");
-                EditorGUILayout.LabelField("Residual Resolution", "—");
+                EditorGUILayout.LabelField(DecompStatLabels[0], "—");
+                EditorGUILayout.LabelField(DecompStatLabels[1], "—");
+                EditorGUILayout.LabelField(DecompStatLabels[2], "—");
+                EditorGUILayout.LabelField(DecompStatLabels[3], "—");
+                EditorGUILayout.LabelField(DecompStatLabels[4], "—");
                 return;
             }
 
-            EditorGUILayout.LabelField("Coverage", (_decompStats.Coverage * 100f).ToString("0") + "%");
-            EditorGUILayout.LabelField("Avg Error", _decompStats.AvgError.ToString("0.000"));
-            EditorGUILayout.LabelField("Max Error", _decompStats.MaxError.ToString("0.000"));
-            EditorGUILayout.LabelField("Residual", _decompStats.ResidualRequired ? "required" : "not required");
+            bool residualWritten = _decompStats.ResidualRequired && _writeResidual;
+
             EditorGUILayout.LabelField(
-                "Residual Resolution", _decompStats.ResidualRequired ? _decompStats.ChosenResolution + "px" : "—");
+                new GUIContent(DecompStatLabels[0],
+                    "Fraction of UV-covered texels reconstructed within the error threshold."),
+                (_decompStats.Coverage * 100f).ToString("0") + "%");
+            EditorGUILayout.LabelField(
+                new GUIContent(DecompStatLabels[1],
+                    "Average removed-detail reconstruction error over covered texels (the same "
+                    + "source-vs-reconstruction error the residual-ON EXR encodes)."),
+                _decompStats.AvgError.ToString("0.000"));
+            EditorGUILayout.LabelField(
+                new GUIContent(DecompStatLabels[2],
+                    "Maximum removed-detail reconstruction error over covered texels (the same "
+                    + "source-vs-reconstruction error the residual-ON EXR encodes)."),
+                _decompStats.MaxError.ToString("0.000"));
+            EditorGUILayout.LabelField(
+                new GUIContent(DecompStatLabels[3],
+                    "The source-vs-reconstruction error of the removed detail: what the residual-ON "
+                    + "EXR encodes and what the gloss transfer re-expresses."),
+                _decompStats.FitOnlyMaxError.ToString("0.000"));
+            EditorGUILayout.LabelField(
+                new GUIContent(DecompStatLabels[4],
+                    "Whether the residual EXR was written (the 04.2 Write Residual checkbox)."),
+                residualWritten
+                    ? "written @" + _decompStats.ChosenResolution + "px"
+                    : ResidualNotWrittenLabel);
         }
 
         private void DrawOutputSection()

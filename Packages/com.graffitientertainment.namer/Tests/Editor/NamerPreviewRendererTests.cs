@@ -10,11 +10,12 @@ using UnityEngine.TestTools;
 namespace GraffitiEntertainment.Namer.Tests
 {
     /// <summary>
-    /// Pins the 04.2-05 preview-presentation rework of <see cref="NamerPreviewRenderer"/>:
+    /// Pins the 04.2-05/04.2-07 preview-presentation rework of <see cref="NamerPreviewRenderer"/>:
     /// one orthographic camera for both panes, one shared yaw+pitch rotation (pitch clamped
     /// to [-89, 89]), zoom as orthographic size (camera transform never moves), and a
-    /// rotation-invariant pair-plus-gap initial size. The render-path test is
-    /// graphics-capability-gated (D-15); the framing/zoom/orbit tests are pure logic.
+    /// rotation-invariant per-pane MarginPx fit (each pane frames its own object). The
+    /// render-path test is graphics-capability-gated (D-15); the framing/zoom/orbit tests
+    /// are pure logic.
     /// </summary>
     public class NamerPreviewRendererTests
     {
@@ -115,30 +116,30 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         [Test]
-        public void Frame_FitsPairPlusGapAtAnyYawPitch()
+        public void Frame_FitsPerPaneObjectWithMargin()
         {
-            // extents (1, 2, 0.5) -> radius sqrt(5.25) ~= 2.29129: the vertical
-            // (radius + PreviewGap) bound dominates the horizontal pair-plus-gap / 2.
+            // extents (1, 2, 0.5) -> radius sqrt(5.25) ~= 2.29129: at 2:1 the pane is
+            // square (400x400 px), so the vertical and horizontal fits coincide at MarginPx 15.
             Mesh tallMesh = CreateBoundsMesh(1f, 2f, 0.5f);
             _renderer.Frame(tallMesh);
-            Assert.AreEqual(2.3913f, _renderer.OrthographicSizeForAspect(2f), 1e-3f,
-                "vertical bound (radius + PreviewGap) must dominate at 2:1");
+            Assert.AreEqual(2.4771f, _renderer.OrthographicSizeForAspect(2f, 400f), 1e-3f,
+                "per-pane fit: square pane, vertical == horizontal at MarginPx 15");
 
             // extents (4, 0.5, 0.1) -> radius sqrt(16.26) ~= 4.03237: the rotation-invariant
-            // sphere bound dominates the horizontal footprint at 2:1 (the yaw-only
-            // horizontal bound is retired), and the pair-plus-gap half-width dominates at 1:1.
+            // sphere bound dominates the horizontal footprint at 2:1; at 1:1 the pane is only
+            // half the full width (200px), so the horizontal fit dominates.
             Mesh wideMesh = CreateBoundsMesh(4f, 0.5f, 0.1f);
             _renderer.Frame(wideMesh);
-            Assert.AreEqual(4.1324f, _renderer.OrthographicSizeForAspect(2f), 1e-3f,
-                "rotation-invariant bound must dominate even for wide-flat meshes at 2:1");
-            Assert.AreEqual(4.8324f, _renderer.OrthographicSizeForAspect(1f), 1e-3f,
-                "square preview uses the pair-plus-gap half-width (HalfSeparation + radius + PreviewGap)");
+            Assert.AreEqual(4.3593f, _renderer.OrthographicSizeForAspect(2f, 400f), 1e-3f,
+                "per-pane fit: wide mesh at 2:1 (400px square pane)");
+            Assert.AreEqual(9.4879f, _renderer.OrthographicSizeForAspect(1f, 400f), 1e-3f,
+                "square full rect -> 200px-wide pane: horizontal fit dominates (pane is half the full width, not the full width)");
 
             // Rotation invariance: Orbit changes only the shared rotation, never the framing.
-            float before = _renderer.OrthographicSizeForAspect(2f);
+            float before = _renderer.OrthographicSizeForAspect(2f, 400f);
             _renderer.Orbit(45f, 30f);
-            Assert.AreEqual(before, _renderer.OrthographicSizeForAspect(2f), 1e-6f,
-                "the framing bound must be unbreakable by any yaw+pitch");
+            Assert.AreEqual(before, _renderer.OrthographicSizeForAspect(2f, 400f), 1e-6f,
+                "the bounding-sphere fit must be unbreakable by any yaw+pitch");
         }
 
         [UnityTest]
@@ -171,7 +172,7 @@ namespace GraffitiEntertainment.Namer.Tests
             Assert.IsNotNull(texture, "Render must return a non-null preview texture");
             Assert.IsTrue(_renderer.IsOrthographic, "the camera must stay orthographic across the render");
             Assert.AreEqual(
-                _renderer.OrthographicSizeForAspect(2f),
+                _renderer.OrthographicSizeForAspect(2f, 256f),
                 _renderer.OrthographicSize,
                 1e-4f,
                 "Render must apply the rect-aspect fit (512/256 = 2) as the camera orthographic size");

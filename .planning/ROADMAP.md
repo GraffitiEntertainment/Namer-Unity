@@ -255,7 +255,7 @@ Plans:
 
 - [x] 04.2-08: GAP-3 — close warnings: WR-01 aspect-correct residual resample (ChosenResolution = long edge), WR-02 CannotDecompose preview guard mirror, WR-03 Decomp dispose before nulling, NAMER_DECOMP_HEATMAP single-exit-point restructure for the Metal translator false positive (VCOL-04/VCOL-05/UI-03)
 
-- [ ] 04.2-09: GAP-4 — divider-anchored tight-AABB framing (10 px inner margins; zoom grows each model outward from the divider, never across it) + 1 px pane outline overlay (UI-03/UI-04)
+- [x] 04.2-09: GAP-4 — divider-anchored tight-AABB framing (10 px inner margins; zoom grows each model outward from the divider, never across it) + 1 px pane outline overlay (UI-03/UI-04)
 
 ### Phase 5: Stylization
 

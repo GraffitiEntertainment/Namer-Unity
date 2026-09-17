@@ -11,13 +11,13 @@ namespace GraffitiEntertainment.Namer.Tests
 {
     /// <summary>
     /// Phase 4 plan 02 GPU golden tests (TEST-02). Proves the residual is the multiplicative
-    /// quotient <c>base / max(vcInterp, VcFloor)</c> derived from the QUANTIZED Color32
-    /// vertex colors (Pitfall 2): (1) the GPU residual reconstructs the base within 2/255 per
-    /// channel, (2) uncovered texels carry the identity residual, (3) the D-13
-    /// residual-required gate distinguishes a constant fit from a gradient base, and (4) the
-    /// adaptive search picks a ladder resolution within threshold with the manual ladder
-    /// override. All tests are capability-gated (D-15): skipped-with-report when
-    /// compute/async-readback is unavailable, never a silent pass.
+    /// quotient <c>max(base, VcFloor) / max(vcInterp, VcFloor)</c> derived from the QUANTIZED
+    /// Color32 vertex colors (Pitfall 2; 04.2 RESEARCH Pattern 2 symmetric floor): (1) the GPU
+    /// residual reconstructs the base within 2/255 per channel, (2) uncovered texels carry the
+    /// identity residual, (3) the D-13 residual-required gate distinguishes a constant fit from
+    /// a gradient base, and (4) the adaptive search picks a ladder resolution within threshold
+    /// with the manual ladder override. All tests are capability-gated (D-15): skipped-with-
+    /// report when compute/async-readback is unavailable, never a silent pass.
     /// </summary>
     public class ResidualPipelineTests
     {
@@ -54,9 +54,11 @@ namespace GraffitiEntertainment.Namer.Tests
                         Color32[] residual = ReadBackColor32(output.Residual);
 
                         float vcInterp = vcByte / 255f;
-                        // CPU oracle: residual = base / max(vcInterp, 1e-3f) — the same quotient
-                        // the GPU computes in CSResidual (Pitfall 2 end-to-end).
-                        float oracle = baseValue / Mathf.Max(vcInterp, 1e-3f);
+                        // CPU oracle: residual = max(base, 1e-3f) / max(vcInterp, 1e-3f) — the
+                        // same symmetric-floor quotient the GPU computes in CSResidual
+                        // (04.2 RESEARCH Pattern 2: the measured 1.70% below-floor dark-texel
+                        // exception class is removed at sub-LSB reconstruction cost).
+                        float oracle = Mathf.Max(baseValue, 1e-3f) / Mathf.Max(vcInterp, 1e-3f);
 
                         for (int i = 0; i < residual.Length; i++)
                         {

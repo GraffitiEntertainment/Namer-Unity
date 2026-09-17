@@ -9,6 +9,26 @@ using UnityEngine.Rendering;
 namespace GraffitiEntertainment.Namer.Editor
 {
     /// <summary>
+    /// Residual generation mode (04.2 residual on/off checkbox semantics, plan 01).
+    /// <see cref="Gate"/> is the legacy D-13 threshold gate (transitional, retired by plan
+    /// 03): the residual is dropped only when the fit-only reconstruction stays within the
+    /// error threshold on a fully opaque base. <see cref="AlwaysKeep"/> /
+    /// <see cref="NeverKeep"/> are the 4.2 checkbox semantics — the residual is forced on or
+    /// off regardless of the D-13 gate. The residual is computed against the passed
+    /// <c>baseLinear</c>, which in the 4.2 wiring is the pre-projection SOURCE base (locked
+    /// user decision 2026-09-16), so <see cref="NamerDecompErrorStats.FitOnlyMaxError"/> reads
+    /// as the removed-detail magnitude and the adaptive resolution search becomes the
+    /// source-reconstruction criterion automatically (VCOL-05; RESEARCH Pitfall 3 needs no
+    /// new code).
+    /// </summary>
+    public enum NamerResidualMode
+    {
+        Gate,
+        AlwaysKeep,
+        NeverKeep,
+    }
+
+    /// <summary>
     /// Reconstruction-error statistics for the vertex-color decomposition (VCOL-04 / D-09).
     /// Every field derives from the one consistent mean-channel MAE metric
     /// <c>err = mean |vcInterp * residual - base|</c>. <see cref="Coverage"/> is the
@@ -20,10 +40,9 @@ namespace GraffitiEntertainment.Namer.Editor
     ///
     /// <see cref="FitOnlyMaxError"/> is the D-13 gate statistic itself: the max error of the
     /// FIT-ONLY reconstruction (<c>residual == identity</c>), captured BEFORE the residual is
-    /// generated. It is the strength-search objective for the fit-driven roughness estimator
-    /// — a search that consumed <see cref="MaxError"/> instead would always pass, because the
-    /// generated residual is the exact quotient <c>base / vc</c> and reconstructs the base
-    /// near-perfectly whenever it is kept.
+    /// generated. It is the fit-only reconstruction error against the passed dividend
+    /// (<c>baseLinear</c>); when that dividend is the pre-projection source base it equals the
+    /// removed-detail magnitude the 04.2 roughness transfer consumes (VCOL-04).
     /// </summary>
     public sealed class NamerDecompErrorStats
     {
@@ -76,9 +95,12 @@ namespace GraffitiEntertainment.Namer.Editor
     /// GPU dispatch harness for the vertex-color decomposition residual stage (Phase 4,
     /// plan 02 — VCOL-03/VCOL-04/VCOL-05). Turns the quantized Color32 vertex colors (plan
     /// 04-01) and the already-uploaded linear base color into the multiplicative quotient
-    /// residual <c>base / max(vcInterp, VcFloor)</c>, then reduces coverage/avg/max error
-    /// and runs the adaptive downward-halving residual-resolution search with the manual
-    /// ladder override.
+    /// residual <c>max(base, VcFloor) / max(vcInterp, VcFloor)</c>, then reduces
+    /// coverage/avg/max error and runs the adaptive downward-halving residual-resolution
+    /// search with the manual ladder override. 04.2 (plan 01) adds the projection write-back
+    /// (<c>projectedOut</c>) and the residual-mode switch (<see cref="NamerResidualMode"/>),
+    /// both behind optional trailing parameters so the default path stays byte-identical to
+    /// 04.1.
     ///
     /// All per-pixel work is compute (<c>Compute/NAMERDecomp.compute</c>); the only CPU
     /// loops are the tiny block-reduction readback and the halving decision loop. No disk
@@ -100,6 +122,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private readonly ComputeTexturePool _pool = new ComputeTexturePool();
         private readonly ComputeShader _compute;
         private readonly int _kernelRasterize;
+        private readonly int _kernelProject;
         private readonly int _kernelResidual;
         private readonly int _kernelErrorHeatmap;
         private readonly int _kernelReduce;
@@ -113,19 +136,28 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             _kernelRasterize = _compute.FindKernel("CSRasterizeVertexColors");
+            _kernelProject = _compute.FindKernel("CSProjectBase");
             _kernelResidual = _compute.FindKernel("CSResidual");
             _kernelErrorHeatmap = _compute.FindKernel("CSErrorHeatmap");
             _kernelReduce = _compute.FindKernel("CSReduce");
         }
 
         /// <summary>
-        /// Rasterizes the quantized <paramref name="quantizedColors"/> into UV space, computes
-        /// the quotient residual, reduces the error stats, applies the D-13 residual-required
-        /// gate (with the alpha-opaque guard, Pitfall 5), and runs the downward-halving
-        /// adaptive search (D-16) with the manual ladder override (D-17). Returns a
-        /// <see cref="NamerDecompOutput"/> whose <see cref="NamerDecompOutput.Residual"/> is
-        /// at the chosen resolution, or null when the fit alone reconstructs within
-        /// <paramref name="errorThreshold"/> for a fully opaque base.
+        /// Rasterizes the quantized <paramref name="quantizedColors"/> into UV space,
+        /// optionally writes the rasterized Gouraud surface back into
+        /// <paramref name="projectedOut"/> (the projection write-back), computes the quotient
+        /// residual, reduces the error stats, applies the residual-mode gate
+        /// (<see cref="NamerResidualMode"/>, default <see cref="NamerResidualMode.Gate"/> is
+        /// the legacy D-13 threshold gate with the alpha-opaque guard, Pitfall 5), and runs
+        /// the downward-halving adaptive search (D-16) with the manual ladder override
+        /// (D-17). Returns a <see cref="NamerDecompOutput"/> whose
+        /// <see cref="NamerDecompOutput.Residual"/> is at the chosen resolution, or null when
+        /// the gate drops the residual.
+        ///
+        /// <paramref name="projectedOut"/> is a caller-owned
+        /// <see cref="GraphicsFormat.R16G16B16A16_SFloat"/> linear render target at
+        /// <c>w</c> x <c>h</c>; it is only written (never released here) and may be null to
+        /// skip the write-back.
         /// </summary>
         public NamerDecompOutput GenerateResidual(
             NamerSplitResult split,
@@ -134,7 +166,9 @@ namespace GraffitiEntertainment.Namer.Editor
             int w,
             int h,
             float errorThreshold,
-            int manualResolution)
+            int manualResolution,
+            RenderTexture projectedOut = null,
+            NamerResidualMode mode = NamerResidualMode.Gate)
         {
             if (split == null)
             {
@@ -207,6 +241,19 @@ namespace GraffitiEntertainment.Namer.Editor
                 _compute.SetTexture(_kernelRasterize, "_VcInterp", vcInterp);
                 Dispatch(_kernelRasterize, w, h);
 
+                // 1b. Projection write-back (04.2 plan 01): write the rasterized Gouraud
+                //     surface back as the cleaned base when the caller supplies a projectedOut
+                //     target. The projection is the SAME rasterization CSResidual reads as its
+                //     divisor (_VcInterp), so the quotient becomes the IEEE x/x identity. The
+                //     caller owns projectedOut; this pipeline never releases it.
+                if (projectedOut != null)
+                {
+                    _compute.SetTexture(_kernelProject, "_VcInterp", vcInterp);
+                    _compute.SetTexture(_kernelProject, "_BaseLinear", baseLinear);
+                    _compute.SetTexture(_kernelProject, "_ProjectedOut", projectedOut);
+                    Dispatch(_kernelProject, w, h);
+                }
+
                 _compute.SetFloat("_VcFloor", NamerConstants.VcFloor);
                 _compute.SetFloat("_Threshold", errorThreshold);
                 _compute.SetFloat("_MaxObservedErr", Mathf.Max(errorThreshold, kMaxObservedErrFloor));
@@ -236,10 +283,24 @@ namespace GraffitiEntertainment.Namer.Editor
                     }, this);
                 }
 
-                // 3. D-13 residual-required gate: drop only for a within-threshold fit on a
-                //    fully opaque base (Pitfall 5 — transparent/cutout always keep a residual).
-                bool opaque = fitStats.MinAlpha >= kOpaqueAlphaThreshold;
-                if (fitStats.MaxError <= errorThreshold && opaque)
+                // 3. Residual-mode gate (04.2 plan 01). Gate is the legacy D-13 threshold
+                //    gate: drop only for a within-threshold fit on a fully opaque base
+                //    (Pitfall 5 — transparent/cutout always keep a residual). AlwaysKeep
+                //    skips the gate entirely and falls through to CSResidual. NeverKeep
+                //    drops unconditionally. The step-2 fit-only heatmap/reduce above runs in
+                //    every mode so FitOnlyMaxError stays populated (VCOL-04).
+                bool drop = false;
+                if (mode == NamerResidualMode.NeverKeep)
+                {
+                    drop = true;
+                }
+                else if (mode == NamerResidualMode.Gate)
+                {
+                    bool opaque = fitStats.MinAlpha >= kOpaqueAlphaThreshold;
+                    drop = fitStats.MaxError <= errorThreshold && opaque;
+                }
+
+                if (drop)
                 {
                     ReduceStats coverage = ReduceToStats(coverageStat, w, h, avgA, avgB);
                     return new NamerDecompOutput(null,

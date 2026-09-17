@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04.1-07-PLAN.md — anchored-inverted dip-depth remap (D-08..D-10)
-last_updated: "2026-09-17T00:49:10.342Z"
+stopped_at: Completed 04.2-02-PLAN.md — removed-luminance roughness transfer
+last_updated: "2026-09-17T01:01:04.178Z"
 last_activity: 2026-09-17
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 29
-  completed_plans: 25
+  completed_plans: 26
   percent: 75
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 ## Current Position
 
 Phase: 04.2 (gouraud-projection-one-texture-with-roughness-transfer-resid) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-09-17
 
-Progress: [█████████░] 86%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
@@ -84,6 +84,7 @@ Progress: [█████████░] 86%
 | Phase 04.1 P05 | 2min | 3 tasks | 2 files |
 | Phase 04.1 P07 | 12min | 3 tasks | 8 files |
 | Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P01 | 9min | 3 tasks | 4 files |
+| Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P02 | 9min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -163,6 +164,8 @@ Recent decisions affecting current work:
 - [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: Symmetric VcFloor max(base,F)/max(vc,F) adopted (04.2 RESEARCH Pattern 2) — kills the 1.70% below-floor dark-texel exception class at sub-LSB reconstruction cost
 - [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: NamerResidualMode.Gate is the byte-identical default; AlwaysKeep/NeverKeep force keep/drop in both directions
 - [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: projectedOut is caller-owned (R16G16B16A16_SFloat linear, w/h), written by the pipeline and never released here
+- [Phase 04.2]: Removed-luma transfer declares _RemovedLuma once as RWTexture2D (read-write, read via [] in the remap kernel) — HLSL cannot declare one resource name twice; mirrors the existing _RoughnessRaw/_BlurPing read-write pattern
+- [Phase 04.2]: RemovedLumaP90 mirrors RobustSobelScale but reads |.r| and omits the trueMax ceiling — removed-luma has no precomputed true max; the kernel saturate owns the 6-bit clip at both ends
 
 ### Pending Todos
 
@@ -193,6 +196,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-17T00:48:16.068Z
-Stopped at: Completed 04.1-07-PLAN.md — anchored-inverted dip-depth remap (D-08..D-10)
+Last session: 2026-09-17T01:01:04.170Z
+Stopped at: Completed 04.2-02-PLAN.md — removed-luminance roughness transfer
 Resume file: None

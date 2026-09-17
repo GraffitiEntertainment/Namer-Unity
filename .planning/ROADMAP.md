@@ -233,7 +233,7 @@ Plans:
 
 - [x] 04.2-01: Decomposition engine — CSProjectBase projection write-back + symmetric VcFloor + NamerResidualMode (AlwaysKeep/NeverKeep) + projection identity/mode tests
 
-- [ ] 04.2-02: Removed-luminance transfer — CSRemovedLuma + CSRoughnessTransferRemap (signed Rec.601, p90-normalized dip) + ExtractTransferRoughness + polarity/headroom tests
+- [x] 04.2-02: Removed-luminance transfer — CSRemovedLuma + CSRoughnessTransferRemap (signed Rec.601, p90-normalized dip) + ExtractTransferRoughness + polarity/headroom tests
 
 **Wave 2** *(blocked on Wave 1 completion)*
 

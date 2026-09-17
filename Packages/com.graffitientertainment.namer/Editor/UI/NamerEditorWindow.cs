@@ -10,9 +10,11 @@ namespace GraffitiEntertainment.Namer.Editor
     /// <summary>
     /// The first-party processor window (<c>Tools &gt; NAMER &gt; Processor</c>) that
     /// presents the 03-01 pipeline to an artist: inspect the selection, preview the
-    /// actual mesh before/after with a shared orbit/zoom camera, tweak the AO un-multiply
-    /// strength with a 300 ms debounced GPU recompute, configure the output folder, and
-    /// run the single shared "Process with NAMER" entry point (D-13).
+    /// actual mesh before/after side by side through one shared orthographic camera with
+    /// synced yaw+pitch rotation (one shared rotation for both panes) and orthographic-size
+    /// zoom, tweak the AO un-multiply strength with a 300 ms debounced GPU recompute,
+    /// configure the output folder, and run the single shared "Process with NAMER" entry
+    /// point (D-13).
     ///
     /// The interactive preview path calls only <see cref="NamerComputePipeline"/> and
     /// <see cref="NamerPreviewRenderer"/> — it never writes to disk (D-10). The sole disk

@@ -39,6 +39,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private NamerComputePipeline _pipeline;
         private NamerDecompPipeline _decompPipeline;
         private NamerDecompOutput _decompOutput;
+        private NamerProjectionContext _projectionContext;
         private Mesh _previewSplitMesh;
         private NamerDecompErrorStats _decompStats;
 
@@ -70,8 +71,9 @@ namespace GraffitiEntertainment.Namer.Editor
         private float _errorThreshold = NamerEditorConstants.DefaultErrorThreshold;
         private int _residualResolution;
         private int _debugChannel;
-        private float _roughnessExtractStrength = 1f;
-        private int _roughnessEstimator;
+        private float _roughnessExtractStrength = NamerEditorConstants.DefaultRoughnessExtractStrength;
+        private NamerDipSource _dipSource;
+        private bool _writeResidual;
         private Vector2 _scrollPosition;
 
         private bool _dirty;
@@ -209,7 +211,8 @@ namespace GraffitiEntertainment.Namer.Editor
             _errorThreshold = _settings.ErrorThreshold;
             _residualResolution = _settings.ResidualResolution;
             _roughnessExtractStrength = _settings.RoughnessExtractStrength;
-            _roughnessEstimator = _settings.RoughnessEstimator;
+            _dipSource = (NamerDipSource)_settings.DipSource;
+            _writeResidual = _settings.WriteResidual;
 
             _previewMesh = ResolvePreviewMesh(_selection);
             _decompGuardReason = NamerProcessor.DecompositionSkipReason(_selection, _model, _previewMesh);
@@ -323,44 +326,33 @@ namespace GraffitiEntertainment.Namer.Editor
                 inspection.AoStrength = _aoStrength;
                 inspection.AoContrast = _aoContrast;
                 inspection.RoughnessExtractStrength = _roughnessExtractStrength;
-                inspection.RoughnessEstimator = (NamerRoughnessEstimator)_roughnessEstimator;
+                inspection.DipSource = _dipSource;
 
                 // CR-01 mirror: when Process would skip decomposition for this selection
                 // (multi-material/multi-mesh), the preview must show the non-decomposed
-                // Phase-3 result Process actually generates — not a fit-driven extraction
-                // Process will never deliver.
+                // Phase-3 result Process actually generates — not a projection Process
+                // will never deliver.
                 bool decompWillRun = _decompositionEnabled && string.IsNullOrEmpty(_decompGuardReason);
 
-                // 3A fit-driven preview wiring: supply the same evaluate callback
-                // NamerProcessor composes so the default FitDriven estimator actually extracts
-                // in the live preview. The 1A refit-precondition needs BakeSourceMesh != null
-                // AND a non-null evaluate; without this the preview packs the scalar roughness
-                // and the Extracted Roughness debug channel stays black.
                 inspection.BakeSourceMesh = decompWillRun ? _previewMesh : null;
                 int baseW = inspection.BaseMap != null ? inspection.BaseMap.width : NamerComputePipeline.DefaultBaseResolution;
                 int baseH = inspection.BaseMap != null ? inspection.BaseMap.height : NamerComputePipeline.DefaultBaseResolution;
-                Func<float, float> evaluate = null;
-                if (decompWillRun && _previewMesh != null && inspection.RoughnessEstimator == NamerRoughnessEstimator.FitDriven)
+
+                // 04.2 projection preview wiring: when decomposition will run AND the dip
+                // source is Removed Detail, build the projection context exactly like
+                // NamerProcessor (its internal CreateProjectionContext) so the preview shows
+                // the projection + transfer Process actually generates. Otherwise pass null
+                // (Sobel fallback, or Phase-3 when decomposition is off / guard-skipped).
+                _projectionContext = null;
+                if (decompWillRun && _previewMesh != null && _dipSource == NamerDipSource.RemovedDetail)
                 {
+                    EnsureDecompPipeline();
                     NamerSplitResult fitSplit = MeshVertexSplitter.Split(_previewMesh);
-                    evaluate = strength =>
-                    {
-                        RenderTexture cleaned = _pipeline.ExtractSharpRemoval(baseW, baseH, strength);
-                        try
-                        {
-                            return NamerProcessor.EvaluateRefitMaxError(fitSplit, cleaned, baseW, baseH, _errorThreshold, _residualResolution);
-                        }
-                        finally
-                        {
-                            _pipeline.ReleaseExtractedRoughness(cleaned);
-                        }
-                    };
+                    _projectionContext = NamerProcessor.CreateProjectionContext(
+                        fitSplit, _decompPipeline, baseW, baseH, _errorThreshold, _residualResolution, _writeResidual);
                 }
 
-                // WR-01 (04.1 review): the debounced preview recompute must never show an
-                // interactive cancelable progress bar on slider drags — pass a
-                // non-interactive shouldCancel so Fit skips EditorUtility progress entirely.
-                _liveResult = _pipeline.Process(inspection, evaluate, () => false, _errorThreshold);
+                _liveResult = _pipeline.Process(inspection, _projectionContext);
 
                 RenderTexture previewBaseMap = ResolvePreviewBaseMap();
 
@@ -555,6 +547,8 @@ namespace GraffitiEntertainment.Namer.Editor
                 _decompOutput = null;
             }
 
+            _projectionContext = null;
+
             if (_previewSplitMesh != null)
             {
                 DestroyImmediate(_previewSplitMesh);
@@ -566,8 +560,11 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>
         /// Runs the in-memory vertex-color fit + residual for the live preview (D-08/D-12).
-        /// Mirrors <see cref="NamerProcessor"/>'s decomposition stage but keeps the residual
-        /// render target bound to the preview material (no readback, no disk write).
+        /// In the 04.2 projection path the context already produced the split/colors/residual
+        /// inside <see cref="NamerComputePipeline.Process"/> — consume them (no second fit);
+        /// in the legacy SobelEdge branch this mirrors <see cref="NamerProcessor"/>'s
+        /// decomposition stage but keeps the residual render target bound to the preview
+        /// material (no readback, no disk write).
         /// </summary>
         private void RunDecompPreview(NamerMaterialInspection inspection)
         {
@@ -579,6 +576,24 @@ namespace GraffitiEntertainment.Namer.Editor
 
             EnsureDecompPipeline();
 
+            if (_projectionContext != null)
+            {
+                // 04.2 projection path: the context already produced Split/Colors/Decomp
+                // inside Process. Consume them for the preview mesh + residual binding
+                // (no second fit — the projection IS the fit the preview renders).
+                NamerProjectionContext ctx = _projectionContext;
+                _decompOutput = ctx.Decomp;
+                _decompStats = ctx.Decomp != null ? ctx.Decomp.Stats : null;
+                if (ctx.Split != null && ctx.Colors != null)
+                {
+                    _previewSplitMesh = BuildPreviewSplitMesh(ctx.Split, ctx.Colors);
+                }
+
+                return;
+            }
+
+            // Legacy SobelEdge branch (decomposition on, no projection): in-memory fit +
+            // residual, mode from the Write Residual checkbox (AlwaysKeep/NeverKeep).
             NativeArray<Color32> baseTexels = default;
             VertexColorFitResult fit = null;
             try
@@ -590,7 +605,9 @@ namespace GraffitiEntertainment.Namer.Editor
                 _decompOutput = _decompPipeline.GenerateResidual(
                     split, colors, _liveResult.NormalizedBaseColor,
                     _liveResult.Width, _liveResult.Height,
-                    _errorThreshold, _residualResolution);
+                    _errorThreshold, _residualResolution,
+                    projectedOut: null,
+                    mode: _writeResidual ? NamerResidualMode.AlwaysKeep : NamerResidualMode.NeverKeep);
                 _decompStats = _decompOutput.Stats;
                 _previewSplitMesh = BuildPreviewSplitMesh(split, colors);
             }
@@ -856,14 +873,32 @@ namespace GraffitiEntertainment.Namer.Editor
 
             EditorGUI.BeginDisabledGroup(inspection == null || _busy);
 
+            int newDipSource = EditorGUILayout.Popup(
+                new GUIContent(
+                    "Dip Source",
+                    "Which signal dips roughness toward gloss. Removed Detail (default) re-expresses the luminance "
+                        + "the Gouraud projection removed as gloss — bright speckle dips toward gloss, dark occlusion "
+                        + "raises toward matte — and requires Vertex Color Decomposition to be enabled. Sobel Edge is "
+                        + "the fallback Blender-parity edge signal, used when decomposition is off (or skipped). "
+                        + "Recomputes the preview in memory " + NamerEditorConstants.DebounceSeconds
+                        + " s after the change — nothing is written to disk."),
+                (int)_dipSource,
+                new[] { "Removed Detail", "Sobel Edge" });
+            if (newDipSource != (int)_dipSource)
+            {
+                _dipSource = (NamerDipSource)newDipSource;
+                _settings.DipSource = newDipSource;
+                _afterPanelState.MarkTweaking();
+                MarkDirty();
+            }
+
             float newStrength = EditorGUILayout.Slider(
                 new GUIContent(
-                    "Roughness Extract Strength",
-                    "Sobel: how much of the extracted roughness to adopt (0 = off, 1 = full). Fit-driven: any value > 0 "
-                        + "enables the auto strength search, which requires Vertex Color Decomposition to be enabled — "
-                        + "with decomposition off, the scalar roughness is used unchanged. The strength itself is picked "
-                        + "by the fit (see the readout below), not by this slider. Recomputes the preview in memory "
-                        + NamerEditorConstants.DebounceSeconds + " s after the slider stops — nothing is written to disk."),
+                    "Roughness Dip Depth",
+                    "Taste control — how strongly removed-detail luminance is re-expressed as gloss (bright "
+                        + "speckle dips toward gloss, dark occlusion raises toward matte; 0 = keep the authored "
+                        + "roughness scalar). Recomputes the preview in memory " + NamerEditorConstants.DebounceSeconds
+                        + " s after the slider stops — nothing is written to disk."),
                 _roughnessExtractStrength, 0f, 1f);
             if (!Mathf.Approximately(newStrength, _roughnessExtractStrength))
             {
@@ -873,35 +908,25 @@ namespace GraffitiEntertainment.Namer.Editor
                 MarkDirty();
             }
 
-            int newEstimator = EditorGUILayout.Popup(
-                new GUIContent(
-                    "Roughness Estimator",
-                    "How roughness is extracted: both routes share the anchored-inverted mapping — the authored roughness scalar anchors the map and the Sobel edge magnitude dips texels toward gloss. This dropdown only chooses who picks the strength: Fit-driven auto-searches the strength that collapses the residual (default); Sobel uses the manual strength slider. Sobel mode does NOT sharp-remove the base, so Sobel-mode assets do not reach the one-texture outcome."),
-                _roughnessEstimator,
-                new[] { "Fit-driven", "Sobel" });
-            if (newEstimator != _roughnessEstimator)
+            bool removedDetailEffective = _dipSource == NamerDipSource.RemovedDetail
+                && _decompositionEnabled
+                && string.IsNullOrEmpty(_decompGuardReason);
+            if (_dipSource == NamerDipSource.SobelEdge)
             {
-                _roughnessEstimator = newEstimator;
-                _settings.RoughnessEstimator = newEstimator;
-                _afterPanelState.MarkTweaking();
-                MarkDirty();
+                EditorGUI.indentLevel++;
+                EditorGUILayout.HelpBox(
+                    "Sobel Edge is a fallback dip source — the Removed Detail path requires Vertex Color Decomposition.",
+                    MessageType.Info);
+                EditorGUI.indentLevel--;
             }
-
-            // Fit-driven honesty readout: the strength slider does not drive the fit —
-            // the search does. Say so, and show what it picked, so a slider that
-            // (correctly) changes nothing is never mistaken for a dead control.
-            if (_roughnessEstimator == (int)NamerRoughnessEstimator.FitDriven && inspection != null)
+            else if (!removedDetailEffective)
             {
-                int fitW = inspection.BaseMap != null ? inspection.BaseMap.width : NamerComputePipeline.DefaultBaseResolution;
-                int fitH = inspection.BaseMap != null ? inspection.BaseMap.height : NamerComputePipeline.DefaultBaseResolution;
-                EnsurePipeline();
-                string message = _pipeline != null
-                    && _pipeline.TryGetFitStrength(inspection, fitW, fitH, _errorThreshold, out float picked)
-                        ? "Fit-driven: strength auto-searched — picked " + picked.ToString("0.##")
-                            + " for this material. The slider only enables the search (> 0); it does not set the strength."
-                        : "Fit-driven: the strength is auto-searched on the next preview/Process. The slider only enables "
-                            + "the search (> 0); it does not set the strength.";
-                EditorGUILayout.HelpBox(message, MessageType.Info);
+                EditorGUI.indentLevel++;
+                EditorGUILayout.HelpBox(
+                    "The effective dip source is Sobel Edge: Removed Detail requires Vertex Color Decomposition, "
+                        + "which is currently off or skipped for this selection.",
+                    MessageType.Info);
+                EditorGUI.indentLevel--;
             }
 
             EditorGUI.EndDisabledGroup();
@@ -1013,10 +1038,33 @@ namespace GraffitiEntertainment.Namer.Editor
 
             EditorGUI.BeginDisabledGroup(!_decompositionEnabled);
 
+            bool newWriteResidual = EditorGUILayout.Toggle(
+                new GUIContent(
+                    "Write Residual Texture",
+                    "OFF (default) = one-texture outcome: no residual EXR — the Gouraud projection already makes the "
+                        + "base ÷ vertex-color interpolation white by construction. ON = additionally write source ÷ "
+                        + "vertex-color interpolation as an EXR carrying the removed detail (including its luminance, "
+                        + "which is also re-expressed as gloss). UV-overlap texels use whichever triangle rasterized "
+                        + "first, so overlapped regions may carry interpolation of the winning triangle only."),
+                _writeResidual);
+            if (newWriteResidual != _writeResidual)
+            {
+                _writeResidual = newWriteResidual;
+                _settings.WriteResidual = newWriteResidual;
+                _afterPanelState.MarkTweaking();
+                MarkDirty();
+            }
+
+            // Error Threshold + Residual Resolution only act when residual writing is on
+            // (04.2: the checkbox is the residual gate now; the threshold/resolution search
+            // keys on source-reconstruction error for the written EXR).
+            EditorGUI.BeginDisabledGroup(!_writeResidual);
+
             float newThreshold = EditorGUILayout.Slider(
                 new GUIContent(
                     "Error Threshold",
-                    "Maximum acceptable reconstruction error before a residual texture is required (a good fit drops the residual entirely). Automatically recomputes the preview in memory "
+                    "Maximum acceptable reconstruction error for the adaptive residual-resolution search (used when "
+                        + "Write Residual is on). Recomputes the preview in memory "
                         + NamerEditorConstants.DebounceSeconds + " s after the slider stops — nothing is written to disk."),
                 _errorThreshold, 0f, 0.10f);
             if (!Mathf.Approximately(newThreshold, _errorThreshold))
@@ -1040,6 +1088,8 @@ namespace GraffitiEntertainment.Namer.Editor
                 _afterPanelState.MarkTweaking();
                 MarkDirty();
             }
+
+            EditorGUI.EndDisabledGroup();
 
             if (_decompositionEnabled)
             {

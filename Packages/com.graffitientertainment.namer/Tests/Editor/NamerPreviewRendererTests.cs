@@ -275,9 +275,12 @@ namespace GraffitiEntertainment.Namer.Tests
             _renderer.Frame(cube);
             _renderer.Orbit(30f, 20f);
 
-            Texture texture = _renderer.Render(cube, cube, material, material, new Rect(0, 0, 512, 256));
+            PreviewRenderResult result = _renderer.Render(cube, cube, material, material, new Rect(0, 0, 512, 256));
 
-            Assert.IsNotNull(texture, "Render must return a non-null preview texture");
+            Assert.IsNotNull(result.Before, "Render must return a non-null before pane texture");
+            Assert.IsNotNull(result.After, "Render must return a non-null after pane texture");
+            Assert.AreNotSame(result.Before, result.After,
+                "each pane must be its own persistent render target");
             Assert.IsTrue(_renderer.IsOrthographic, "the camera must stay orthographic across the render");
             Assert.AreEqual(
                 _renderer.OrthographicSizeForAspect(2f, 256f),

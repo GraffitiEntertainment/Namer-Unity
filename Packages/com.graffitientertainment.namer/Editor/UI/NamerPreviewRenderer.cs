@@ -5,6 +5,28 @@ using UnityEngine;
 namespace GraffitiEntertainment.Namer.Editor
 {
     /// <summary>
+    /// The two per-pane persistent render targets produced by
+    /// <see cref="NamerPreviewRenderer.Render(Mesh, Material, Material, Rect)"/>: the before
+    /// pane's texture (its own mesh only) and the after pane's texture (its own mesh only).
+    /// Each is a persistent <see cref="RenderTexture"/> owned by the renderer — never
+    /// <see cref="PreviewRenderUtility"/>'s cached RT — so the window can draw each pane's
+    /// own half without cross-pane overlap.
+    /// </summary>
+    public readonly struct PreviewRenderResult
+    {
+        public readonly Texture Before;
+        public readonly Texture After;
+
+        public PreviewRenderResult(Texture before, Texture after)
+        {
+            Before = before;
+            After = after;
+        }
+
+        public bool IsValid => Before != null && After != null;
+    }
+
+    /// <summary>
     /// Wraps a single <see cref="PreviewRenderUtility"/> to render the actual selected
     /// mesh twice side-by-side — the source material (before) and the in-memory NAMER or
     /// debug material (after) — through one shared orthographic camera (D-09, 04.2).
@@ -56,6 +78,11 @@ namespace GraffitiEntertainment.Namer.Editor
         private float _framedHalfWidth = 1f;
         private float _framedHalfHeight = 1f;
 
+        // Persistent per-pane render targets owned by the renderer (blit targets; reallocc'd
+        // on rect-size change, released in Cleanup). Never PreviewRenderUtility's cached RT.
+        private RenderTexture _beforePaneTexture;
+        private RenderTexture _afterPaneTexture;
+
         /// <summary>True when the preview camera is orthographic (false before the preview scene exists).</summary>
         public bool IsOrthographic => _preview != null && _preview.camera.orthographic;
 
@@ -85,11 +112,12 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Renders <paramref name="mesh"/> twice (before left, after right) into an
-        /// offscreen texture and returns it. Returns <c>null</c> when the mesh is missing
+        /// Renders <paramref name="mesh"/> twice (before left, after right) into two per-pane
+        /// render targets and returns them as a <see cref="PreviewRenderResult"/>.
+        /// <see cref="PreviewRenderResult.IsValid"/> is <c>false</c> when the mesh is missing
         /// so the caller can render its empty-state UI instead.
         /// </summary>
-        public Texture Render(Mesh mesh, Material before, Material after, Rect rect)
+        public PreviewRenderResult Render(Mesh mesh, Material before, Material after, Rect rect)
         {
             return Render(mesh, mesh, before, after, rect);
         }
@@ -97,18 +125,24 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>
         /// Renders two (possibly different) meshes side-by-side — the source mesh (before,
         /// left) and the decomposition split mesh (after, right) — through one shared,
-        /// orthographic camera (D-08 after-mesh parity). Framing uses <paramref name="beforeMesh"/>
-        /// bounds; the split mesh carries the fitted vertex colors but identical geometry, so
-        /// both instances stay in view. Returns <c>null</c> when either mesh is missing.
+        /// orthographic camera (D-08 after-mesh parity), each into its OWN per-pane
+        /// persistent render target via two BeginPreview→DrawMesh→Render(true)→EndPreview
+        /// cycles. Framing uses <paramref name="beforeMesh"/> bounds; the split mesh carries
+        /// the fitted vertex colors but identical geometry, so both instances stay in view.
+        /// Returns a <see cref="PreviewRenderResult"/> whose
+        /// <see cref="PreviewRenderResult.Before"/>/<see cref="PreviewRenderResult.After"/>
+        /// are the two persistent pane RTs (each cycle's utility RT is blitted into its pane
+        /// RT before the next cycle begins); <see cref="PreviewRenderResult.IsValid"/> is
+        /// <c>false</c> when either mesh is missing. Framing/rotation/zoom semantics are
+        /// unchanged.
         /// </summary>
-        public Texture Render(Mesh beforeMesh, Mesh afterMesh, Material before, Material after, Rect rect)
+        public PreviewRenderResult Render(Mesh beforeMesh, Mesh afterMesh, Material before, Material after, Rect rect)
         {
             if (beforeMesh == null || afterMesh == null || _preview == null)
             {
-                return null;
+                return default;
             }
 
-            _preview.BeginPreview(rect, GUIStyle.none);
             EnsureFramed(beforeMesh);
             ApplyCamera();
 
@@ -116,10 +150,6 @@ namespace GraffitiEntertainment.Namer.Editor
             // aspect, so the size is applied where the rect is known, not in Frame).
             float aspect = rect.width / Mathf.Max(rect.height, 1f);
             float orthoSize = OrthographicSizeForAspect(aspect, rect.height);
-            _preview.camera.orthographicSize = orthoSize;
-
-            _preview.lights[0].transform.rotation = Quaternion.Euler(50f, -30f, 0f);
-            _preview.lights[1].transform.rotation = Quaternion.Euler(340f, 218f, 177f);
 
             // Draw each instance rotated IN PLACE about its own bounds center: the draw
             // transform maps v -> rotation * v + position, so countering the rotated
@@ -132,16 +162,49 @@ namespace GraffitiEntertainment.Namer.Editor
             Quaternion meshRotation = Quaternion.Euler(_pitch, _yaw, 0f);
             Vector3 rotatedBoundsCenter = meshRotation * beforeMesh.bounds.center;
             Vector2 drawOffsets = GetPaneDrawOffsets(aspect, rect.height);
-            Vector3 beforePosition = new Vector3(drawOffsets.x, 0f, 0f) - rotatedBoundsCenter;
-            Vector3 afterPosition = new Vector3(drawOffsets.y, 0f, 0f) - rotatedBoundsCenter;
 
-            _preview.DrawMesh(beforeMesh, beforePosition, meshRotation, before, 0);
-            _preview.DrawMesh(afterMesh, afterPosition, meshRotation, after, 0);
+            Texture beforeRT = RenderPane(beforeMesh, before, rect, orthoSize, meshRotation, rotatedBoundsCenter, drawOffsets.x, ref _beforePaneTexture);
+            Texture afterRT = RenderPane(afterMesh, after, rect, orthoSize, meshRotation, rotatedBoundsCenter, drawOffsets.y, ref _afterPaneTexture);
+            return new PreviewRenderResult(beforeRT, afterRT);
+        }
 
-            // allowScriptableRenderPipeline = true is REQUIRED for URP materials —
-            // the default false path renders them magenta/fallback-error.
-            _preview.Render(true);
-            return _preview.EndPreview();
+        private Texture RenderPane(Mesh mesh, Material material, Rect rect, float orthoSize,
+                                   Quaternion meshRotation, Vector3 rotatedBoundsCenter, float drawOffsetX,
+                                   ref RenderTexture paneTexture)
+        {
+            _preview.BeginPreview(rect, GUIStyle.none);
+            ApplyCamera();
+            _preview.camera.orthographicSize = orthoSize;
+            _preview.lights[0].transform.rotation = Quaternion.Euler(50f, -30f, 0f);
+            _preview.lights[1].transform.rotation = Quaternion.Euler(340f, 218f, 177f);
+            Vector3 position = new Vector3(drawOffsetX, 0f, 0f) - rotatedBoundsCenter;
+            _preview.DrawMesh(mesh, position, meshRotation, material, 0);
+            _preview.Render(true);   // allowScriptableRenderPipeline=true is REQUIRED for URP materials
+            Texture utilityRt = _preview.EndPreview();   // the utility's CACHED RT — reused by the next BeginPreview
+            return BlitToPane(ref paneTexture, utilityRt);  // copy NOW, before the next cycle overwrites it
+        }
+
+        private RenderTexture BlitToPane(ref RenderTexture pane, Texture source)
+        {
+            int w = source.width;
+            int h = source.height;
+            if (pane == null || pane.width != w || pane.height != h)
+            {
+                if (pane != null)
+                {
+                    pane.Release();
+                }
+
+                pane = new RenderTexture(w, h, 0, source.graphicsFormat)
+                {
+                    name = "NamerPreviewPane",
+                    hideFlags = HideFlags.HideAndDontSave,
+                };
+            }
+
+            Graphics.Blit(source, pane);
+            RenderTexture.active = null;   // restore EndPreview's post-condition — Render runs mid-OnGUI (C-3)
+            return pane;
         }
 
         /// <summary>
@@ -247,6 +310,18 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 _preview.Cleanup();
                 _preview = null;
+            }
+
+            if (_beforePaneTexture != null)
+            {
+                _beforePaneTexture.Release();
+                _beforePaneTexture = null;
+            }
+
+            if (_afterPaneTexture != null)
+            {
+                _afterPaneTexture.Release();
+                _afterPaneTexture = null;
             }
         }
 

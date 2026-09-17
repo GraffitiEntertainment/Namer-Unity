@@ -842,10 +842,10 @@ namespace GraffitiEntertainment.Namer.Editor
                 }
             }
 
-            Texture previewTexture = _preview.Render(_previewMesh, afterMesh, beforeMaterial, afterMaterial, previewRect);
-            if (previewTexture != null)
+            PreviewRenderResult previewResult = _preview.Render(_previewMesh, afterMesh, beforeMaterial, afterMaterial, previewRect);
+            if (previewResult.IsValid)
             {
-                GUI.DrawTexture(previewRect, previewTexture, ScaleMode.StretchToFill);
+                DrawPreviewPaneTexture(previewRect, previewResult);
                 DrawPreviewPaneOutline(previewRect);
             }
             else
@@ -879,6 +879,14 @@ namespace GraffitiEntertainment.Namer.Editor
             EditorGUI.DrawRect(new Rect(previewRect.x, previewRect.y, 1f, previewRect.height), outline);                       // left
             EditorGUI.DrawRect(new Rect(previewRect.xMax - 1f, previewRect.y, 1f, previewRect.height), outline);               // right
             EditorGUI.DrawRect(new Rect(previewRect.x + previewRect.width / 2f - 0.5f, previewRect.y, 1f, previewRect.height), outline); // center divider
+        }
+
+        private void DrawPreviewPaneTexture(Rect previewRect, PreviewRenderResult result)
+        {
+            Rect leftPane = new Rect(previewRect.x, previewRect.y, previewRect.width * 0.5f, previewRect.height);
+            Rect rightPane = new Rect(previewRect.x + previewRect.width * 0.5f, previewRect.y, previewRect.width * 0.5f, previewRect.height);
+            GUI.DrawTextureWithTexCoords(leftPane, result.Before, new Rect(0f, 0f, 0.5f, 1f));   // before pane: before RT's left half
+            GUI.DrawTextureWithTexCoords(rightPane, result.After, new Rect(0.5f, 0f, 0.5f, 1f)); // after pane: after RT's right half
         }
 
         private void HandlePreviewCameraInput(Rect previewRect)

@@ -341,6 +341,100 @@ namespace GraffitiEntertainment.Namer.Tests
             yield return null;
         }
 
+        [UnityTest]
+        public IEnumerator Transfer_SeamOutlier_SoftClipsAtUnitDepth()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping seam-outlier soft-clip test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            const int w = WorkingSize;
+            const int h = WorkingSize;
+            const float scalar = 0.5f;
+            const float strength = 0.25f;
+            const int px = 16, py = 16, pw = 2, ph = 2; // 2x2 seam outlier far above p90
+
+            RenderTexture source = CreateBase(w, h, (x, y) =>
+                InRect(x, y, px, py, pw, ph) ? new Color(0.95f, 0.95f, 0.95f, 1f) : new Color(0.5f, 0.5f, 0.5f, 1f));
+            RenderTexture projected = CreateFlat(w, h, 0.5f);
+            RenderTexture roughness = null;
+
+            try
+            {
+                roughness = _pipeline.ExtractTransferRoughness(scalar, source, projected, w, h, strength);
+                Color32[] texels = ReadBackColor32(roughness, w * h);
+
+                for (int y = py; y < py + ph; y++)
+                {
+                    for (int x = px; x < px + pw; x++)
+                    {
+                        float r = texels[y * w + x].r / 255f;
+                        Assert.AreEqual(scalar - strength, r, 0.03f,
+                            $"seam-outlier texel ({x},{y}) must soft-clip to scalar - strength (= 0.25), not saturate to gloss 0");
+                    }
+                }
+
+                float quiet = texels[0 * w + 0].r / 255f;
+                Assert.LessOrEqual(Mathf.Abs(quiet - scalar), 1f / 255f,
+                    "quiet texel must stay at the authored scalar");
+            }
+            finally
+            {
+                _pipeline.ReleaseRoughness(roughness);
+                Release(source, projected);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Transfer_SeamOutlier_DipIsMonotonicInStrength()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping seam-outlier monotonic-strength test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            const int w = WorkingSize;
+            const int h = WorkingSize;
+            const float scalar = 0.5f;
+            const int px = 16, py = 16, pw = 2, ph = 2;
+
+            RenderTexture source = CreateBase(w, h, (x, y) =>
+                InRect(x, y, px, py, pw, ph) ? new Color(0.95f, 0.95f, 0.95f, 1f) : new Color(0.5f, 0.5f, 0.5f, 1f));
+            RenderTexture projected = CreateFlat(w, h, 0.5f);
+            RenderTexture roughness025 = null;
+            RenderTexture roughness06 = null;
+
+            try
+            {
+                roughness025 = _pipeline.ExtractTransferRoughness(scalar, source, projected, w, h, 0.25f);
+                roughness06 = _pipeline.ExtractTransferRoughness(scalar, source, projected, w, h, 0.6f);
+
+                Color32[] texels025 = ReadBackColor32(roughness025, w * h);
+                Color32[] texels06 = ReadBackColor32(roughness06, w * h);
+
+                float r025 = texels025[py * w + px].r / 255f;
+                float r06 = texels06[py * w + px].r / 255f;
+
+                Assert.Less(r06, r025 - 0.05f,
+                    "seam-outlier texel must dip strictly more at strength 0.6 than 0.25 (monotonic slider)");
+                Assert.Less(r025, scalar, "seam texel must dip below the authored scalar at strength 0.25");
+                Assert.Less(r06, scalar, "seam texel must dip below the authored scalar at strength 0.6");
+            }
+            finally
+            {
+                _pipeline.ReleaseRoughness(roughness025);
+                _pipeline.ReleaseRoughness(roughness06);
+                Release(source, projected);
+            }
+
+            yield return null;
+        }
+
         // --------------------------------------------------------------------
 
         private static RenderTexture CreateFlat(int w, int h, float value)

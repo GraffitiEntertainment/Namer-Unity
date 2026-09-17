@@ -144,24 +144,7 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         [Test]
-        public void HorizontalHalfExtentWorld_TracksCurrentRotation()
-        {
-            Mesh wideMesh = CreateBoundsMesh(4f, 0.5f, 0.1f);
-            _renderer.Frame(wideMesh);
-            Assert.AreEqual(4f, _renderer.HorizontalHalfExtentWorld(), 1e-4f, "neutral: X extent");
-
-            _renderer.Orbit(90f, 0f);
-            Assert.AreEqual(0.1f, _renderer.HorizontalHalfExtentWorld(), 1e-4f,
-                "yaw 90: wide axis rotates into depth, X extent = Z extent");
-
-            _renderer.Frame(wideMesh);
-            _renderer.Orbit(45f, 0f);
-            Assert.AreEqual(2.8991f, _renderer.HorizontalHalfExtentWorld(), 1e-3f,
-                "yaw 45: |cos45|*4 + |sin45|*0.1 = 0.70710678*4.1");
-        }
-
-        [Test]
-        public void PaneAnchor_InnerEdgeStaysAtInnerMarginAcrossZoomSweep()
+        public void PaneAnchor_FixedCenter_InnerEdgePinnedAtNeutral_AcrossZoom()
         {
             Mesh wideMesh = CreateBoundsMesh(4f, 0.5f, 0.1f);
             _renderer.Frame(wideMesh);
@@ -170,37 +153,40 @@ namespace GraffitiEntertainment.Namer.Tests
             {
                 float ortho = _renderer.OrthographicSizeForAspect(2f, 400f);
                 float anchor = _renderer.PaneAnchorWorld(2f, 400f);
-                float xExtent = _renderer.HorizontalHalfExtentWorld();
-                float innerEdgePx = (anchor - xExtent) * (400f / (2f * ortho));
+                float innerEdgePx = (anchor - 4f) * (400f / (2f * ortho));
                 Assert.AreEqual(NamerPreviewRenderer.InnerMarginPx, innerEdgePx, 1e-3f,
                     "inner edge must stay InnerMarginPx from the divider at every zoom");
                 _renderer.Zoom(1f);
             }
 
             _renderer.Frame(wideMesh);
+            float before = _renderer.PaneAnchorWorld(2f, 400f);
+            _renderer.Zoom(-1f);
+            Assert.Greater(_renderer.PaneAnchorWorld(2f, 400f), before,
+                "zoom out must grow the anchor outward from the divider");
+
+            _renderer.Frame(wideMesh);
+            float anchorBefore = _renderer.PaneAnchorWorld(2f, 400f);
+            Vector2 offsetsBefore = _renderer.GetPaneDrawOffsets(2f, 400f);
             _renderer.Orbit(35f, 20f);
-            for (int i = 0; i < 24; i++)
-            {
-                float ortho = _renderer.OrthographicSizeForAspect(2f, 400f);
-                float anchor = _renderer.PaneAnchorWorld(2f, 400f);
-                float xExtent = _renderer.HorizontalHalfExtentWorld();
-                float innerEdgePx = (anchor - xExtent) * (400f / (2f * ortho));
-                Assert.AreEqual(NamerPreviewRenderer.InnerMarginPx, innerEdgePx, 1e-3f,
-                    "inner edge must stay InnerMarginPx from the divider at every zoom, even rotated");
-                _renderer.Zoom(1f);
-            }
+            Assert.AreEqual(anchorBefore, _renderer.PaneAnchorWorld(2f, 400f), 1e-6f,
+                "the anchor must NOT change under orbit — the center is the first positioning");
+            Assert.AreEqual(offsetsBefore.x, _renderer.GetPaneDrawOffsets(2f, 400f).x, 1e-6f,
+                "the before offset must NOT change under orbit (fixed first positioning)");
+            Assert.AreEqual(offsetsBefore.y, _renderer.GetPaneDrawOffsets(2f, 400f).y, 1e-6f,
+                "the after offset must NOT change under orbit (fixed first positioning)");
         }
 
         [Test]
         public void GetPaneDrawOffsets_MirrorsDividerAnchor()
         {
             // GAP-4 acceptance term: Render draws each pane's object center at ±anchor,
-            // where anchor = HorizontalHalfExtentWorld() + InnerMarginPx * (2*orthoSize/H).
-            // The offsets Render consumes are (-anchor, +anchor) — NOT the retired
-            // center-anchored placement (±orthoSize*aspect/2). For the wide mesh at 2:1 the
-            // divider anchor is ~4.2133 while center-anchored would be ~4.2667, so pinning
-            // the returned values here fails if Render (or this method) regresses to
-            // centering each pane instead of hugging the divider.
+            // where anchor = _framedHalfWidth + InnerMarginPx * (2*orthoSize/H). The offsets
+            // Render consumes are (-anchor, +anchor) — NOT the retired center-anchored
+            // placement (±orthoSize*aspect/2). For the wide mesh at 2:1 the divider anchor is
+            // ~4.2133 while center-anchored would be ~4.2667, so pinning the returned values
+            // here fails if Render (or this method) regresses to centering each pane instead
+            // of hugging the divider.
             const float aspect = 2f;
             const float rectHeightPx = 400f;
 
@@ -209,7 +195,6 @@ namespace GraffitiEntertainment.Namer.Tests
 
             Vector2 offsets = _renderer.GetPaneDrawOffsets(aspect, rectHeightPx);
             float orthoSize = _renderer.OrthographicSizeForAspect(aspect, rectHeightPx);
-            float xExtent = _renderer.HorizontalHalfExtentWorld();
             float anchor = _renderer.PaneAnchorWorld(aspect, rectHeightPx);
 
             Assert.AreEqual(-anchor, offsets.x, 1e-4f, "before pane must draw left of the divider at -anchor");
@@ -218,34 +203,28 @@ namespace GraffitiEntertainment.Namer.Tests
 
             Assert.AreEqual(
                 NamerPreviewRenderer.InnerMarginPx * (2f * orthoSize / rectHeightPx),
-                anchor - xExtent,
+                anchor - 4f,
                 1e-3f,
-                "the anchor must leave exactly InnerMarginPx of world space between the inner edge and the divider");
+                "the anchor must leave exactly InnerMarginPx of world space between the neutral inner edge and the divider");
             Assert.AreNotEqual(
                 orthoSize * aspect / 2f,
                 anchor,
                 "the divider anchor must differ from the retired center-anchored placement (GAP-4 regression guard)");
 
-            // Orbit rotates the framed bounds, so the rotated horizontal half-extent — and
-            // therefore the anchor the draw offsets consume — must track the new silhouette.
+            // Orbit must NOT change the divider anchor — the anchor is the neutral X
+            // half-extent captured at Frame (the first positioning), so the draw offsets stay
+            // fixed under rotation (GAP-5).
+            Vector2 offsetsBefore = _renderer.GetPaneDrawOffsets(aspect, rectHeightPx);
             _renderer.Orbit(35f, 20f);
-            Vector2 rotatedOffsets = _renderer.GetPaneDrawOffsets(aspect, rectHeightPx);
-            float rotatedAnchor = _renderer.PaneAnchorWorld(aspect, rectHeightPx);
-            float rotatedExtent = _renderer.HorizontalHalfExtentWorld();
+            Vector2 offsetsAfter = _renderer.GetPaneDrawOffsets(aspect, rectHeightPx);
+            float anchorAfter = _renderer.PaneAnchorWorld(aspect, rectHeightPx);
 
-            Assert.AreEqual(-rotatedAnchor, rotatedOffsets.x, 1e-4f,
-                "the before offset must track the rotated extent");
-            Assert.AreEqual(rotatedAnchor, rotatedOffsets.y, 1e-4f,
-                "the after offset must track the rotated extent");
-            Assert.AreEqual(-rotatedOffsets.x, rotatedOffsets.y, 1e-6f,
-                "rotated draw offsets must stay exact negatives");
-            Assert.AreNotEqual(xExtent, rotatedExtent,
-                "orbit must change the rotated horizontal half-extent");
-            Assert.AreEqual(
-                NamerPreviewRenderer.InnerMarginPx * (2f * _renderer.OrthographicSizeForAspect(aspect, rectHeightPx) / rectHeightPx),
-                rotatedAnchor - rotatedExtent,
-                1e-3f,
-                "the rotated inner edge must still stay InnerMarginPx from the divider");
+            Assert.AreEqual(offsetsBefore.x, offsetsAfter.x, 1e-6f,
+                "orbit must NOT change the before divider anchor (fixed first positioning, GAP-5)");
+            Assert.AreEqual(offsetsBefore.y, offsetsAfter.y, 1e-6f,
+                "orbit must NOT change the after divider anchor (fixed first positioning, GAP-5)");
+            Assert.AreEqual(anchor, anchorAfter, 1e-6f,
+                "orbit must NOT change the divider anchor (fixed first positioning, GAP-5)");
 
             // Zoom sweep: ortho size changes the world-space margin, so the anchor — and
             // thus the consumed offsets — must re-derive at every zoom to keep the inner
@@ -256,7 +235,6 @@ namespace GraffitiEntertainment.Namer.Tests
                 float zoomOrtho = _renderer.OrthographicSizeForAspect(aspect, rectHeightPx);
                 Vector2 zoomOffsets = _renderer.GetPaneDrawOffsets(aspect, rectHeightPx);
                 float zoomAnchor = _renderer.PaneAnchorWorld(aspect, rectHeightPx);
-                float zoomExtent = _renderer.HorizontalHalfExtentWorld();
 
                 Assert.AreEqual(-zoomAnchor, zoomOffsets.x, 1e-4f,
                     "before offset must mirror the anchor at every zoom");
@@ -264,7 +242,7 @@ namespace GraffitiEntertainment.Namer.Tests
                     "after offset must mirror the anchor at every zoom");
                 Assert.AreEqual(
                     NamerPreviewRenderer.InnerMarginPx * (2f * zoomOrtho / rectHeightPx),
-                    zoomAnchor - zoomExtent,
+                    zoomAnchor - 4f,
                     1e-3f,
                     "the inner edge must stay InnerMarginPx from the divider at every zoom");
 

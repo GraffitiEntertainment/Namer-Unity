@@ -19,6 +19,12 @@
 //
 // All write targets are LINEAR. _RoughnessOut is R8G8B8A8_UNorm linear; intermediates are
 // R16G16B16A16_SFloat linear. Compute never writes sRGB.
+//
+// Phase 04.2 (plan 02) adds the removed-luminance roughness-transfer chain — CSRemovedLuma
+// (signed Rec.601 luma of source - projected) and CSRoughnessTransferRemap (the surviving
+// D-08 consume site with the dip source swapped from Sobel magnitude to p90-normalized
+// removed-luma). The Sobel chain (CSRoughnessSobel/CSRoughnessMaxReduce/CSRoughnessNormalize/
+// CSRoughnessRemap) remains intact as the alternate dip source (plan 03 selects between them).
 
 #include "NAMERRoughness.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
@@ -31,6 +37,8 @@
 #pragma kernel CSRoughnessSharpDetail
 #pragma kernel CSRoughnessSharpRemoval
 #pragma kernel CSRoughnessRemap
+#pragma kernel CSRemovedLuma
+#pragma kernel CSRoughnessTransferRemap
 
 // Kernel-written outputs (linear, random-access).
 RWTexture2D<float4> _RoughnessRaw; // R16G16B16A16_SFloat: g = Sobel edge magnitude
@@ -40,11 +48,13 @@ RWTexture2D<float4> _BlurPing;     // R16G16B16A16_SFloat: horizontal separable-
 RWTexture2D<float4> _Blurred;      // R16G16B16A16_SFloat: separable-gaussian low-pass of the base (full RGB)
 RWTexture2D<float4> _SharpDetail;  // R16G16B16A16_SFloat: high-frequency detail (base - blurred)
 RWTexture2D<float4> _CleanedBaseOut; // R16G16B16A16_SFloat: sharp-removal cleaned base (full RGB, alpha 1)
+RWTexture2D<float4> _RemovedLuma;  // R16G16B16A16_SFloat: signed Rec.601 luma of (source - projected), .r (04.2 transfer)
 
 // Blit-uploaded / kernel-read inputs.
 Texture2D<float4> _BaseColorOut;   // the already-linear cleaned base (CSNormalize output)
 Texture2D<float4> _SrcAvg;         // generic max-reduce read target
 Texture2D<float4> _SobelRoughness; // CSRoughnessNormalize output the fit-driven remap adopts (plan 04.1-06)
+Texture2D<float4> _ProjectedBase;  // Gouraud-projected base (linear float16) the removed luma is measured against (04.2)
 
 // Uniforms.
 uint2 _Size;           // unsigned: compared against SV_DispatchThreadID (uint) in the kernel guards
@@ -53,6 +63,7 @@ uint2 _AvgDstSize;
 float _GlobalMax;      // Sobel normalization scale (robust p90 of the magnitude, UAT round 4) uploaded for the normalize pass
 float _Strength;       // fit-driven sharp-removal / Sobel-adoption strength (0..1)
 float _ScalarRoughness; // authored scalar roughness that anchors the fit-driven dip (inspection.Roughness)
+float _LumaP90;        // p90 of |removed-luma| (readback-normalized, clamped to >= 1e-4) uploaded for the transfer remap (04.2)
 int _Radius;       // separable-blur radius (frequency-separation low-pass)
 float _Sigma;      // separable-blur sigma
 
@@ -233,5 +244,48 @@ void CSRoughnessRemap(uint3 id : SV_DispatchThreadID)
     }
 
     float roughness = saturate(_ScalarRoughness - _Strength * _SobelRoughness[id.xy].r);
+    _RoughnessOut[id.xy] = float4(roughness, 0.0, 0.0, 1.0);
+}
+
+// ------------------------------------------------------------------
+// Removed-luminance roughness transfer (Phase 04.2, plan 02).
+//
+// CSRemovedLuma computes the signed Rec.601 luminance of (source - projected): the removed
+// detail the Gouraud projection cannot represent. Positive = bright baked detail (speckle),
+// negative = dark baked occlusion (locked 2026-09-16 polarity decision). Written to
+// _RemovedLuma.r unnormalized; the C# side reads back and p90-normalizes it.
+//
+// CSRoughnessTransferRemap is the surviving D-08 consume site with the dip source swapped
+// from Sobel magnitude to the normalized removed-luma signal: saturate(scalar - strength *
+// mag). saturate clamps the 6-bit headroom at BOTH ends (gloss clip at bright, matte clip
+// at dark — CONTEXT locked headroom handling); strength is the pure-taste dip-depth slider
+// (no precompute, no search). The Sobel chain above remains intact as the alternate dip
+// source (plan 03 selects between them).
+// ------------------------------------------------------------------
+
+// Signed removed-detail luminance: luma(source - projected) -> _RemovedLuma.r.
+[numthreads(8,8,1)]
+void CSRemovedLuma(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float3 diff = _BaseColorOut[id.xy].rgb - _ProjectedBase[id.xy].rgb;
+    _RemovedLuma[id.xy] = float4(NamerRoughnessLuminance(diff), 0.0, 0.0, 1.0);
+}
+
+// Transfer remap: roughness = saturate(scalar - strength * removedLuma / p90).
+[numthreads(8,8,1)]
+void CSRoughnessTransferRemap(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float mag = _RemovedLuma[id.xy].r / max(_LumaP90, 1e-4);
+    float roughness = saturate(_ScalarRoughness - _Strength * mag);
     _RoughnessOut[id.xy] = float4(roughness, 0.0, 0.0, 1.0);
 }

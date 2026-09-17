@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verifying
-stopped_at: Completed 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid-05-PLAN.md
+stopped_at: Gap closure planned (04.2-06/07/08) after UAT round 1 — ready for execute-phase --gaps-only
 last_updated: "2026-09-17T02:02:03.466Z"
 last_activity: 2026-09-17
 progress:
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 
 Phase: 04.2 (gouraud-projection-one-texture-with-roughness-transfer-resid) — EXECUTING
 Plan: 5 of 5
-Status: Phase complete — ready for verification
+Status: Gap closure planned (04.2-06/07/08) — ready for --gaps-only execution
 Last activity: 2026-09-17
 
 Progress: [██████████] 100%

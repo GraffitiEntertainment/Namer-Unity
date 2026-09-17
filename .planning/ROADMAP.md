@@ -241,7 +241,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 04.2-04: UI honesty + acceptance — end-to-end criteria tests (one-texture default, source-dividend EXR, whiteness identity, taste slider), stats relabel + chroma/overlap honesty copy, full regression + flip audit
+- [x] 04.2-04: UI honesty + acceptance — end-to-end criteria tests (one-texture default, source-dividend EXR, whiteness identity, taste slider), stats relabel + chroma/overlap honesty copy, full regression + flip audit
 
 **Wave 4** *(blocked on Wave 3 completion)*
 

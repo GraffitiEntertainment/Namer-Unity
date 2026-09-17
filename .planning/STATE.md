@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04.2-03-PLAN.md — rewire + retirement + UI
-last_updated: "2026-09-17T01:28:12.156Z"
+stopped_at: Completed 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid-04-PLAN.md
+last_updated: "2026-09-17T01:47:26.057Z"
 last_activity: 2026-09-17
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 29
-  completed_plans: 27
+  completed_plans: 28
   percent: 75
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 ## Current Position
 
 Phase: 04.2 (gouraud-projection-one-texture-with-roughness-transfer-resid) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-09-17
 
-Progress: [█████████░] 93%
+Progress: [██████████] 97%
 
 ## Performance Metrics
 
@@ -86,6 +86,7 @@ Progress: [█████████░] 93%
 | Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P01 | 9min | 3 tasks | 4 files |
 | Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P02 | 9min | 3 tasks | 4 files |
 | Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P03 | 20min | 3 tasks | 14 files |
+| Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P04 | 17min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -170,6 +171,9 @@ Recent decisions affecting current work:
 - [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: NamerProjectionContext.Run is invoked between normalize and pack; NormalizedBaseColor is the projected base and SourceBaseColor preserves the source for the residual-ON dividend and preview
 - [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: CreateProjectionContext is internal; the window calls it directly and the projection-era tests mirror its Run contract with a local helper
 - [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: DipSource/WriteResidual are fresh keys (no stale-estimator migration); WriteResidual drives AlwaysKeep/NeverKeep, retiring Gate from production call sites
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: DrawDecompStats gains a Removed-detail max error row (FitOnlyMaxError) and the residual row reads 'not written (one-texture)' vs 'written @ Npx'
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: No computed overlap-depth statistic was added — honest tooltip copy carries the measured numbers (0.07 / 87.9 / ~55%), per CONTEXT 'at most an honest statement, not repair'
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: EditMode full-suite run deferred to the orchestrator's post-wave regression gate (no unity-mcp relay; live editor holds the project lock)
 
 ### Pending Todos
 
@@ -200,6 +204,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-17T01:28:12.141Z
-Stopped at: Completed 04.2-03-PLAN.md — rewire + retirement + UI
+Last session: 2026-09-17T01:47:26.048Z
+Stopped at: Completed 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid-04-PLAN.md
 Resume file: None

@@ -26,10 +26,9 @@
 // removed-luma). The Sobel chain (CSRoughnessSobel/CSRoughnessMaxReduce/CSRoughnessNormalize)
 // remains intact as the alternate dip source (plan 03 selects between them).
 //
-// Phase 04.2 (plan 03) RETIRED the 04.1 frequency-separation kernels (CSRoughnessBlurH,
-// CSRoughnessBlurV, CSRoughnessSharpDetail, CSRoughnessSharpRemoval) and the old
-// CSRoughnessRemap — the strength ladder search, the fit cache, and the sharp-removal
-// cleaned base no longer exist.
+// Phase 04.2 (plan 03) RETIRED the 04.1 frequency-separation kernels (the separable blur
+// H/V, sharp-detail, and sharp-removal kernels) and the old fit-driven Sobel remap — the
+// strength ladder search, the fit cache, and the sharp-removal cleaned base no longer exist.
 
 #include "NAMERRoughness.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"

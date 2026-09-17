@@ -1,8 +1,8 @@
 // NAMERRoughness.compute
-// GPU image-space roughness extraction kernels (Phase 04.1, plan 01).
+// GPU image-space roughness dip-source kernels (Phase 04.2; Sobel chain from 04.1 plan 01).
 //
 // Three staged kernels turn the already-cleaned linear base color (_BaseColorOut from
-// CSNormalize) into a per-texel roughness texture for the Sobel estimator:
+// CSNormalize) into a per-texel roughness texture for the Sobel dip source:
 // CSRoughnessSobel -> hierarchical max-reduce -> CSRoughnessNormalize.
 //
 // CSRoughnessSobel computes the Rec.601 luminance of the cleaned base (NAMERRoughness.hlsl,
@@ -14,7 +14,7 @@
 // block max, no atomics) to reduce the Sobel magnitude to a tiny RT, so the GLOBAL max is
 // available as the ceiling of the robust p90 normalization scale (UAT round 4).
 //
-// CSRoughnessNormalize emits the final roughness directly in the roughness domain:
+// CSRoughnessNormalize emits the final Sobel roughness directly in the roughness domain:
 // saturate(mag / max(globalMax, 1e-4)) — NO 1 - x inversion (RESEARCH Pitfall 1).
 //
 // All write targets are LINEAR. _RoughnessOut is R8G8B8A8_UNorm linear; intermediates are
@@ -23,8 +23,13 @@
 // Phase 04.2 (plan 02) adds the removed-luminance roughness-transfer chain — CSRemovedLuma
 // (signed Rec.601 luma of source - projected) and CSRoughnessTransferRemap (the surviving
 // D-08 consume site with the dip source swapped from Sobel magnitude to p90-normalized
-// removed-luma). The Sobel chain (CSRoughnessSobel/CSRoughnessMaxReduce/CSRoughnessNormalize/
-// CSRoughnessRemap) remains intact as the alternate dip source (plan 03 selects between them).
+// removed-luma). The Sobel chain (CSRoughnessSobel/CSRoughnessMaxReduce/CSRoughnessNormalize)
+// remains intact as the alternate dip source (plan 03 selects between them).
+//
+// Phase 04.2 (plan 03) RETIRED the 04.1 frequency-separation kernels (CSRoughnessBlurH,
+// CSRoughnessBlurV, CSRoughnessSharpDetail, CSRoughnessSharpRemoval) and the old
+// CSRoughnessRemap — the strength ladder search, the fit cache, and the sharp-removal
+// cleaned base no longer exist.
 
 #include "NAMERRoughness.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
@@ -32,11 +37,6 @@
 #pragma kernel CSRoughnessSobel
 #pragma kernel CSRoughnessMaxReduce
 #pragma kernel CSRoughnessNormalize
-#pragma kernel CSRoughnessBlurH
-#pragma kernel CSRoughnessBlurV
-#pragma kernel CSRoughnessSharpDetail
-#pragma kernel CSRoughnessSharpRemoval
-#pragma kernel CSRoughnessRemap
 #pragma kernel CSRemovedLuma
 #pragma kernel CSRoughnessTransferRemap
 
@@ -44,16 +44,11 @@
 RWTexture2D<float4> _RoughnessRaw; // R16G16B16A16_SFloat: g = Sobel edge magnitude
 RWTexture2D<float4> _RoughnessOut; // R8G8B8A8_UNorm linear: r = normalized roughness
 RWTexture2D<float4> _DstAvg;       // generic max-reduce write target
-RWTexture2D<float4> _BlurPing;     // R16G16B16A16_SFloat: horizontal separable-blur intermediate (full RGB)
-RWTexture2D<float4> _Blurred;      // R16G16B16A16_SFloat: separable-gaussian low-pass of the base (full RGB)
-RWTexture2D<float4> _SharpDetail;  // R16G16B16A16_SFloat: high-frequency detail (base - blurred)
-RWTexture2D<float4> _CleanedBaseOut; // R16G16B16A16_SFloat: sharp-removal cleaned base (full RGB, alpha 1)
 RWTexture2D<float4> _RemovedLuma;  // R16G16B16A16_SFloat: signed Rec.601 luma of (source - projected), .r (04.2 transfer)
 
 // Blit-uploaded / kernel-read inputs.
 Texture2D<float4> _BaseColorOut;   // the already-linear cleaned base (CSNormalize output)
 Texture2D<float4> _SrcAvg;         // generic max-reduce read target
-Texture2D<float4> _SobelRoughness; // CSRoughnessNormalize output the fit-driven remap adopts (plan 04.1-06)
 Texture2D<float4> _ProjectedBase;  // Gouraud-projected base (linear float16) the removed luma is measured against (04.2)
 
 // Uniforms.
@@ -61,13 +56,12 @@ uint2 _Size;           // unsigned: compared against SV_DispatchThreadID (uint) 
 uint2 _AvgSrcSize;
 uint2 _AvgDstSize;
 float _GlobalMax;      // Sobel normalization scale (robust p90 of the magnitude, UAT round 4) uploaded for the normalize pass
-float _Strength;       // fit-driven sharp-removal / Sobel-adoption strength (0..1)
-float _ScalarRoughness; // authored scalar roughness that anchors the fit-driven dip (inspection.Roughness)
+float _ScalarRoughness; // authored scalar roughness that anchors the transfer dip (inspection.Roughness)
+float _Strength;       // dip-depth taste slider (0..1)
 float _LumaP90;        // p90 of |removed-luma| (readback-normalized, clamped to >= 1e-4) uploaded for the transfer remap (04.2)
-int _Radius;       // separable-blur radius (frequency-separation low-pass)
-float _Sigma;      // separable-blur sigma
 
-// Clamped luminance tap into the cleaned base (edge clamp mirrors CSBlurH/CSBlurV, T-04.1-01).
+// Clamped luminance tap into the cleaned base (edge clamp mirrors the retired separable-blur
+// kernels' edge handling, T-04.1-01).
 float SampleLuma(uint3 id, int dx, int dy)
 {
     int2 p = int2(clamp((int)id.x + dx, 0, (int)_Size.x - 1),
@@ -143,108 +137,6 @@ void CSRoughnessNormalize(uint3 id : SV_DispatchThreadID)
     }
 
     _RoughnessOut[id.xy] = float4(saturate(_RoughnessRaw[id.xy].g / max(_GlobalMax, 1e-4)), 0.0, 0.0, 1.0);
-}
-
-// ------------------------------------------------------------------
-// Frequency-separation (fit-driven) kernels (Phase 04.1, plan 02).
-//
-// CSRoughnessBlurH/CSRoughnessBlurV copy the CSBlurH/CSBlurV separable gaussian bodies from
-// NAMERAO.compute (radius _Radius, sigma _Sigma, exp(-x*x/(2*_Sigma*_Sigma)), clamped taps)
-// but operate on the FULL RGB cleaned base — this blur separates COLOR (the low-frequency
-// base from the high-frequency baked-gloss detail), not a scalar channel, so there is no
-// NamerBlurSample/NamerBlurWrite channel-select lerp (the AO blur's channel contract does
-// not apply).
-// ------------------------------------------------------------------
-
-// Separable gaussian low-pass over the full RGB base: horizontal pass.
-[numthreads(8,8,1)]
-void CSRoughnessBlurH(uint3 id : SV_DispatchThreadID)
-{
-    if (id.x >= _Size.x || id.y >= _Size.y)
-    {
-        return;
-    }
-
-    float3 acc = 0.0;
-    float wsum = 0.0;
-    for (int x = -_Radius; x <= _Radius; ++x)
-    {
-        float w = exp(-(float)(x * x) / (2.0 * _Sigma * _Sigma));
-        int sx = clamp((int)id.x + x, 0, (int)_Size.x - 1);
-        acc += _BaseColorOut[int2(sx, (int)id.y)].rgb * w;
-        wsum += w;
-    }
-
-    _BlurPing[id.xy] = float4(acc / wsum, 1.0);
-}
-
-// Separable gaussian low-pass over the full RGB base: vertical pass (writes the final blur).
-[numthreads(8,8,1)]
-void CSRoughnessBlurV(uint3 id : SV_DispatchThreadID)
-{
-    if (id.x >= _Size.x || id.y >= _Size.y)
-    {
-        return;
-    }
-
-    float3 acc = 0.0;
-    float wsum = 0.0;
-    for (int y = -_Radius; y <= _Radius; ++y)
-    {
-        float w = exp(-(float)(y * y) / (2.0 * _Sigma * _Sigma));
-        int sy = clamp((int)id.y + y, 0, (int)_Size.y - 1);
-        acc += _BlurPing[int2((int)id.x, sy)].rgb * w;
-        wsum += w;
-    }
-
-    _Blurred[id.xy] = float4(acc / wsum, 1.0);
-}
-
-// High-frequency detail = base - blurred base.
-[numthreads(8,8,1)]
-void CSRoughnessSharpDetail(uint3 id : SV_DispatchThreadID)
-{
-    if (id.x >= _Size.x || id.y >= _Size.y)
-    {
-        return;
-    }
-
-    _SharpDetail[id.xy] = float4(_BaseColorOut[id.xy].rgb - _Blurred[id.xy].rgb, 0.0);
-}
-
-// Sharp-removal cleaned base: base - strength * detail, each RGB channel saturate-clamped
-// (halo mitigation — the removed detail is clamped so over-removal cannot invert colors;
-// RESEARCH Pitfall 5).
-[numthreads(8,8,1)]
-void CSRoughnessSharpRemoval(uint3 id : SV_DispatchThreadID)
-{
-    if (id.x >= _Size.x || id.y >= _Size.y)
-    {
-        return;
-    }
-
-    float3 cleaned = saturate(_BaseColorOut[id.xy].rgb - _Strength * _SharpDetail[id.xy].rgb);
-    _CleanedBaseOut[id.xy] = float4(cleaned, 1.0);
-}
-
-// Fit-driven roughness = the authored scalar anchors the map and the direct-polarity Sobel
-// edge signal (CSRoughnessNormalize output, mag/p90 in .r) DIPS texels toward gloss:
-// saturate(_ScalarRoughness - _Strength * _SobelRoughness[id.xy].r) (D-08 anchored-inverted).
-// The scalar anchor holds at every strength (strength 0 => exactly the scalar); at higher
-// strength edges dip toward 0 (gloss). The round-3 lerp-to-Sobel is retired. The high-pass
-// detail remap (saturate(strength * length(_SharpDetail))) was already retired in plan
-// 04.1-06. CSRoughnessNormalize stays direct-polarity (mag/p90); the inversion lives ONLY
-// here and in CSSurfacePack's Sobel branch (D-08).
-[numthreads(8,8,1)]
-void CSRoughnessRemap(uint3 id : SV_DispatchThreadID)
-{
-    if (id.x >= _Size.x || id.y >= _Size.y)
-    {
-        return;
-    }
-
-    float roughness = saturate(_ScalarRoughness - _Strength * _SobelRoughness[id.xy].r);
-    _RoughnessOut[id.xy] = float4(roughness, 0.0, 0.0, 1.0);
 }
 
 // ------------------------------------------------------------------

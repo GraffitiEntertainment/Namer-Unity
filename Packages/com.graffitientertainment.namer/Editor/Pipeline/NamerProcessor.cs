@@ -135,7 +135,7 @@ namespace GraffitiEntertainment.Namer.Editor
                     inspection.AoStrength = settings.AoStrength;
                     inspection.AoContrast = settings.AoContrast;
                     inspection.RoughnessExtractStrength = settings.RoughnessExtractStrength;
-                    inspection.RoughnessEstimator = (NamerRoughnessEstimator)settings.RoughnessEstimator;
+                    inspection.DipSource = (NamerDipSource)settings.DipSource;
 
                     // ResolveSourceMesh ordering (plan 02): attach the source mesh BEFORE
                     // Process so the fit-driven estimator can resolve its 1A refit-precondition
@@ -146,46 +146,39 @@ namespace GraffitiEntertainment.Namer.Editor
                         inspection.BakeSourceMesh = decomposeSourceMesh;
                     }
 
-                    // 3A: compose the Func<float,float> evaluate callback — the strength
-                    // search's per-step objective. NamerProcessor owns the splitter/fitter/
-                    // decomp state the callback needs; the pipeline owns the GPU per-step
-                    // sharp-removal (ExtractSharpRemoval) and the fit cache.
+                    // 04.2: build the projection context when decomposition runs with the
+                    // RemovedDetail dip source. The context's Run drives the projection
+                    // write-back + residual inside pipeline.Process; the legacy SobelEdge
+                    // branch (decomposition on, no projection) keeps the post-Process
+                    // readback -> fit -> GenerateResidual flow with mode from
+                    // settings.WriteResidual (AlwaysKeep/NeverKeep — Gate retires from call
+                    // sites).
                     int baseW = inspection.BaseMap != null ? inspection.BaseMap.width : NamerComputePipeline.DefaultBaseResolution;
                     int baseH = inspection.BaseMap != null ? inspection.BaseMap.height : NamerComputePipeline.DefaultBaseResolution;
+                    bool decomposeWillRun = settings.DecompositionEnabled && decomposeSourceMesh != null;
+                    bool projectionPath = decomposeWillRun && inspection.DipSource == NamerDipSource.RemovedDetail;
                     NamerSplitResult fitSplit = null;
-                    Func<float, float> evaluate = null;
-                    if (settings.DecompositionEnabled && decomposeSourceMesh != null)
+                    NamerDecompPipeline decompPipeline = null;
+                    NamerProjectionContext projection = null;
+                    if (decomposeWillRun)
                     {
                         fitSplit = MeshVertexSplitter.Split(decomposeSourceMesh);
-                        evaluate = strength =>
+                        decompPipeline = new NamerDecompPipeline();
+                        if (projectionPath)
                         {
-                            RenderTexture cleaned = pipeline.ExtractSharpRemoval(baseW, baseH, strength);
-                            try
-                            {
-                                return EvaluateRefitMaxError(fitSplit, cleaned, baseW, baseH, settings.ErrorThreshold, settings.ResidualResolution);
-                            }
-                            finally
-                            {
-                                pipeline.ReleaseExtractedRoughness(cleaned);
-                            }
-                        };
+                            projection = CreateProjectionContext(
+                                fitSplit, decompPipeline, baseW, baseH,
+                                settings.ErrorThreshold, settings.ResidualResolution, settings.WriteResidual);
+                        }
                     }
 
-                    NamerComputeResult computeResult = pipeline.Process(inspection, evaluate, null, settings.ErrorThreshold);
-                    if (computeResult.RoughnessFitCancelled)
+                    try
                     {
-                        // WR-01 (04.1 review): a cancelled fit falls back to the identity
-                        // path, so every asset below is still written — WITHOUT the roughness
-                        // extraction the user expects. Never let that vanish silently.
-                        Debug.LogWarning("NAMER: roughness fit cancelled for material '"
-                            + (inspection.Material != null ? inspection.Material.name : "(null)")
-                            + "' — assets written WITHOUT roughness extraction.");
-                    }
+                    NamerComputeResult computeResult = pipeline.Process(inspection, projection);
                     try
                     {
                         NamerDecompData decomp = null;
                         VertexColorFitResult fit = null;
-                        NamerDecompPipeline decompPipeline = null;
                         NamerDecompOutput decompOutput = null;
                         NativeArray<Color32> baseTexels = default;
                         try
@@ -210,36 +203,64 @@ namespace GraffitiEntertainment.Namer.Editor
                                 // before WR-02, where the old if/else coupled the two.
                                 if (decomposeSourceMesh != null)
                                 {
-                                    baseTexels = ReadBackBase(computeResult.NormalizedBaseColor);
-                                    // Reuse the pre-Process split. D-05: NormalizedBaseColor is
-                                    // already the post-extraction cleaned base in the fit-driven
-                                    // path, so this refit consumes the sharp-removal output.
-                                    NamerSplitResult split = fitSplit;
-                                    fit = VertexColorFitter.Fit(split, baseTexels, computeResult.Width, computeResult.Height);
-                                    Color32[] colors = fit.ToColor32Array();
-                                    decompPipeline = new NamerDecompPipeline();
-                                    decompOutput = decompPipeline.GenerateResidual(
-                                        split, colors, computeResult.NormalizedBaseColor,
-                                        computeResult.Width, computeResult.Height,
-                                        settings.ErrorThreshold, settings.ResidualResolution);
-                                    if (decompOutput.Stats.CannotDecompose)
+                                    if (projection != null)
                                     {
-                                        // CR-03 fallback: near-zero rasterizer coverage means the
-                                        // fit was never validated — leave decomp null so the Phase-3
-                                        // shape is generated instead of a bogus residual.
-                                        result.Warnings.Add("Vertex-color decomposition skipped for material '"
-                                            + (inspection.Material != null ? inspection.Material.name : "(null)")
-                                            + "': UV coverage near zero (tiling/out-of-range UVs) — generating the non-decomposed Phase-3 shape instead.");
+                                        // 04.2 projection path: the context already produced
+                                        // Split/Colors/Decomp inside Process.
+                                        NamerProjectionContext ctx = projection;
+                                        if (ctx.Decomp != null && ctx.Decomp.Stats.CannotDecompose)
+                                        {
+                                            // CR-03 fallback: near-zero rasterizer coverage means the
+                                            // fit was never validated — leave decomp null so the Phase-3
+                                            // shape is generated instead of a bogus residual.
+                                            result.Warnings.Add("Vertex-color decomposition skipped for material '"
+                                                + (inspection.Material != null ? inspection.Material.name : "(null)")
+                                                + "': UV coverage near zero (tiling/out-of-range UVs) — generating the non-decomposed Phase-3 shape instead.");
+                                        }
+                                        else if (ctx.Decomp != null && ctx.Decomp.Stats != null)
+                                        {
+                                            decomp = new NamerDecompData
+                                            {
+                                                Split = ctx.Split,
+                                                Colors = ctx.Colors,
+                                                Residual = ctx.Decomp.Residual,
+                                                Stats = ctx.Decomp.Stats,
+                                            };
+                                        }
                                     }
                                     else
                                     {
-                                        decomp = new NamerDecompData
+                                        // Legacy SobelEdge branch: readback -> fit ->
+                                        // GenerateResidual, mode from settings.WriteResidual.
+                                        baseTexels = ReadBackBase(computeResult.NormalizedBaseColor);
+                                        NamerSplitResult split = fitSplit;
+                                        fit = VertexColorFitter.Fit(split, baseTexels, computeResult.Width, computeResult.Height);
+                                        Color32[] colors = fit.ToColor32Array();
+                                        decompOutput = decompPipeline.GenerateResidual(
+                                            split, colors, computeResult.NormalizedBaseColor,
+                                            computeResult.Width, computeResult.Height,
+                                            settings.ErrorThreshold, settings.ResidualResolution,
+                                            projectedOut: null,
+                                            mode: settings.WriteResidual ? NamerResidualMode.AlwaysKeep : NamerResidualMode.NeverKeep);
+                                        if (decompOutput.Stats.CannotDecompose)
                                         {
-                                            Split = split,
-                                            Colors = colors,
-                                            Residual = decompOutput.Residual,
-                                            Stats = decompOutput.Stats,
-                                        };
+                                            // CR-03 fallback: near-zero rasterizer coverage means the
+                                            // fit was never validated — leave decomp null so the Phase-3
+                                            // shape is generated instead of a bogus residual.
+                                            result.Warnings.Add("Vertex-color decomposition skipped for material '"
+                                                + (inspection.Material != null ? inspection.Material.name : "(null)")
+                                                + "': UV coverage near zero (tiling/out-of-range UVs) — generating the non-decomposed Phase-3 shape instead.");
+                                        }
+                                        else
+                                        {
+                                            decomp = new NamerDecompData
+                                            {
+                                                Split = split,
+                                                Colors = colors,
+                                                Residual = decompOutput.Residual,
+                                                Stats = decompOutput.Stats,
+                                            };
+                                        }
                                     }
                                 }
                             }
@@ -251,14 +272,14 @@ namespace GraffitiEntertainment.Namer.Editor
                         {
                             // The residual RT is read back synchronously inside Generate, so
                             // release it (and the pool) only after Generate returns.
+                            if (projection != null && projection.Decomp != null)
+                            {
+                                projection.Decomp.Dispose();
+                            }
+
                             if (decompOutput != null)
                             {
                                 decompOutput.Dispose();
-                            }
-
-                            if (decompPipeline != null)
-                            {
-                                decompPipeline.Dispose();
                             }
 
                             if (fit != null)
@@ -280,6 +301,14 @@ namespace GraffitiEntertainment.Namer.Editor
                     finally
                     {
                         pipeline.ReleaseResult(computeResult);
+                    }
+                    }
+                    finally
+                    {
+                        if (decompPipeline != null)
+                        {
+                            decompPipeline.Dispose();
+                        }
                     }
                 }
             }
@@ -520,42 +549,52 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Measures the fit-only refit MaxError for the fit-driven strength search: reads
-        /// the (sharp-removal cleaned) base back, runs the vertex-color fit + residual
-        /// generation, and returns the FIT-ONLY MaxError (<see cref="NamerDecompErrorStats.FitOnlyMaxError"/>
-        /// — the D-13 gate statistic, residual == identity). The with-residual
-        /// <see cref="NamerDecompErrorStats.MaxError"/> must NOT feed the search: whenever the
-        /// residual is kept it is the exact quotient base/vc, so it reconstructs the base
-        /// near-perfectly and the ladder would stop at strength 0.0 without extracting. The
-        /// 3A evaluate callback invokes this per strength step; every intermediate allocation
-        /// is disposed here.
+        /// Builds the 04.2 projection context for the removed-detail dip path. The returned
+        /// <see cref="NamerProjectionContext.Run"/> callback (invoked by
+        /// <see cref="NamerComputePipeline.Process"/> after normalize) reads the source base
+        /// back, runs the vertex-color fit, and generates the residual against the SOURCE base
+        /// while writing the Gouraud projection into <c>projectedOut</c>. With
+        /// <paramref name="writeResidual"/> the residual is forced kept (AlwaysKeep); otherwise
+        /// forced dropped (NeverKeep) — the 04.2 checkbox, replacing the retired D-13 Gate.
         /// </summary>
-        internal static float EvaluateRefitMaxError(
+        internal static NamerProjectionContext CreateProjectionContext(
             NamerSplitResult split,
-            RenderTexture cleanedBase,
+            NamerDecompPipeline decomp,
             int w,
             int h,
             float errorThreshold,
-            int residualResolution)
+            int residualResolution,
+            bool writeResidual)
         {
-            NativeArray<Color32> texels = ReadBackBase(cleanedBase);
-            try
+            var context = new NamerProjectionContext
             {
-                using (VertexColorFitResult probeFit = VertexColorFitter.Fit(split, texels, w, h))
+                Split = split,
+                ErrorThreshold = errorThreshold,
+                ManualResolution = residualResolution,
+                WriteResidual = writeResidual,
+            };
+
+            context.Run = (sourceBase, projectedOut) =>
+            {
+                NativeArray<Color32> texels = ReadBackBase(sourceBase);
+                try
                 {
-                    Color32[] probeColors = probeFit.ToColor32Array();
-                    using (NamerDecompPipeline probeDecomp = new NamerDecompPipeline())
-                    using (NamerDecompOutput probeOutput = probeDecomp.GenerateResidual(
-                        split, probeColors, cleanedBase, w, h, errorThreshold, residualResolution))
+                    using (VertexColorFitResult fit = VertexColorFitter.Fit(split, texels, w, h))
                     {
-                        return probeOutput.Stats.FitOnlyMaxError;
+                        context.Colors = fit.ToColor32Array();
+                        context.Decomp = decomp.GenerateResidual(
+                            split, context.Colors, sourceBase, w, h,
+                            context.ErrorThreshold, context.ManualResolution, projectedOut,
+                            context.WriteResidual ? NamerResidualMode.AlwaysKeep : NamerResidualMode.NeverKeep);
                     }
                 }
-            }
-            finally
-            {
-                texels.Dispose();
-            }
+                finally
+                {
+                    texels.Dispose();
+                }
+            };
+
+            return context;
         }
 
         /// <summary>

@@ -4,16 +4,19 @@ using UnityEngine;
 namespace GraffitiEntertainment.Namer.Editor
 {
     /// <summary>
-    /// Roughness-extraction estimator selector (D-03). <see cref="FitDriven"/> (0) is the
-    /// default: the strength search picks the minimal strength whose post-refit residual
-    /// MaxError collapses within threshold (D-04). <see cref="Sobel"/> (1) is the explicit
-    /// standalone parity route (plan 01) — it does NOT sharp-remove the base, so Sobel-mode
-    /// assets do not reach the one-texture outcome (parity-only per D-03).
+    /// Roughness dip-source selector (04.2: the dip source replaces the retired 04.1
+    /// estimator split, UI-03). <see cref="RemovedDetail"/> (0) is the default: the signed
+    /// Rec.601 luminance of the albedo the Gouraud projection removed is re-expressed as
+    /// gloss through the taste dip slider, and requires decomposition to run (the projected
+    /// base is the dividend). <see cref="SobelEdge"/> (1) is the explicit alternate dip
+    /// source — the surviving Blender-parity Sobel edge signal — used when decomposition is
+    /// off (or CR-01-guarded) and as the fallback signal; it does NOT project the base, so
+    /// Sobel-only assets do not reach the by-construction one-texture outcome.
     /// </summary>
-    public enum NamerRoughnessEstimator
+    public enum NamerDipSource
     {
-        FitDriven = 0,
-        Sobel = 1,
+        RemovedDetail = 0,
+        SobelEdge = 1,
     }
 
     /// <summary>
@@ -88,15 +91,15 @@ namespace GraffitiEntertainment.Namer.Editor
         public float Roughness;
         public float AoUnmultiplyStrength;
 
-        // Roughness extraction controls (Phase 04.1). RoughnessExtractStrength is the
-        // D-02 user override (strength 0 = off); it has NO inline default (matching
-        // AoUnmultiplyStrength) so the identity 0 = off preserves the legacy scalar path for
-        // direct NamerComputePipeline.Process callers and existing no-map fixtures — the shipped
-        // default-on 1f arrives via settings/constants in plan 02. RoughnessEstimator is the
-        // D-03 selector, retyped to the NamerRoughnessEstimator enum in plan 02 (FitDriven = 0
-        // is the default; Sobel = 1 the parity alternative).
+        // Roughness extraction controls (Phase 04.2). RoughnessExtractStrength is the
+        // D-02 user override re-expressed as the pure-taste dip-depth slider (strength 0 =
+        // keep the authored scalar); it has NO inline default (matching AoUnmultiplyStrength)
+        // so the identity 0 = off preserves the legacy scalar path for direct
+        // NamerComputePipeline.Process callers and existing no-map fixtures — the shipped
+        // default-on 0.25 arrives via settings/constants. DipSource is the 04.2 selector
+        // (RemovedDetail = 0 is the default; SobelEdge = 1 the fallback alternate).
         public float RoughnessExtractStrength;
-        public NamerRoughnessEstimator RoughnessEstimator = NamerRoughnessEstimator.FitDriven;
+        public NamerDipSource DipSource = NamerDipSource.RemovedDetail;
 
         /// <summary>
         /// D-06 optional per-material roughness-offset input (null default = no offset). A

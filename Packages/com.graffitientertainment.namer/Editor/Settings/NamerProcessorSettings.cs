@@ -23,7 +23,8 @@ namespace GraffitiEntertainment.Namer.Editor
         private const string ErrorThresholdKey = "NamerProcessor.ErrorThreshold";
         private const string ResidualResolutionKey = "NamerProcessor.ResidualResolution";
         private const string RoughnessExtractStrengthKey = "NamerProcessor.RoughnessExtractStrength";
-        private const string RoughnessEstimatorKey = "NamerProcessor.RoughnessEstimator";
+        private const string DipSourceKey = "NamerProcessor.DipSource";
+        private const string WriteResidualKey = "NamerProcessor.WriteResidual";
         private const string FoldoutSourceKey = "NamerProcessor.FoldoutSource";
         private const string FoldoutPreviewKey = "NamerProcessor.FoldoutPreview";
         private const string FoldoutRoughnessExtractionKey = "NamerProcessor.FoldoutRoughnessExtraction";
@@ -108,18 +109,25 @@ namespace GraffitiEntertainment.Namer.Editor
             set { EditorPrefs.SetInt(ResidualResolutionKey, value); }
         }
 
-        /// <summary>Roughness-extraction strength (D-02; 0 = off, default 1 = on).</summary>
+        /// <summary>Roughness dip-depth slider (04.2 SHDR-02; 0 = keep the authored scalar, default 0.25).</summary>
         public float RoughnessExtractStrength
         {
             get { return EditorPrefs.GetFloat(RoughnessExtractStrengthKey, NamerEditorConstants.DefaultRoughnessExtractStrength); }
             set { EditorPrefs.SetFloat(RoughnessExtractStrengthKey, value); }
         }
 
-        /// <summary>Roughness estimator popup index (D-03; 0 = FitDriven default, 1 = Sobel).</summary>
-        public int RoughnessEstimator
+        /// <summary>Roughness dip-source popup index (04.2 UI-03; 0 = RemovedDetail default, 1 = SobelEdge).</summary>
+        public int DipSource
         {
-            get { return EditorPrefs.GetInt(RoughnessEstimatorKey, NamerEditorConstants.DefaultRoughnessEstimator); }
-            set { EditorPrefs.SetInt(RoughnessEstimatorKey, value); }
+            get { return EditorPrefs.GetInt(DipSourceKey, NamerEditorConstants.DefaultDipSource); }
+            set { EditorPrefs.SetInt(DipSourceKey, value); }
+        }
+
+        /// <summary>Write Residual Texture checkbox (04.2 VCOL-05; default OFF = one-texture outcome).</summary>
+        public bool WriteResidual
+        {
+            get { return EditorPrefs.GetBool(WriteResidualKey, NamerEditorConstants.DefaultWriteResidual); }
+            set { EditorPrefs.SetBool(WriteResidualKey, value); }
         }
 
         /// <summary>Source foldout open/closed state (D-07; Source defaults OPEN so the selection is visible).</summary>

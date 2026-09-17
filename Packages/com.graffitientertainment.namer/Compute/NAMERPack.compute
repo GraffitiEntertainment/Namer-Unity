@@ -43,8 +43,8 @@ float _Emissive;
 float _SmoothnessTextureChannel;
 float _HasMetallicGlossMap;
 float _HasExtractedRoughness;      // 1 = override the scalar roughness with _RoughnessTex at PACK time (D-01)
-float _RoughnessExtractStrength;   // D-02 user blend (0 = off, leaves the scalar untouched)
-float _RoughnessDipApplied;        // 1 = _RoughnessTex already carries the anchored-inverted dip (fit-driven, CSRoughnessRemap) -> adopt as-is; 0 = direct mag/p90 (Sobel) -> apply the dip now
+float _RoughnessExtractStrength;   // 04.2 dip-depth taste slider (0 = keep the authored scalar)
+float _RoughnessDipApplied;        // 1 = _RoughnessTex already carries the dip-encoded roughness (04.2 removed-detail transfer, CSRoughnessTransferRemap) -> adopt as-is; 0 = direct mag/p90 (Sobel) -> apply the slider-scaled dip now
 uint2 _Size; // unsigned: compared against SV_DispatchThreadID (uint) in the kernel guards
 
 [numthreads(8,8,1)]
@@ -117,15 +117,15 @@ void CSSurfacePack(uint3 id : SV_DispatchThreadID)
     {
         if (_RoughnessDipApplied > 0.5)
         {
-            // Fit-driven: _RoughnessTex already carries the anchored-inverted dip
-            // (CSRoughnessRemap) -> adopt as-is (full adoption, unchanged from the old
-            // lerp(..., 1f)).
+            // 04.2 removed-detail transfer: _RoughnessTex is already dip-encoded by
+            // CSRoughnessTransferRemap (saturate(scalar - strength * removedLuma / p90))
+            // -> adopt as-is (full adoption; the dip-depth slider was baked into the map).
             roughness = _RoughnessTex[id.xy].r;
         }
         else
         {
-            // Sobel: _RoughnessTex is direct mag/p90 -> dip the scalar anchor by the
-            // slider x edge signal (D-08 anchored-inverted).
+            // Sobel fallback dip source: _RoughnessTex is direct mag/p90 -> dip the scalar
+            // anchor by the slider x edge signal (D-08 anchored-inverted).
             roughness = saturate(roughness - _RoughnessExtractStrength * _RoughnessTex[id.xy].r);
         }
     }

@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.IO;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
@@ -10,58 +8,28 @@ using UnityEngine.Rendering;
 namespace GraffitiEntertainment.Namer.Editor
 {
     /// <summary>
-    /// Result of one roughness-extraction run. <see cref="Roughness"/> is always pool-leased
-    /// (<see cref="GraphicsFormat.R8G8B8A8_UNorm"/> linear); <see cref="CleanedBase"/> is only
-    /// set by the fit-driven path (<see cref="GraphicsFormat.R16G16B16A16_SFloat"/> linear — the
-    /// sharp-removal cleaned base the refit consumes, D-05). Both are owned by the roughness
-    /// pipeline's pool and released via <see cref="NamerRoughnessPipeline.ReleaseRoughness"/>.
-    /// </summary>
-    public sealed class NamerRoughnessExtractResult
-    {
-        public RenderTexture Roughness;
-        public RenderTexture CleanedBase;
-
-        /// <summary>
-        /// True when the strength search was aborted via the cancel poll (WR-01, 04.1
-        /// review): no roughness or cleaned base was produced — the caller fell back to
-        /// the identity (scalar) path and must surface that to the user.
-        /// </summary>
-        public bool Cancelled;
-    }
-
-    /// <summary>
-    /// GPU dispatch harness for the NAMER image-space roughness extraction stage (Phase 04.1).
-    /// Plan 01 delivered the Sobel (Blender-parity) estimator; plan 02 adds the fit-driven
-    /// estimator and its frequency-separation kernels (blur H/V -> sharp-detail -> sharp-removal;
-    /// roughness = the Sobel signal adopted by the searched strength, plan 04.1-06) plus the
-    /// 3A AO-three-way fit cache.
+    /// GPU dispatch harness for the NAMER image-space roughness dip-source stage (Phase 04.2).
+    /// The removed-luminance roughness transfer (<see cref="ExtractTransferRoughness"/>) is the
+    /// PRIMARY dip source: the signed Rec.601 luminance of (source - projected) is p90-normalized
+    /// and fed through the surviving D-08 consume site <c>saturate(scalar - strength * mag)</c>.
+    /// The Sobel chain (<see cref="ExtractSobel"/>) survives as the FALLBACK alternate dip source
+    /// — used when decomposition is off (or CR-01-guarded) or when the user selects Sobel Edge.
     ///
-    /// The fit-driven path runs the strength search synchronously on cache miss: it calls
-    /// <see cref="NamerRoughnessFitter.Fit"/> with the <c>Func&lt;float,float&gt;</c> evaluate
-    /// callback that <c>NamerProcessor</c> composes (the callback owns the splitter/fitter/decomp
-    /// state and drives the per-step GPU sharp-removal + readback + refit). This pipeline owns
-    /// only the GPU per-iteration sharp-removal eval (<see cref="RunSharpRemoval"/>) and the fit
-    /// cache — never the splitter/fitter/decomp state (3A).
+    /// The 04.1 fit-driven machinery is RETIRED (plan 03): the strength ladder search, the fit
+    /// cache, the frequency-separation (blur/sharp) kernels, the sharp-removal cleaned base, and
+    /// the strength-ladder fitter no longer exist. The dip-depth taste slider owns the dip
+    /// magnitude end to end — no precompute, no search.
     ///
     /// All render targets are declared with <see cref="GraphicsFormat"/> (intermediates
     /// <see cref="GraphicsFormat.R16G16B16A16_SFloat"/> linear; the roughness output
     /// <see cref="GraphicsFormat.R8G8B8A8_UNorm"/> linear), never sRGB, so compute can write
     /// them directly.
-    ///
-    /// The 04.2 removed-luminance transfer (<see cref="ExtractTransferRoughness"/>) lives here
-    /// beside the Sobel path; both feed the same D-08 dip consume site (saturate(scalar -
-    /// strength * mag)) — plan 03 selects between them.
     /// </summary>
     public sealed class NamerRoughnessPipeline : IDisposable
     {
         private const string ComputeShaderPath = "Packages/com.graffitientertainment.namer/Compute/NAMERRoughness.compute";
 
         private const int AverageDownsampleFactor = 8;
-        private const int MinBlurRadius = 8;
-        private const int MaxBlurRadius = 64;
-        private const int BlurRadiusDivisor = 32;
-        private const float BlurSigmaDivisor = 3.0f;
-        private const float MinBlurSigma = 1e-3f;
 
         // Robust Sobel normalization (UAT round 4): the normalization scale is the p90 of the
         // Sobel magnitude over a fixed-size subsample, not the global max — see RobustSobelScale.
@@ -80,24 +48,8 @@ namespace GraffitiEntertainment.Namer.Editor
         private readonly int _kernelSobel;
         private readonly int _kernelMaxReduce;
         private readonly int _kernelNormalize;
-        private readonly int _kernelBlurH;
-        private readonly int _kernelBlurV;
-        private readonly int _kernelSharpDetail;
-        private readonly int _kernelSharpRemoval;
-        private readonly int _kernelRemap;
         private readonly int _kernelRemovedLuma;
         private readonly int _kernelTransferRemap;
-
-        // 3A fit cache keyed by the full fit identity (mesh, base-map identity + content
-        // stamp, occlusion-map identity, AO controls, estimator, dimensions, threshold —
-        // see MakeFitKey, WR-01) — mirrors NamerAOPipeline's
-        // bake cache. Stores the SELECTED strength so a later Process call reuses it without
-        // re-running the strength search. The threshold is part of the key: a strength that
-        // passes one threshold may not pass another, so a fit must be re-searched when the
-        // threshold changes. Only a PASSED search is cached — a failed search re-runs on the
-        // next request instead of reusing the honest-but-invalid max ladder strength.
-        private readonly Dictionary<(int meshId, int baseMapId, long baseMapStamp, int occlusionMapId, float aoStrength, float aoContrast, float aoBlurRadius, float aoUnmultiplyStrength, int estimator, int w, int h, float maxErrorThreshold), NamerRoughnessFitResult> _fitCache =
-            new();
 
         public NamerRoughnessPipeline()
         {
@@ -110,202 +62,43 @@ namespace GraffitiEntertainment.Namer.Editor
             _kernelSobel = _compute.FindKernel("CSRoughnessSobel");
             _kernelMaxReduce = _compute.FindKernel("CSRoughnessMaxReduce");
             _kernelNormalize = _compute.FindKernel("CSRoughnessNormalize");
-            _kernelBlurH = _compute.FindKernel("CSRoughnessBlurH");
-            _kernelBlurV = _compute.FindKernel("CSRoughnessBlurV");
-            _kernelSharpDetail = _compute.FindKernel("CSRoughnessSharpDetail");
-            _kernelSharpRemoval = _compute.FindKernel("CSRoughnessSharpRemoval");
-            _kernelRemap = _compute.FindKernel("CSRoughnessRemap");
             _kernelRemovedLuma = _compute.FindKernel("CSRemovedLuma");
             _kernelTransferRemap = _compute.FindKernel("CSRoughnessTransferRemap");
         }
 
         /// <summary>
-        /// Extracts image-space roughness from <paramref name="baseColorOut"/> (the
-        /// already-linear cleaned base produced by <c>CSNormalize</c>), dispatching on
-        /// <c>inspection.RoughnessEstimator</c>:
-        /// <list type="bullet">
-        /// <item><see cref="NamerRoughnessEstimator.Sobel"/> — the plan-01 Sobel estimator
-        /// (returns only a roughness target, no cleaned base).</item>
-        /// <item><see cref="NamerRoughnessEstimator.FitDriven"/> — the strength search via
-        /// <see cref="NamerRoughnessFitter.Fit"/> (driven by the caller-composed
-        /// <paramref name="evaluate"/>), returning BOTH the roughness and the sharp-removal
-        /// cleaned base (D-05).</item>
-        /// </list>
-        /// Both returned targets are pool-leased; the caller owns them and must release via
-        /// <see cref="ReleaseRoughness"/>.
-        /// </summary>
-        public NamerRoughnessExtractResult ExtractRoughness(
-            NamerMaterialInspection inspection,
-            RenderTexture baseColorOut,
-            int w,
-            int h,
-            Func<float, float> evaluate = null,
-            Func<bool> shouldCancel = null,
-            float maxErrorThreshold = 0f)
-        {
-            if (inspection == null)
-            {
-                throw new ArgumentNullException(nameof(inspection));
-            }
-
-            if (baseColorOut == null)
-            {
-                throw new ArgumentNullException(nameof(baseColorOut));
-            }
-
-            if (inspection.RoughnessEstimator == NamerRoughnessEstimator.Sobel)
-            {
-                return new NamerRoughnessExtractResult { Roughness = ExtractSobel(baseColorOut, w, h) };
-            }
-
-            return ExtractFitDriven(inspection, baseColorOut, w, h, evaluate, shouldCancel, maxErrorThreshold);
-        }
-
-        /// <summary>
-        /// Runs one self-contained fit-driven sharp-removal at <paramref name="strength"/>
-        /// (blur H/V -> sharp-detail -> sharp-removal) and returns the cleaned base. This is
-        /// the GPU per-iteration eval the <c>NamerProcessor</c>-composed evaluate callback
-        /// drives (3A) — the pipeline owns the GPU work, the caller owns the readback + refit.
-        /// The returned target is pool-leased; release via <see cref="ReleaseRoughness"/>.
-        /// </summary>
-        public RenderTexture RunSharpRemoval(RenderTexture baseColorOut, int w, int h, float strength)
-        {
-            if (baseColorOut == null)
-            {
-                throw new ArgumentNullException(nameof(baseColorOut));
-            }
-
-            RenderTextureDescriptor intermediate = NewDescriptor(w, h, GraphicsFormat.R16G16B16A16_SFloat);
-
-            RenderTexture blurA = null;
-            RenderTexture blurB = null;
-            RenderTexture sharpDetail = null;
-            RenderTexture cleanedBase = null;
-
-            try
-            {
-                blurA = _pool.Lease(intermediate);
-                blurB = _pool.Lease(intermediate);
-                sharpDetail = _pool.Lease(intermediate);
-                cleanedBase = _pool.Lease(intermediate);
-
-                RunBlurAndSharpDetail(baseColorOut, w, h, blurA, blurB, sharpDetail);
-
-                _compute.SetFloat("_Strength", strength);
-                _compute.SetTexture(_kernelSharpRemoval, "_BaseColorOut", baseColorOut);
-                _compute.SetTexture(_kernelSharpRemoval, "_SharpDetail", sharpDetail);
-                _compute.SetTexture(_kernelSharpRemoval, "_CleanedBaseOut", cleanedBase);
-                Dispatch(_kernelSharpRemoval, w, h);
-
-                return cleanedBase;
-            }
-            finally
-            {
-                Release(blurA);
-                Release(blurB);
-                Release(sharpDetail);
-            }
-        }
-
-        /// <summary>
-        /// Returns an extracted-roughness (or cleaned-base) target to this pipeline's pool.
-        /// No-ops for null.
+        /// Returns an extracted-roughness target to this pipeline's pool. No-ops for null.
         /// </summary>
         public void ReleaseRoughness(RenderTexture roughness)
         {
             _pool.Release(roughness);
         }
 
-        /// <summary>
-        /// Runs (or reuses a cached) fit-driven strength search, then invokes
-        /// <paramref name="onComplete"/>. The off-debounce interactive path (3A) — mirrors
-        /// <c>NamerAOPipeline.RequestBake</c>. No-ops (and still invokes the callback) when a
-        /// fit is already cached or no mesh/objective exists. Returns <c>false</c> (and does
-        /// NOT cache or invoke <paramref name="onComplete"/>) when the search is cancelled via
-        /// <paramref name="shouldCancel"/>.
-        /// </summary>
-        public bool RequestFit(
-            NamerMaterialInspection inspection,
-            int w,
-            int h,
-            float maxErrorThreshold,
-            Func<float, float> evaluate,
-            Action onComplete,
-            Func<bool> shouldCancel = null)
-        {
-            if (inspection == null || inspection.BakeSourceMesh == null || evaluate == null)
-            {
-                onComplete?.Invoke();
-                return true;
-            }
-
-            var key = MakeFitKey(inspection, w, h, maxErrorThreshold);
-            if (_fitCache.ContainsKey(key))
-            {
-                onComplete?.Invoke();
-                return true;
-            }
-
-            NamerRoughnessFitResult fit = NamerRoughnessFitter.Fit(evaluate, shouldCancel, maxErrorThreshold);
-            if (fit.Cancelled)
-            {
-                // A cancelled fit must never be cached: no callback, so the caller falls back
-                // to the identity legacy path (mirrors NamerAOPipeline's cancelled-bake contract).
-                return false;
-            }
-
-            // WR-02: only a PASSED search is cached — a failed search (Passed == false) re-runs
-            // on the next request instead of reusing its honest-but-invalid max-ladder strength.
-            if (fit.Passed)
-            {
-                _fitCache[key] = fit;
-            }
-
-            onComplete?.Invoke();
-            return true;
-        }
-
-        /// <summary>Drops every cached fit (used by tests and <see cref="Dispose"/>).</summary>
-        public void ClearFitCache()
-        {
-            _fitCache.Clear();
-        }
-
-        /// <summary>
-        /// Returns the cached searched strength for this inspection's fit key when a PASSED
-        /// fit is cached. The window surfaces this as a readout — the user slider does NOT
-        /// drive the fit-driven strength (it only gates extraction on with a value > 0).
-        /// </summary>
-        public bool TryGetFitStrength(
-            NamerMaterialInspection inspection,
-            int w,
-            int h,
-            float maxErrorThreshold,
-            out float strength)
-        {
-            if (inspection != null
-                && _fitCache.TryGetValue(MakeFitKey(inspection, w, h, maxErrorThreshold), out NamerRoughnessFitResult fit))
-            {
-                strength = fit.Strength;
-                return true;
-            }
-
-            strength = 0f;
-            return false;
-        }
-
         public void Dispose()
         {
-            ClearFitCache();
             _pool.Dispose();
         }
 
         // ------------------------------------------------------------------
-        // Sobel (plan-01) path
+        // Sobel (plan-01) fallback dip-source path
         // ------------------------------------------------------------------
 
-        private RenderTexture ExtractSobel(RenderTexture baseColorOut, int w, int h)
+        /// <summary>
+        /// Extracts image-space roughness from <paramref name="baseColorOut"/> (the
+        /// already-linear cleaned base produced by <c>CSNormalize</c>) using the Blender-parity
+        /// Sobel estimator (CSRoughnessSobel -> max-reduce -> CSRoughnessNormalize). This is the
+        /// ALTERNATE dip source (04.2): the returned map is direct <c>mag/p90</c> in <c>.r</c>,
+        /// and <c>CSSurfacePack</c> applies the anchored-inverted dip
+        /// <c>saturate(scalar - strength * map.r)</c> at pack time. The returned target is
+        /// pool-leased; the caller owns it and must release via <see cref="ReleaseRoughness"/>.
+        /// </summary>
+        public RenderTexture ExtractSobel(RenderTexture baseColorOut, int w, int h)
         {
+            if (baseColorOut == null)
+            {
+                throw new ArgumentNullException(nameof(baseColorOut));
+            }
+
             RenderTextureDescriptor intermediate = NewDescriptor(w, h, GraphicsFormat.R16G16B16A16_SFloat);
             RenderTextureDescriptor unorm8 = NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm);
             int avgW = (w + AverageDownsampleFactor - 1) / AverageDownsampleFactor;
@@ -498,151 +291,6 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         // ------------------------------------------------------------------
-        // Fit-driven (plan-02) path
-        // ------------------------------------------------------------------
-
-        private NamerRoughnessExtractResult ExtractFitDriven(
-            NamerMaterialInspection inspection,
-            RenderTexture baseColorOut,
-            int w,
-            int h,
-            Func<float, float> evaluate,
-            Func<bool> shouldCancel,
-            float maxErrorThreshold)
-        {
-            if (evaluate == null)
-            {
-                // No refit objective => no fit => identity (1A). NamerComputePipeline gates on
-                // this before calling; this is a defensive no-op.
-                return new NamerRoughnessExtractResult();
-            }
-
-            var key = MakeFitKey(inspection, w, h, maxErrorThreshold);
-
-            NamerRoughnessFitResult fit;
-            if (_fitCache.TryGetValue(key, out fit))
-            {
-                // Cached strength: reuse it without re-running the search.
-            }
-            else
-            {
-                fit = NamerRoughnessFitter.Fit(evaluate, shouldCancel, maxErrorThreshold);
-                if (fit.Cancelled)
-                {
-                    return new NamerRoughnessExtractResult { Cancelled = true };
-                }
-
-                // WR-02: only a PASSED search is cached — a failed search re-runs on the next
-                // request instead of reusing its honest-but-invalid max-ladder strength.
-                if (fit.Passed)
-                {
-                    _fitCache[key] = fit;
-                }
-            }
-
-            return RunFrequencySeparation(baseColorOut, w, h, fit.Strength, inspection.Roughness);
-        }
-
-        /// <summary>
-        /// Produces the final fit-driven outputs at <paramref name="strength"/>: the
-        /// sharp-removal cleaned base AND the roughness texture — the Sobel edge signal
-        /// (same Blender-parity estimator as the standalone path) adopted by the strength
-        /// via lerp(scalarRoughness, sobel, strength) — computing the frequency-separation
-        /// blur once (plan 04.1-06).
-        /// </summary>
-        private NamerRoughnessExtractResult RunFrequencySeparation(
-            RenderTexture baseColorOut, int w, int h, float strength, float scalarRoughness)
-        {
-            RenderTextureDescriptor intermediate = NewDescriptor(w, h, GraphicsFormat.R16G16B16A16_SFloat);
-
-            RenderTexture blurA = null;
-            RenderTexture blurB = null;
-            RenderTexture sharpDetail = null;
-            RenderTexture cleanedBase = null;
-            RenderTexture sobelRoughness = null;
-            RenderTexture roughnessOut = null;
-
-            try
-            {
-                blurA = _pool.Lease(intermediate);
-                blurB = _pool.Lease(intermediate);
-                sharpDetail = _pool.Lease(intermediate);
-                cleanedBase = _pool.Lease(intermediate);
-
-                RunBlurAndSharpDetail(baseColorOut, w, h, blurA, blurB, sharpDetail);
-
-                _compute.SetFloat("_Strength", strength);
-
-                _compute.SetTexture(_kernelSharpRemoval, "_BaseColorOut", baseColorOut);
-                _compute.SetTexture(_kernelSharpRemoval, "_SharpDetail", sharpDetail);
-                _compute.SetTexture(_kernelSharpRemoval, "_CleanedBaseOut", cleanedBase);
-                Dispatch(_kernelSharpRemoval, w, h);
-
-                // Roughness = the Sobel signal of the SAME base the standalone estimator
-                // reads (NOT the cleaned base — the removed detail must not re-enter the
-                // roughness), adopted by the searched strength.
-                sobelRoughness = ExtractSobel(baseColorOut, w, h);
-                roughnessOut = _pool.Lease(NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm));
-
-                _compute.SetFloat("_ScalarRoughness", scalarRoughness);
-                _compute.SetTexture(_kernelRemap, "_SobelRoughness", sobelRoughness);
-                _compute.SetTexture(_kernelRemap, "_RoughnessOut", roughnessOut);
-                Dispatch(_kernelRemap, w, h);
-
-                return new NamerRoughnessExtractResult { Roughness = roughnessOut, CleanedBase = cleanedBase };
-            }
-            catch
-            {
-                // WR-03: the leases this method RETURNS must not leak when a stage throws —
-                // the finally only owns the intermediates (incl. the sobel input lease).
-                Release(cleanedBase);
-                Release(roughnessOut);
-                throw;
-            }
-            finally
-            {
-                Release(blurA);
-                Release(blurB);
-                Release(sharpDetail);
-                Release(sobelRoughness);
-            }
-        }
-
-        /// <summary>
-        /// Runs the shared frequency-separation prelude: separable gaussian blur H/V over the
-        /// full-RGB base followed by the sharp-detail extraction. <paramref name="blurA"/>/<paramref name="blurB"/>
-        /// ping-pong the blur; <paramref name="sharpDetail"/> receives base - blurred.
-        /// </summary>
-        private void RunBlurAndSharpDetail(
-            RenderTexture baseColorOut,
-            int w,
-            int h,
-            RenderTexture blurA,
-            RenderTexture blurB,
-            RenderTexture sharpDetail)
-        {
-            int radius = Mathf.Clamp(Mathf.Max(w, h) / BlurRadiusDivisor, MinBlurRadius, MaxBlurRadius);
-            float sigma = Mathf.Max(radius / BlurSigmaDivisor, MinBlurSigma);
-
-            _compute.SetInts("_Size", new[] { w, h });
-            _compute.SetInt("_Radius", radius);
-            _compute.SetFloat("_Sigma", sigma);
-
-            _compute.SetTexture(_kernelBlurH, "_BaseColorOut", baseColorOut);
-            _compute.SetTexture(_kernelBlurH, "_BlurPing", blurA);
-            Dispatch(_kernelBlurH, w, h);
-
-            _compute.SetTexture(_kernelBlurV, "_BlurPing", blurA);
-            _compute.SetTexture(_kernelBlurV, "_Blurred", blurB);
-            Dispatch(_kernelBlurV, w, h);
-
-            _compute.SetTexture(_kernelSharpDetail, "_BaseColorOut", baseColorOut);
-            _compute.SetTexture(_kernelSharpDetail, "_Blurred", blurB);
-            _compute.SetTexture(_kernelSharpDetail, "_SharpDetail", sharpDetail);
-            Dispatch(_kernelSharpDetail, w, h);
-        }
-
-        // ------------------------------------------------------------------
         // Shared reduction + dispatch helpers (plan-01 Sobel reduce)
         // ------------------------------------------------------------------
 
@@ -760,59 +408,6 @@ namespace GraffitiEntertainment.Namer.Editor
             finally
             {
                 Release(subsample);
-            }
-        }
-
-        // WR-01 (04.1 review): the fit drives on the base map's baked response sampled at
-        // the mesh's UVs, and the evaluate callback re-runs the pipeline under the current
-        // AO controls — so the key must identify the base-map CONTENT and the AO settings,
-        // not just mesh + dimensions. A mesh + dimensions-only key let a persistent window
-        // pipeline reuse a stale fitted strength across different materials sharing a mesh.
-        // WR-02 (04.1 review): the authored occlusion map also feeds CSNormalize's
-        // un-multiply of the base the Sobel estimator reads, so its identity belongs in
-        // the key too — swapping _OcclusionMap on the source material must invalidate the
-        // cached strength — and the base map carries a content stamp because re-importing
-        // changed pixels into the SAME Texture2D instance keeps the instance ID stable.
-        private static (int meshId, int baseMapId, long baseMapStamp, int occlusionMapId, float aoStrength, float aoContrast, float aoBlurRadius, float aoUnmultiplyStrength, int estimator, int w, int h, float maxErrorThreshold) MakeFitKey(
-            NamerMaterialInspection inspection, int w, int h, float maxErrorThreshold)
-        {
-            int meshId = inspection.BakeSourceMesh != null ? inspection.BakeSourceMesh.GetInstanceID() : 0;
-            int baseMapId = inspection.BaseMap != null ? inspection.BaseMap.GetInstanceID() : 0;
-            int occlusionMapId = inspection.OcclusionMap != null ? inspection.OcclusionMap.GetInstanceID() : 0;
-            return (meshId, baseMapId, AssetContentStamp(inspection.BaseMap), occlusionMapId,
-                inspection.AoStrength, inspection.AoContrast,
-                inspection.AoBlurRadius, inspection.AoUnmultiplyStrength,
-                (int)inspection.RoughnessEstimator, w, h, maxErrorThreshold);
-        }
-
-        /// <summary>
-        /// Cheap content stamp for a fit-key texture (WR-02, 04.1 review): the imported
-        /// file's last-write UTC ticks, so re-importing/rebaking changed pixels into the
-        /// SAME <c>Texture2D</c> instance (whose instance ID stays stable) invalidates a
-        /// cached fit instead of reusing a stale strength. Zero for non-persistent
-        /// textures (test fixtures, in-memory instances), which the instance ID already
-        /// distinguishes.
-        /// </summary>
-        private static long AssetContentStamp(Texture2D texture)
-        {
-            if (texture == null)
-            {
-                return 0L;
-            }
-
-            string path = AssetDatabase.GetAssetPath(texture);
-            if (string.IsNullOrEmpty(path))
-            {
-                return 0L;
-            }
-
-            try
-            {
-                return File.GetLastWriteTimeUtc(path).Ticks;
-            }
-            catch (IOException)
-            {
-                return 0L;
             }
         }
 

@@ -43,15 +43,18 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>Default AO contrast (D-11; 1 = identity, pivot 0.5).</summary>
         public const float DefaultAoContrast = 1f;
 
-        /// <summary>Default roughness-extraction strength (D-01/D-02; 1 = extraction ON by
-        /// default, matching the AO precedent — extraction runs when no authored metallic/
-        /// roughness map exists, and the default fit-driven estimator additionally requires
-        /// vertex-color decomposition to be enabled (otherwise the scalar roughness is used
-        /// unchanged); 0 = the user turns it off).</summary>
-        public const float DefaultRoughnessExtractStrength = 1f;
+        /// <summary>Default roughness dip-depth (04.2 SHDR-02; pure-taste slider, research
+        /// taste range 0.2-0.3 — 0 = keep the authored scalar unchanged). Extraction runs
+        /// when no authored metallic/roughness map exists and the value is > 0; the
+        /// removed-detail path additionally requires vertex-color decomposition to be
+        /// enabled (otherwise the scalar roughness is used unchanged).</summary>
+        public const float DefaultRoughnessExtractStrength = 0.25f;
 
-        /// <summary>Default roughness estimator popup index (D-03; 0 = fit-driven default).</summary>
-        public const int DefaultRoughnessEstimator = 0;
+        /// <summary>Default roughness dip-source popup index (04.2 UI-03; 0 = RemovedDetail default).</summary>
+        public const int DefaultDipSource = 0;
+
+        /// <summary>Default Write Residual Texture checkbox (04.2 VCOL-05; OFF = one-texture outcome).</summary>
+        public const bool DefaultWriteResidual = false;
 
         /// <summary>Default vertex-color decomposition toggle (D-05: opt-in, OFF).</summary>
         public const bool DefaultDecompositionEnabled = false;

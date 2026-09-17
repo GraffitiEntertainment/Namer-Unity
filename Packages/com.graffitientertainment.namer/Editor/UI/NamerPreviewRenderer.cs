@@ -19,8 +19,11 @@ namespace GraffitiEntertainment.Namer.Editor
     /// on the outer/vertical edges — and each pane's object is divider-anchored (its inner
     /// edge sits exactly <see cref="InnerMarginPx"/> from the divider). Zoom grows each
     /// object outward from the divider — never across it; clipping at the outer/top/bottom
-    /// edges is accepted window behavior — and the anchor recomputes the rotated horizontal
-    /// half-extent per Render so orbit never crosses the divider (GAP-4).
+    /// edges is accepted window behavior — and the anchor is fixed at Frame from the neutral
+    /// AABB (the first positioning) so orbit spins each model in place about a fixed center;
+    /// zoom grows each model outward from the divider; silhouette overflow past the divider at
+    /// extreme combined rotations is clipped invisible by the two-cycle per-pane render
+    /// (Task 2) (GAP-5).
     /// Orbit rotates each instance IN PLACE about its own bounds center (the standard
     /// Unity object-preview expectation — drag spins the object, camera stays put).
     ///
@@ -122,9 +125,10 @@ namespace GraffitiEntertainment.Namer.Editor
             // transform maps v -> rotation * v + position, so countering the rotated
             // bounds center keeps each pane's object anchored on the ±PaneAnchorWorld
             // offset while it spins (camera fixed — Unity Inspector-preview semantics).
-            // The anchor is derived from the orthographic size and the rotated horizontal
-            // half-extent, so the inner edge stays InnerMarginPx from the divider and zoom
-            // grows each object outward from the divider (never across it).
+            // The anchor derives from the neutral _framedHalfWidth captured at Frame plus the
+            // orthographic-size (zoom) term — it does not change under orbit, so the inner
+            // edge stays InnerMarginPx from the divider and zoom grows each object outward
+            // from the divider (never across it).
             Quaternion meshRotation = Quaternion.Euler(_pitch, _yaw, 0f);
             Vector3 rotatedBoundsCenter = meshRotation * beforeMesh.bounds.center;
             Vector2 drawOffsets = GetPaneDrawOffsets(aspect, rect.height);
@@ -207,42 +211,28 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// The rotated-AABB horizontal half-extent (world units) of the framed mesh at the
-        /// current yaw/pitch — the absolute first row of the rotation matrix dotted with the
-        /// mesh extents. This is the distance from the object's center to its innermost X
-        /// silhouette at ANY orbit, so it bounds the inner edge the anchor offsets.
-        /// </summary>
-        public float HorizontalHalfExtentWorld()
-        {
-            if (_framedMesh == null)
-            {
-                return 0f;
-            }
-
-            Matrix4x4 m = Matrix4x4.Rotate(Quaternion.Euler(_pitch, _yaw, 0f));
-            Vector3 e = _framedMesh.bounds.extents;
-            return Mathf.Abs(m.m00) * e.x + Mathf.Abs(m.m01) * e.y + Mathf.Abs(m.m02) * e.z;
-        }
-
-        /// <summary>
         /// The world-x distance of each pane's object center from the divider (world x = 0):
-        /// the rotated horizontal half-extent plus <see cref="InnerMarginPx"/> expressed in
-        /// world units at the current orthographic size. Recomputes per Render so zoom grows
-        /// each object outward from the divider, never across it.
+        /// the neutral X half-extent captured at Frame plus <see cref="InnerMarginPx"/>
+        /// expressed in world units at the current orthographic size. Fixed under orbit (the
+        /// first positioning) so orbit spins each model in place; still scales with zoom so
+        /// zoom grows each object outward from the divider. Overflow past the divider at
+        /// extreme combined rotations is clipped invisible by the two-cycle per-pane render
+        /// (each pane renders its own mesh into its own RT; the window discards the far half
+        /// of each RT).
         /// </summary>
         public float PaneAnchorWorld(float aspect, float rectHeightPx)
         {
             float orthoSize = OrthographicSizeForAspect(aspect, rectHeightPx);
-            return HorizontalHalfExtentWorld() + InnerMarginPx * (2f * orthoSize / Mathf.Max(rectHeightPx, 1f));
+            return _framedHalfWidth + InnerMarginPx * (2f * orthoSize / Mathf.Max(rectHeightPx, 1f));
         }
 
         /// <summary>
         /// The mirrored world-x draw offsets for the two panes: <c>(−anchor, +anchor)</c>,
         /// where <see cref="PaneAnchorWorld"/> is the divider-anchored distance of each
-        /// pane's object center from the divider (world x = 0) at the current rotation/zoom
-        /// state. <see cref="Render"/> draws the before mesh at <c>.x</c> and the after mesh
-        /// at <c>.y</c> so each pane's inner edge sits exactly <see cref="InnerMarginPx"/>
-        /// from the divider — never centered (GAP-4).
+        /// pane's object center from the divider (world x = 0) at the current zoom
+        /// (rotation-stable — fixed at Frame). <see cref="Render"/> draws the before mesh at
+        /// <c>.x</c> and the after mesh at <c>.y</c> so each pane's inner edge sits exactly
+        /// <see cref="InnerMarginPx"/> from the divider — never centered (GAP-4).
         /// </summary>
         public Vector2 GetPaneDrawOffsets(float aspect, float rectHeightPx)
         {

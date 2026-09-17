@@ -91,6 +91,10 @@ namespace GraffitiEntertainment.Namer.Tests
             Assert.AreEqual(1f - ZoomSensitivity, _renderer.ZoomScale, 1e-4f,
                 "positive scroll (zoom in) must shrink the ortho size by ZoomSensitivity");
 
+            // Zoom accumulates multiplicatively (the retired distance zoom's curve), so the
+            // opposite wheel direction is probed from a fresh neutral scale via Frame.
+            _renderer.Frame(CreateBoundsMesh(1f, 2f, 0.5f));
+
             _renderer.Zoom(-1f);
             Assert.AreEqual(1f + ZoomSensitivity, _renderer.ZoomScale, 1e-4f,
                 "negative scroll (zoom out) must grow the ortho size by ZoomSensitivity");

@@ -47,6 +47,10 @@ namespace GraffitiEntertainment.Namer.Editor
     /// <see cref="GraphicsFormat.R16G16B16A16_SFloat"/> linear; the roughness output
     /// <see cref="GraphicsFormat.R8G8B8A8_UNorm"/> linear), never sRGB, so compute can write
     /// them directly.
+    ///
+    /// The 04.2 removed-luminance transfer (<see cref="ExtractTransferRoughness"/>) lives here
+    /// beside the Sobel path; both feed the same D-08 dip consume site (saturate(scalar -
+    /// strength * mag)) — plan 03 selects between them.
     /// </summary>
     public sealed class NamerRoughnessPipeline : IDisposable
     {
@@ -64,6 +68,13 @@ namespace GraffitiEntertainment.Namer.Editor
         private const int SobelScaleSubsampleSize = 256;
         private const float SobelScalePercentile = 0.9f;
 
+        // Removed-luminance transfer normalization (04.2): the p90 of |removed-luma| over a
+        // fixed-size subsample, floored at 1e-4 so a flat projection yields scalar passthrough
+        // (T-04.2-05) — see RemovedLumaP90.
+        private const int LumaScaleSubsampleSize = 256;
+        private const float LumaScalePercentile = 0.9f;
+        private const float LumaScaleFloor = 1e-4f;
+
         private readonly ComputeTexturePool _pool = new ComputeTexturePool();
         private readonly ComputeShader _compute;
         private readonly int _kernelSobel;
@@ -74,6 +85,8 @@ namespace GraffitiEntertainment.Namer.Editor
         private readonly int _kernelSharpDetail;
         private readonly int _kernelSharpRemoval;
         private readonly int _kernelRemap;
+        private readonly int _kernelRemovedLuma;
+        private readonly int _kernelTransferRemap;
 
         // 3A fit cache keyed by the full fit identity (mesh, base-map identity + content
         // stamp, occlusion-map identity, AO controls, estimator, dimensions, threshold —
@@ -102,6 +115,8 @@ namespace GraffitiEntertainment.Namer.Editor
             _kernelSharpDetail = _compute.FindKernel("CSRoughnessSharpDetail");
             _kernelSharpRemoval = _compute.FindKernel("CSRoughnessSharpRemoval");
             _kernelRemap = _compute.FindKernel("CSRoughnessRemap");
+            _kernelRemovedLuma = _compute.FindKernel("CSRemovedLuma");
+            _kernelTransferRemap = _compute.FindKernel("CSRoughnessTransferRemap");
         }
 
         /// <summary>
@@ -345,6 +360,140 @@ namespace GraffitiEntertainment.Namer.Editor
                 Release(roughnessRaw);
                 Release(avgA);
                 Release(avgB);
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Removed-luminance transfer (plan 04.2-02) path
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// Produces the 04.2 roughness-transfer map: the signed Rec.601 removed-luminance of
+        /// <paramref name="sourceBase"/> minus <paramref name="projectedBase"/> is p90-normalized
+        /// and fed through the surviving D-08 consume site
+        /// <c>saturate(scalarRoughness - strength * removedLuma / p90)</c>. Bright removed detail
+        /// (positive luma) dips toward gloss; dark removed occlusion (negative luma) raises toward
+        /// matte (locked 2026-09-16 polarity decision). Strength 0 — or a flat projection — yields
+        /// the authored scalar exactly.
+        ///
+        /// The returned target is pool-leased (UNorm8 linear); the caller owns it and must release
+        /// via <see cref="ReleaseRoughness"/>. The two input targets are only ever bound read-only
+        /// and are never released here.
+        /// </summary>
+        public RenderTexture ExtractTransferRoughness(
+            float scalarRoughness,
+            RenderTexture sourceBase,
+            RenderTexture projectedBase,
+            int w,
+            int h,
+            float strength)
+        {
+            if (sourceBase == null)
+            {
+                throw new ArgumentNullException(nameof(sourceBase));
+            }
+
+            if (projectedBase == null)
+            {
+                throw new ArgumentNullException(nameof(projectedBase));
+            }
+
+            RenderTextureDescriptor lumaDesc = NewDescriptor(w, h, GraphicsFormat.R16G16B16A16_SFloat);
+            RenderTextureDescriptor unorm8 = NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm);
+
+            RenderTexture lumaRT = null;
+            RenderTexture roughnessOut = null;
+
+            try
+            {
+                lumaRT = _pool.Lease(lumaDesc);
+                roughnessOut = _pool.Lease(unorm8);
+
+                _compute.SetInts("_Size", new[] { w, h });
+
+                // 1. Signed removed-luma (source - projected) -> _RemovedLuma.r.
+                _compute.SetTexture(_kernelRemovedLuma, "_BaseColorOut", sourceBase);
+                _compute.SetTexture(_kernelRemovedLuma, "_ProjectedBase", projectedBase);
+                _compute.SetTexture(_kernelRemovedLuma, "_RemovedLuma", lumaRT);
+                Dispatch(_kernelRemovedLuma, w, h);
+
+                // 2. p90 of |removed-luma| — the normalization scale (RobustSobelScale precedent).
+                float p90 = RemovedLumaP90(lumaRT);
+
+                // 3. Transfer remap: roughness = saturate(scalar - strength * removedLuma / p90).
+                _compute.SetFloat("_ScalarRoughness", scalarRoughness);
+                _compute.SetFloat("_Strength", strength);
+                _compute.SetFloat("_LumaP90", p90);
+                _compute.SetTexture(_kernelTransferRemap, "_RemovedLuma", lumaRT);
+                _compute.SetTexture(_kernelTransferRemap, "_RoughnessOut", roughnessOut);
+                Dispatch(_kernelTransferRemap, w, h);
+
+                return roughnessOut;
+            }
+            catch
+            {
+                // WR-03: the lease this method RETURNS must not leak when a stage throws —
+                // the finally only owns the removed-luma intermediate.
+                Release(roughnessOut);
+                throw;
+            }
+            finally
+            {
+                Release(lumaRT);
+            }
+        }
+
+        /// <summary>
+        /// p90 normalization scale for the removed-luminance transfer: the p90 of |removed-luma|
+        /// read back from a <see cref="LumaScaleSubsampleSize"/>² blit subsample of the signed
+        /// luma RT and floored at <see cref="LumaScaleFloor"/>. Follows the
+        /// <see cref="RobustSobelScale"/> precedent (research measured |luma| p90 = 0.173 on Neo,
+        /// so strength 1.0 reaches full-clip only on the top decile of detail). Unlike the Sobel
+        /// scale there is NO trueMax ceiling — removed-luma has no precomputed true max and the
+        /// <c>saturate</c> in the remap kernel owns the clip. A flat projection (all-zero luma)
+        /// returns exactly <see cref="LumaScaleFloor"/>, never zero, so flat inputs cannot amplify
+        /// noise or divide by zero (T-04.2-05).
+        /// </summary>
+        private float RemovedLumaP90(RenderTexture luma)
+        {
+            RenderTexture subsample = null;
+            try
+            {
+                subsample = _pool.Lease(NewDescriptor(
+                    LumaScaleSubsampleSize, LumaScaleSubsampleSize, GraphicsFormat.R32G32B32A32_SFloat));
+                Graphics.Blit(luma, subsample);
+
+                AsyncGPUReadbackRequest request = AsyncGPUReadback.Request(subsample, 0, TextureFormat.RGBAFloat);
+                request.WaitForCompletion();
+                if (request.hasError)
+                {
+                    throw new InvalidOperationException("NAMER roughness removed-luma p90 readback failed.");
+                }
+
+                NativeArray<float> data = request.GetData<float>();
+                try
+                {
+                    int texelCount = data.Length / 4;
+                    float[] magnitudes = new float[texelCount];
+                    for (int i = 0; i < texelCount; i++)
+                    {
+                        // RGBAFloat is 4 floats per texel, row-major; the signed removed-luma is in .r.
+                        magnitudes[i] = Mathf.Abs(data[i * 4]);
+                    }
+
+                    Array.Sort(magnitudes);
+                    int percentileIndex = Mathf.Clamp(
+                        Mathf.FloorToInt(texelCount * LumaScalePercentile), 0, texelCount - 1);
+                    return Mathf.Max(magnitudes[percentileIndex], LumaScaleFloor);
+                }
+                finally
+                {
+                    data.Dispose();
+                }
+            }
+            finally
+            {
+                Release(subsample);
             }
         }
 

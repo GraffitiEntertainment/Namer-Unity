@@ -10,12 +10,12 @@ using UnityEngine.TestTools;
 namespace GraffitiEntertainment.Namer.Tests
 {
     /// <summary>
-    /// Pins the 04.2-05/04.2-07 preview-presentation rework of <see cref="NamerPreviewRenderer"/>:
-    /// one orthographic camera for both panes, one shared yaw+pitch rotation (pitch clamped
-    /// to [-89, 89]), zoom as orthographic size (camera transform never moves), and a
-    /// rotation-invariant per-pane MarginPx fit (each pane frames its own object). The
-    /// render-path test is graphics-capability-gated (D-15); the framing/zoom/orbit tests
-    /// are pure logic.
+    /// Pins the 04.2-09 preview-framing rework of <see cref="NamerPreviewRenderer"/>: one
+    /// orthographic camera for both panes, one shared yaw+pitch rotation (pitch clamped to
+    /// [-89, 89]), zoom as orthographic size (camera transform never moves), and a
+    /// divider-anchored tight neutral-AABB fit (each pane's object hugs the divider with an
+    /// <see cref="NamerPreviewRenderer.InnerMarginPx"/> inner margin). The render-path test is
+    /// graphics-capability-gated (D-15); the framing/zoom/orbit tests are pure logic.
     /// </summary>
     public class NamerPreviewRendererTests
     {
@@ -116,30 +116,79 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         [Test]
-        public void Frame_FitsPerPaneObjectWithMargin()
+        public void Frame_FitsTightAabbWithInnerMargin()
         {
-            // extents (1, 2, 0.5) -> radius sqrt(5.25) ~= 2.29129: at 2:1 the pane is
-            // square (400x400 px), so the vertical and horizontal fits coincide at MarginPx 15.
+            // Tight neutral-AABB fit: extents (1, 2, 0.5) -> the vertical half-extent ey=2
+            // dominates (horizFit 400/375 = 1.0667, vertFit 800/370 = 2.1622).
             Mesh tallMesh = CreateBoundsMesh(1f, 2f, 0.5f);
             _renderer.Frame(tallMesh);
-            Assert.AreEqual(2.4771f, _renderer.OrthographicSizeForAspect(2f, 400f), 1e-3f,
-                "per-pane fit: square pane, vertical == horizontal at MarginPx 15");
+            Assert.AreEqual(2.1622f, _renderer.OrthographicSizeForAspect(2f, 400f), 1e-3f,
+                "tight AABB: vertical ey=2 dominates (800/370)");
 
-            // extents (4, 0.5, 0.1) -> radius sqrt(16.26) ~= 4.03237: the rotation-invariant
-            // sphere bound dominates the horizontal footprint at 2:1; at 1:1 the pane is only
-            // half the full width (200px), so the horizontal fit dominates.
+            // extents (4, 0.5, 0.1): the neutral horizontal half-extent ex=4 dominates the
+            // wide mesh at 2:1 (horizFit 1600/375); at 1:1 the pane is 200px wide so the
+            // horizontal fit dominates harder (1600/175).
             Mesh wideMesh = CreateBoundsMesh(4f, 0.5f, 0.1f);
             _renderer.Frame(wideMesh);
-            Assert.AreEqual(4.3593f, _renderer.OrthographicSizeForAspect(2f, 400f), 1e-3f,
-                "per-pane fit: wide mesh at 2:1 (400px square pane)");
-            Assert.AreEqual(9.4879f, _renderer.OrthographicSizeForAspect(1f, 400f), 1e-3f,
-                "square full rect -> 200px-wide pane: horizontal fit dominates (pane is half the full width, not the full width)");
+            Assert.AreEqual(4.2667f, _renderer.OrthographicSizeForAspect(2f, 400f), 1e-3f,
+                "tight AABB: wide mesh at 2:1 (1600/375)");
+            Assert.AreEqual(9.1429f, _renderer.OrthographicSizeForAspect(1f, 400f), 1e-3f,
+                "tight AABB horizontal ex=4 in a 200px pane (1600/175)");
 
-            // Rotation invariance: Orbit changes only the shared rotation, never the framing.
+            // Fit rotation invariance: the neutral-AABB fit is fixed at Frame — anchoring,
+            // not fitting, absorbs rotation.
             float before = _renderer.OrthographicSizeForAspect(2f, 400f);
             _renderer.Orbit(45f, 30f);
             Assert.AreEqual(before, _renderer.OrthographicSizeForAspect(2f, 400f), 1e-6f,
-                "the bounding-sphere fit must be unbreakable by any yaw+pitch");
+                "the neutral-AABB fit is fixed at Frame — anchoring, not fitting, absorbs rotation");
+        }
+
+        [Test]
+        public void HorizontalHalfExtentWorld_TracksCurrentRotation()
+        {
+            Mesh wideMesh = CreateBoundsMesh(4f, 0.5f, 0.1f);
+            _renderer.Frame(wideMesh);
+            Assert.AreEqual(4f, _renderer.HorizontalHalfExtentWorld(), 1e-4f, "neutral: X extent");
+
+            _renderer.Orbit(90f, 0f);
+            Assert.AreEqual(0.1f, _renderer.HorizontalHalfExtentWorld(), 1e-4f,
+                "yaw 90: wide axis rotates into depth, X extent = Z extent");
+
+            _renderer.Frame(wideMesh);
+            _renderer.Orbit(45f, 0f);
+            Assert.AreEqual(2.8991f, _renderer.HorizontalHalfExtentWorld(), 1e-3f,
+                "yaw 45: |cos45|*4 + |sin45|*0.1 = 0.70710678*4.1");
+        }
+
+        [Test]
+        public void PaneAnchor_InnerEdgeStaysAtInnerMarginAcrossZoomSweep()
+        {
+            Mesh wideMesh = CreateBoundsMesh(4f, 0.5f, 0.1f);
+            _renderer.Frame(wideMesh);
+
+            for (int i = 0; i < 24; i++)
+            {
+                float ortho = _renderer.OrthographicSizeForAspect(2f, 400f);
+                float anchor = _renderer.PaneAnchorWorld(2f, 400f);
+                float xExtent = _renderer.HorizontalHalfExtentWorld();
+                float innerEdgePx = (anchor - xExtent) * (400f / (2f * ortho));
+                Assert.AreEqual(NamerPreviewRenderer.InnerMarginPx, innerEdgePx, 1e-3f,
+                    "inner edge must stay InnerMarginPx from the divider at every zoom");
+                _renderer.Zoom(1f);
+            }
+
+            _renderer.Frame(wideMesh);
+            _renderer.Orbit(35f, 20f);
+            for (int i = 0; i < 24; i++)
+            {
+                float ortho = _renderer.OrthographicSizeForAspect(2f, 400f);
+                float anchor = _renderer.PaneAnchorWorld(2f, 400f);
+                float xExtent = _renderer.HorizontalHalfExtentWorld();
+                float innerEdgePx = (anchor - xExtent) * (400f / (2f * ortho));
+                Assert.AreEqual(NamerPreviewRenderer.InnerMarginPx, innerEdgePx, 1e-3f,
+                    "inner edge must stay InnerMarginPx from the divider at every zoom, even rotated");
+                _renderer.Zoom(1f);
+            }
         }
 
         [UnityTest]

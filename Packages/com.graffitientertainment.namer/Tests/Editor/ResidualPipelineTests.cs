@@ -385,6 +385,52 @@ namespace GraffitiEntertainment.Namer.Tests
             yield return null;
         }
 
+        [UnityTest]
+        public IEnumerator GenerateResidual_NonSquareBase_PreservesSourceAspect()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU residual test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            // WR-01 (04.2-08): the residual ladder value is the LONG edge of the residual;
+            // the short edge scales to preserve the source aspect. A 256x128 base with manual
+            // index 5 (ResolutionLadder[4] = 128) must produce a 128x64 residual — never the
+            // square 128x128 target the width-only clamp produced before the fix.
+            const int w = 256;
+            const int h = 128;
+            NamerSplitResult split = CreateSplitQuad(0f, 1f);
+            Color32[] colors = ConstantColors(split.VertexCount, 128);
+            RenderTexture baseRt = CreateGradientBase(w, h);
+
+            using (NamerDecompPipeline pipeline = new NamerDecompPipeline())
+            {
+                try
+                {
+                    NamerDecompOutput output = pipeline.GenerateResidual(split, colors, baseRt, w, h, 0.05f, 5);
+                    try
+                    {
+                        Assert.IsTrue(output.Stats.ResidualRequired, "a gradient base must require a residual");
+                        Assert.IsNotNull(output.Residual);
+                        Assert.AreEqual(128, output.Stats.ChosenResolution, "manual index 5 resolves to the 128px long edge");
+                        Assert.AreEqual(128, output.Residual.width, "residual long edge must be the chosen resolution");
+                        Assert.AreEqual(64, output.Residual.height, "residual short edge must preserve the 2:1 source aspect");
+                    }
+                    finally
+                    {
+                        output.Dispose();
+                    }
+                }
+                finally
+                {
+                    Release(baseRt);
+                }
+            }
+
+            yield return null;
+        }
+
         // --------------------------------------------------------------------
 
         private static NamerSplitResult CreateSplitQuad(float uvMin, float uvMax)

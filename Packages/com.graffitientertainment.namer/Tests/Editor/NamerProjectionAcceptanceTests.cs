@@ -757,6 +757,14 @@ namespace GraffitiEntertainment.Namer.Tests
             {
                 if (rt != null)
                 {
+                    // Graphics.Blit (the UploadBase path) leaves RenderTexture.active pointing
+                    // at its destination; unbind before release (mirrors ComputeTexturePool's
+                    // guard and the sibling test-suite Release helpers).
+                    if (RenderTexture.active == rt)
+                    {
+                        RenderTexture.active = null;
+                    }
+
                     rt.Release();
                     DestroyImmediate(rt);
                 }

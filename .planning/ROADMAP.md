@@ -249,7 +249,7 @@ Plans:
 
 **Gap Closure** *(UAT round 1: all three parallel, independent files)*
 
-- [ ] 04.2-06: GAP-1 — soft-clip the Removed Detail transfer magnitude in CSRoughnessTransferRemap (clamp(mag, -1, 1)) so projection-error texels dip to saturate(scalar − strength) instead of gloss 0; dip-depth slider becomes monotonically live; fix the dividend/minuend comment (SHDR-02/UI-03)
+- [x] 04.2-06: GAP-1 — soft-clip the Removed Detail transfer magnitude in CSRoughnessTransferRemap (clamp(mag, -1, 1)) so projection-error texels dip to saturate(scalar − strength) instead of gloss 0; dip-depth slider becomes monotonically live; fix the dividend/minuend comment (SHDR-02/UI-03)
 
 - [ ] 04.2-07: GAP-2 — per-pane screen-space framing: each pane fits its own object's bounding sphere with MarginPx = 15 at neutral rotation, pane centers track zoom; supersedes the 04.2-05 pair-plus-gap framing by UAT verdict (UI-03/UI-04)
 

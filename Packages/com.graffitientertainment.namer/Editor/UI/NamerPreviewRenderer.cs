@@ -127,9 +127,9 @@ namespace GraffitiEntertainment.Namer.Editor
             // grows each object outward from the divider (never across it).
             Quaternion meshRotation = Quaternion.Euler(_pitch, _yaw, 0f);
             Vector3 rotatedBoundsCenter = meshRotation * beforeMesh.bounds.center;
-            float anchor = PaneAnchorWorld(aspect, rect.height);
-            Vector3 beforePosition = new Vector3(-anchor, 0f, 0f) - rotatedBoundsCenter;
-            Vector3 afterPosition = new Vector3(anchor, 0f, 0f) - rotatedBoundsCenter;
+            Vector2 drawOffsets = GetPaneDrawOffsets(aspect, rect.height);
+            Vector3 beforePosition = new Vector3(drawOffsets.x, 0f, 0f) - rotatedBoundsCenter;
+            Vector3 afterPosition = new Vector3(drawOffsets.y, 0f, 0f) - rotatedBoundsCenter;
 
             _preview.DrawMesh(beforeMesh, beforePosition, meshRotation, before, 0);
             _preview.DrawMesh(afterMesh, afterPosition, meshRotation, after, 0);
@@ -234,6 +234,20 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             float orthoSize = OrthographicSizeForAspect(aspect, rectHeightPx);
             return HorizontalHalfExtentWorld() + InnerMarginPx * (2f * orthoSize / Mathf.Max(rectHeightPx, 1f));
+        }
+
+        /// <summary>
+        /// The mirrored world-x draw offsets for the two panes: <c>(−anchor, +anchor)</c>,
+        /// where <see cref="PaneAnchorWorld"/> is the divider-anchored distance of each
+        /// pane's object center from the divider (world x = 0) at the current rotation/zoom
+        /// state. <see cref="Render"/> draws the before mesh at <c>.x</c> and the after mesh
+        /// at <c>.y</c> so each pane's inner edge sits exactly <see cref="InnerMarginPx"/>
+        /// from the divider — never centered (GAP-4).
+        /// </summary>
+        public Vector2 GetPaneDrawOffsets(float aspect, float rectHeightPx)
+        {
+            float anchor = PaneAnchorWorld(aspect, rectHeightPx);
+            return new Vector2(-anchor, anchor);
         }
 
         /// <summary>Releases the underlying preview scene and camera (idempotent).</summary>

@@ -245,7 +245,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 04.2-05: Orthographic synced side-by-side preview — ortho PreviewRenderUtility camera, synced yaw+pitch rotation (one shared quaternion, ±89° pitch clamp), orthographic-size zoom, both-objects-wide-plus-gap initial framing (UI-03/UI-04; the acceptance instrument for the transferred-roughness LOOK)
+- [x] 04.2-05: Orthographic synced side-by-side preview — ortho PreviewRenderUtility camera, synced yaw+pitch rotation (one shared quaternion, ±89° pitch clamp), orthographic-size zoom, both-objects-wide-plus-gap initial framing (UI-03/UI-04; the acceptance instrument for the transferred-roughness LOOK)
 
 ### Phase 5: Stylization
 

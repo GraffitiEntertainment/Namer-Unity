@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid-04-PLAN.md
-last_updated: "2026-09-17T01:47:26.057Z"
+status: verifying
+stopped_at: Completed 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid-05-PLAN.md
+last_updated: "2026-09-17T02:02:03.466Z"
 last_activity: 2026-09-17
 progress:
   total_phases: 8
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 29
-  completed_plans: 28
-  percent: 75
+  completed_plans: 29
+  percent: 88
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 
 Phase: 04.2 (gouraud-projection-one-texture-with-roughness-transfer-resid) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-17
 
-Progress: [██████████] 97%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -87,6 +87,7 @@ Progress: [██████████] 97%
 | Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P02 | 9min | 3 tasks | 4 files |
 | Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P03 | 20min | 3 tasks | 14 files |
 | Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P04 | 17min | 3 tasks | 5 files |
+| Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P05 | 6min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -174,6 +175,10 @@ Recent decisions affecting current work:
 - [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: DrawDecompStats gains a Removed-detail max error row (FitOnlyMaxError) and the residual row reads 'not written (one-texture)' vs 'written @ Npx'
 - [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: No computed overlap-depth statistic was added — honest tooltip copy carries the measured numbers (0.07 / 87.9 / ~55%), per CONTEXT 'at most an honest statement, not repair'
 - [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: EditMode full-suite run deferred to the orchestrator's post-wave regression gate (no unity-mcp relay; live editor holds the project lock)
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: Orthographic preview camera (fieldOfView deleted) fixed at OrthoCameraDistance; camera transform never moves for framing or zoom
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: One shared yaw+pitch quaternion (pitch clamped to +/-89 degrees) drives both DrawMesh calls — pane sync is the invariant (amended 2026-09-16)
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: Zoom is orthographic size via a clamped zoom scale; initial size = both objects wide plus PreviewGap under the rotation-invariant bounding-sphere bound
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: Added a 6th public test-observability accessor (OrthographicSize) beyond the plan's 5 listed, so the render test can assert the camera's applied size
 
 ### Pending Todos
 
@@ -204,6 +209,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-17T01:47:26.048Z
-Stopped at: Completed 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid-04-PLAN.md
+Last session: 2026-09-17T02:02:03.457Z
+Stopped at: Completed 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid-05-PLAN.md
 Resume file: None

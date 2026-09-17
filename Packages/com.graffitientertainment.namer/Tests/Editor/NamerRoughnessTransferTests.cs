@@ -419,6 +419,13 @@ namespace GraffitiEntertainment.Namer.Tests
             {
                 if (rt != null)
                 {
+                    // Graphics.Blit leaves RenderTexture.active pointing at its destination;
+                    // unbind before release (mirrors ComputeTexturePool's guard).
+                    if (RenderTexture.active == rt)
+                    {
+                        RenderTexture.active = null;
+                    }
+
                     rt.Release();
                     Object.DestroyImmediate(rt);
                 }

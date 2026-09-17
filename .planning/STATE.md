@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 04.1-07-PLAN.md — anchored-inverted dip-depth remap (D-08..D-10)
-last_updated: "2026-09-17T00:35:18.446Z"
-last_activity: 2026-09-17 -- Phase 04.2 execution started
+last_updated: "2026-09-17T00:49:10.342Z"
+last_activity: 2026-09-17
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 29
-  completed_plans: 24
+  completed_plans: 25
   percent: 75
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 ## Current Position
 
 Phase: 04.2 (gouraud-projection-one-texture-with-roughness-transfer-resid) — EXECUTING
-Plan: 1 of 5
-Status: Executing Phase 04.2
-Last activity: 2026-09-17 -- Phase 04.2 execution started
+Plan: 2 of 5
+Status: Ready to execute
+Last activity: 2026-09-17
 
-Progress: [██████████] 100%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
@@ -83,6 +83,7 @@ Progress: [██████████] 100%
 | Phase 04.1 P04 | 4min | 3 tasks | 6 files |
 | Phase 04.1 P05 | 2min | 3 tasks | 2 files |
 | Phase 04.1 P07 | 12min | 3 tasks | 8 files |
+| Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P01 | 9min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -159,6 +160,9 @@ Recent decisions affecting current work:
 - [Phase 04.1]: Collapse fixtures use fixture-local CollapseErrorThreshold=0.04 + BakedResponse gloss amplitude 0.10 (test-only); production D-13 gate / NamerRoughnessFitter / MinBlurRadius untouched
 - [Phase 04.1]: Offset fixture persists the roughness-offset texture as an imported asset (mirroring CreateImportedBaseMap), matching D-06 product intent of a user-assigned project texture
 - [Phase 04.1]: Anchored-inverted roughness mapping (D-08/D-09/D-10, plan 04.1-07): the authored roughness scalar anchors the extracted map and the Sobel edge magnitude (p90-scaled) dips texels toward gloss — saturate(scalar − strength · mag/p90) at both consume sites (CSRoughnessRemap fit-driven; CSSurfacePack Sobel); CSRoughnessNormalize stays direct-polarity; fit-driven pack adoption stays full-strength (isFitDriven ? 1f); estimator tooltip drops the Blender-parity claim
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: Symmetric VcFloor max(base,F)/max(vc,F) adopted (04.2 RESEARCH Pattern 2) — kills the 1.70% below-floor dark-texel exception class at sub-LSB reconstruction cost
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: NamerResidualMode.Gate is the byte-identical default; AlwaysKeep/NeverKeep force keep/drop in both directions
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: projectedOut is caller-owned (R16G16B16A16_SFloat linear, w/h), written by the pipeline and never released here
 
 ### Pending Todos
 
@@ -189,6 +193,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-16T19:10:21Z
+Last session: 2026-09-17T00:48:16.068Z
 Stopped at: Completed 04.1-07-PLAN.md — anchored-inverted dip-depth remap (D-08..D-10)
-Resume file: .planning/phases/04.1-baked-response-roughness-extraction-zero-residual-one-textur/04.1-07-SUMMARY.md
+Resume file: None

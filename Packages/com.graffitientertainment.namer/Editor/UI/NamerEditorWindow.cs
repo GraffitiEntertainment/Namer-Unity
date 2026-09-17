@@ -1166,28 +1166,28 @@ namespace GraffitiEntertainment.Namer.Editor
             EditorGUILayout.LabelField(
                 new GUIContent(DecompStatLabels[0],
                     "Fraction of UV-covered texels reconstructed within the error threshold."),
-                (_decompStats.Coverage * 100f).ToString("0") + "%");
+                new GUIContent((_decompStats.Coverage * 100f).ToString("0") + "%"));
             EditorGUILayout.LabelField(
                 new GUIContent(DecompStatLabels[1],
                     "Average removed-detail reconstruction error over covered texels (the same "
                     + "source-vs-reconstruction error the residual-ON EXR encodes)."),
-                _decompStats.AvgError.ToString("0.000"));
+                new GUIContent(_decompStats.AvgError.ToString("0.000")));
             EditorGUILayout.LabelField(
                 new GUIContent(DecompStatLabels[2],
                     "Maximum removed-detail reconstruction error over covered texels (the same "
                     + "source-vs-reconstruction error the residual-ON EXR encodes)."),
-                _decompStats.MaxError.ToString("0.000"));
+                new GUIContent(_decompStats.MaxError.ToString("0.000")));
             EditorGUILayout.LabelField(
                 new GUIContent(DecompStatLabels[3],
                     "The source-vs-reconstruction error of the removed detail: what the residual-ON "
                     + "EXR encodes and what the gloss transfer re-expresses."),
-                _decompStats.FitOnlyMaxError.ToString("0.000"));
+                new GUIContent(_decompStats.FitOnlyMaxError.ToString("0.000")));
             EditorGUILayout.LabelField(
                 new GUIContent(DecompStatLabels[4],
                     "Whether the residual EXR was written (the 04.2 Write Residual checkbox)."),
-                residualWritten
+                new GUIContent(residualWritten
                     ? "written @" + _decompStats.ChosenResolution + "px"
-                    : ResidualNotWrittenLabel);
+                    : ResidualNotWrittenLabel));
         }
 
         private void DrawOutputSection()

@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid-09-PLAN.md
-last_updated: "2026-09-17T22:00:12.379Z"
-last_activity: 2026-09-17 -- Phase 4.2 planning complete
+status: verifying
+stopped_at: Completed 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid-10-PLAN.md
+last_updated: "2026-09-17T23:46:43.568Z"
+last_activity: 2026-09-17
 progress:
   total_phases: 8
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 34
-  completed_plans: 33
-  percent: 75
+  completed_plans: 34
+  percent: 88
 ---
 
 # Project State
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 
 Phase: 04.2 (gouraud-projection-one-texture-with-roughness-transfer-resid) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
-Last activity: 2026-09-17 -- Phase 4.2 planning complete
+Status: Phase complete — ready for verification
+Last activity: 2026-09-17
 
 Progress: [██████████] 100%
 
@@ -88,6 +88,7 @@ Progress: [██████████] 100%
 | Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P03 | 20min | 3 tasks | 14 files |
 | Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P04 | 17min | 3 tasks | 5 files |
 | Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P05 | 6min | 2 tasks | 4 files |
+| Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P10 | 4min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -179,6 +180,8 @@ Recent decisions affecting current work:
 - [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: One shared yaw+pitch quaternion (pitch clamped to +/-89 degrees) drives both DrawMesh calls — pane sync is the invariant (amended 2026-09-16)
 - [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: Zoom is orthographic size via a clamped zoom scale; initial size = both objects wide plus PreviewGap under the rotation-invariant bounding-sphere bound
 - [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: Added a 6th public test-observability accessor (OrthographicSize) beyond the plan's 5 listed, so the render test can assert the camera's applied size
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: PaneAnchorWorld uses the neutral _framedHalfWidth captured at Frame (first positioning) instead of the per-Render rotated HorizontalHalfExtentWorld — orbit spins in place about a fixed center (GAP-5)
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: Real per-pane clipping via two preview cycles + two persistent pane RTs (option a), each cycle blitting its utility RT into its own pane RT before the next BeginPreview and restoring RenderTexture.active=null after each blit
 
 ### Pending Todos
 
@@ -209,6 +212,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-17T19:48:02Z
-Stopped at: Completed 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid-09-PLAN.md
+Last session: 2026-09-17T23:46:43.559Z
+Stopped at: Completed 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid-10-PLAN.md
 Resume file: None

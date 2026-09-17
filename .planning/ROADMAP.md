@@ -257,7 +257,7 @@ Plans:
 
 - [x] 04.2-09: GAP-4 — divider-anchored tight-AABB framing (10 px inner margins; zoom grows each model outward from the divider, never across it) + 1 px pane outline overlay (UI-03/UI-04)
 
-- [ ] 04.2-10: GAP-5 — rotation-stable divider anchor (fixed first positioning; HorizontalHalfExtentWorld retired) + per-pane clipping (two-cycle per-pane render: each pane renders its own mesh into its own RT; the window draws only that pane's half) (UI-03/UI-04)
+- [x] 04.2-10: GAP-5 — rotation-stable divider anchor (fixed first positioning; HorizontalHalfExtentWorld retired) + per-pane clipping (two-cycle per-pane render: each pane renders its own mesh into its own RT; the window draws only that pane's half) (UI-03/UI-04)
 
 ### Phase 5: Stylization
 

@@ -225,7 +225,7 @@ Plans:
   4. Estimator dropdown consolidates to one extraction path + decomposition on/off (Sobel-of-base's survival as alternate dip source is a planning call)
   5. Existing 04.1-07 dip-coupling tests flip again, intentionally, and the full EditMode suite is green
 
-**Plans**: 9 plans (5 + 4 gap closure from UAT rounds 1-2)
+**Plans**: 10 plans (5 + 5 gap closure from UAT rounds 1-3)
 
 Plans:
 
@@ -247,7 +247,7 @@ Plans:
 
 - [x] 04.2-05: Orthographic synced side-by-side preview — ortho PreviewRenderUtility camera, synced yaw+pitch rotation (one shared quaternion, ±89° pitch clamp), orthographic-size zoom, both-objects-wide-plus-gap initial framing (UI-03/UI-04; the acceptance instrument for the transferred-roughness LOOK)
 
-**Gap Closure** *(UAT round 1: 06/07/08 parallel, independent files; UAT round 2: 09)*
+**Gap Closure** *(UAT round 1: 06/07/08 parallel, independent files; UAT round 2: 09; UAT round 3: 10)*
 
 - [x] 04.2-06: GAP-1 — soft-clip the Removed Detail transfer magnitude in CSRoughnessTransferRemap (clamp(mag, -1, 1)) so projection-error texels dip to saturate(scalar − strength) instead of gloss 0; dip-depth slider becomes monotonically live; fix the dividend/minuend comment (SHDR-02/UI-03)
 
@@ -256,6 +256,8 @@ Plans:
 - [x] 04.2-08: GAP-3 — close warnings: WR-01 aspect-correct residual resample (ChosenResolution = long edge), WR-02 CannotDecompose preview guard mirror, WR-03 Decomp dispose before nulling, NAMER_DECOMP_HEATMAP single-exit-point restructure for the Metal translator false positive (VCOL-04/VCOL-05/UI-03)
 
 - [x] 04.2-09: GAP-4 — divider-anchored tight-AABB framing (10 px inner margins; zoom grows each model outward from the divider, never across it) + 1 px pane outline overlay (UI-03/UI-04)
+
+- [ ] 04.2-10: GAP-5 — rotation-stable divider anchor (fixed first positioning; HorizontalHalfExtentWorld retired) + per-pane clipping (two-cycle per-pane render: each pane renders its own mesh into its own RT; the window draws only that pane's half) (UI-03/UI-04)
 
 ### Phase 5: Stylization
 

@@ -253,7 +253,7 @@ Plans:
 
 - [x] 04.2-07: GAP-2 — per-pane screen-space framing: each pane fits its own object's bounding sphere with MarginPx = 15 at neutral rotation, pane centers track zoom; supersedes the 04.2-05 pair-plus-gap framing by UAT verdict (UI-03/UI-04)
 
-- [ ] 04.2-08: GAP-3 — close warnings: WR-01 aspect-correct residual resample (ChosenResolution = long edge), WR-02 CannotDecompose preview guard mirror, WR-03 Decomp dispose before nulling, NAMER_DECOMP_HEATMAP single-exit-point restructure for the Metal translator false positive (VCOL-04/VCOL-05/UI-03)
+- [x] 04.2-08: GAP-3 — close warnings: WR-01 aspect-correct residual resample (ChosenResolution = long edge), WR-02 CannotDecompose preview guard mirror, WR-03 Decomp dispose before nulling, NAMER_DECOMP_HEATMAP single-exit-point restructure for the Metal translator false positive (VCOL-04/VCOL-05/UI-03)
 
 ### Phase 5: Stylization
 

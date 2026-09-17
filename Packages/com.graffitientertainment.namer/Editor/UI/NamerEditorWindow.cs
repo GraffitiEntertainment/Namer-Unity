@@ -568,6 +568,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 _decompOutput = null;
             }
 
+            _projectionContext?.Decomp?.Dispose();
             _projectionContext = null;
 
             if (_previewSplitMesh != null)
@@ -603,6 +604,13 @@ namespace GraffitiEntertainment.Namer.Editor
                 // inside Process. Consume them for the preview mesh + residual binding
                 // (no second fit — the projection IS the fit the preview renders).
                 NamerProjectionContext ctx = _projectionContext;
+                if (ctx.Decomp != null && ctx.Decomp.Stats.CannotDecompose)
+                {
+                    // CR-03 mirror: Process generates the Phase-3 shape here — preview must match.
+                    _decompStats = ctx.Decomp.Stats;
+                    return;
+                }
+
                 _decompOutput = ctx.Decomp;
                 _decompStats = ctx.Decomp != null ? ctx.Decomp.Stats : null;
                 if (ctx.Split != null && ctx.Colors != null)

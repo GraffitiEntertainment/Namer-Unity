@@ -846,6 +846,7 @@ namespace GraffitiEntertainment.Namer.Editor
             if (previewTexture != null)
             {
                 GUI.DrawTexture(previewRect, previewTexture, ScaleMode.StretchToFill);
+                DrawPreviewPaneOutline(previewRect);
             }
             else
             {
@@ -868,6 +869,16 @@ namespace GraffitiEntertainment.Namer.Editor
             EditorGUI.EndDisabledGroup();
 
             EditorGUILayout.Space();
+        }
+
+        private void DrawPreviewPaneOutline(Rect previewRect)
+        {
+            Color outline = new Color(0.4f, 0.4f, 0.4f, 1f);
+            EditorGUI.DrawRect(new Rect(previewRect.x, previewRect.y, previewRect.width, 1f), outline);                       // top
+            EditorGUI.DrawRect(new Rect(previewRect.x, previewRect.yMax - 1f, previewRect.width, 1f), outline);                // bottom
+            EditorGUI.DrawRect(new Rect(previewRect.x, previewRect.y, 1f, previewRect.height), outline);                       // left
+            EditorGUI.DrawRect(new Rect(previewRect.xMax - 1f, previewRect.y, 1f, previewRect.height), outline);               // right
+            EditorGUI.DrawRect(new Rect(previewRect.x + previewRect.width / 2f - 0.5f, previewRect.y, 1f, previewRect.height), outline); // center divider
         }
 
         private void HandlePreviewCameraInput(Rect previewRect)

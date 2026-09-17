@@ -170,8 +170,9 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 if (projection != null && removedDetail && shouldExtract)
                 {
-                    // Removed-detail transfer: the projected base is the dividend, and the
-                    // transfer map already carries the dip (adopt as-is at pack time).
+                    // Removed-detail transfer: the removed-luma minuend is the SOURCE base
+                    // (baseColorOut), the projected base is the subtrahend, and the transfer
+                    // map already carries the dip (adopt as-is at pack time).
                     roughnessTex = EnsureRoughnessPipeline().ExtractTransferRoughness(
                         inspection.Roughness, baseColorOut, projectedOut, w, h, inspection.RoughnessExtractStrength);
                     roughnessDipApplied = true;

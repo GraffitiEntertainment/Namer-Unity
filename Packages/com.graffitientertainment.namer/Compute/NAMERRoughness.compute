@@ -148,10 +148,11 @@ void CSRoughnessNormalize(uint3 id : SV_DispatchThreadID)
 //
 // CSRoughnessTransferRemap is the surviving D-08 consume site with the dip source swapped
 // from Sobel magnitude to the normalized removed-luma signal: saturate(scalar - strength *
-// mag). saturate clamps the 6-bit headroom at BOTH ends (gloss clip at bright, matte clip
-// at dark — CONTEXT locked headroom handling); strength is the pure-taste dip-depth slider
-// (no precompute, no search). The Sobel chain above remains intact as the alternate dip
-// source (plan 03 selects between them).
+// mag). mag is clamped to [-1, 1] so removed-detail outliers cannot consume the slider's
+// range (GAP-1); saturate clamps the 6-bit headroom at BOTH ends (gloss clip at bright,
+// matte clip at dark — CONTEXT locked headroom handling); strength is the pure-taste
+// dip-depth slider (no precompute, no search). The Sobel chain above remains intact as the
+// alternate dip source (plan 03 selects between them).
 // ------------------------------------------------------------------
 
 // Signed removed-detail luminance: luma(source - projected) -> _RemovedLuma.r.
@@ -177,6 +178,13 @@ void CSRoughnessTransferRemap(uint3 id : SV_DispatchThreadID)
     }
 
     float mag = _RemovedLuma[id.xy].r / max(_LumaP90, 1e-4);
+    // Soft-clip the normalized depth to the unit range (GAP-1): projection-error outliers
+    // (UV seams, triangle-boundary kinks) have |luma| far above p90 and would otherwise pin
+    // saturate(scalar - strength * mag) to roughness 0 at ANY slider value, consuming the
+    // slider's dynamic range. Clamping treats them like the strongest legitimate removed
+    // detail, so the roughness floor becomes saturate(scalar - strength) and the slider
+    // modulates them monotonically.
+    mag = clamp(mag, -1.0, 1.0);
     float roughness = saturate(_ScalarRoughness - _Strength * mag);
     _RoughnessOut[id.xy] = float4(roughness, 0.0, 0.0, 1.0);
 }

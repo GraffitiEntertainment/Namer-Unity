@@ -319,14 +319,18 @@ namespace GraffitiEntertainment.Namer.Editor
                     w, h, errorThreshold, manualResolution, avgA, avgB);
 
                 // 6. Produce the final residual at the chosen resolution (not upsampled back).
-                if (chosenResolution >= w)
+                //    The chosen resolution is the LONG edge; the short edge preserves the
+                //    source aspect (WR-01 — never a square target for non-square bases).
+                int longEdge = Mathf.Max(w, h);
+                if (chosenResolution >= longEdge)
                 {
                     returnedResidual = fullResidual;
                     fullResidual = null;
                 }
                 else
                 {
-                    returnedResidual = Resample(fullResidual, chosenResolution, chosenResolution);
+                    ResolveAspectSize(chosenResolution, w, h, out int cw, out int ch);
+                    returnedResidual = Resample(fullResidual, cw, ch);
                     Release(fullResidual);
                     fullResidual = null;
                 }
@@ -334,7 +338,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 // 7. Final stats at the chosen resolution: reconstruct with the chosen residual
                 //    (upsampled to source for the error metric), reduce error + coverage.
                 RenderTexture eval = returnedResidual;
-                if (chosenResolution < w)
+                if (chosenResolution < longEdge)
                 {
                     eval = Resample(returnedResidual, w, h);
                 }
@@ -390,24 +394,25 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture avgA,
             RenderTexture avgB)
         {
-            // Manual override (D-17): the POPUP INDEX resolves to a pixel size, clamped to
-            // <= source, and skips the search entirely.
+            // Manual override (D-17): the POPUP INDEX resolves to a pixel size — the LONG
+            // edge — clamped to <= the source's long edge, and skips the search entirely.
             if (manualResolution > 0)
             {
                 int idx = Mathf.Clamp(manualResolution - 1, 0, ResolutionLadder.Length - 1);
-                return Mathf.Min(ResolutionLadder[idx], w);
+                return Mathf.Min(ResolutionLadder[idx], Mathf.Max(w, h));
             }
 
             // Adaptive (D-16): walk the ladder largest -> smallest, skipping any step >=
-            // source (full-res already covers it). Stop at the first violating step and keep
-            // the previous (larger) passing step; fall back to full source when the first
-            // step already violates or no step is <= source (e.g. a 4096 source where the
-            // ladder tops out at 2048).
-            int chosen = w;
+            // the source LONG edge (full-res already covers it). Stop at the first violating
+            // step and keep the previous (larger) passing step; fall back to the full source
+            // long edge when the first step already violates or no step is <= the source long
+            // edge (e.g. a 4096 source where the ladder tops out at 2048).
+            int longEdge = Mathf.Max(w, h);
+            int chosen = longEdge;
             for (int i = 0; i < ResolutionLadder.Length; i++)
             {
                 int r = ResolutionLadder[i];
-                if (r >= w)
+                if (r >= longEdge)
                 {
                     continue;
                 }
@@ -437,7 +442,8 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture avgA,
             RenderTexture avgB)
         {
-            RenderTexture down = Resample(fullResidual, resolution, resolution);
+            ResolveAspectSize(resolution, w, h, out int cw, out int ch);
+            RenderTexture down = Resample(fullResidual, cw, ch);
             RenderTexture up = Resample(down, w, h);
             Release(down);
 
@@ -571,6 +577,24 @@ namespace GraffitiEntertainment.Namer.Editor
                 ResidualRequired = required,
                 ChosenResolution = chosenResolution,
             };
+        }
+
+        private static void ResolveAspectSize(int longEdge, int w, int h, out int outW, out int outH)
+        {
+            // The ResolutionLadder value is the LONG edge of the residual; the short edge
+            // scales to preserve the source aspect so residual texel (u, v) keeps
+            // corresponding to base texel (u, v) (WR-01 — no square targets for non-square
+            // bases). Mathf.Max(1, ...) guards degenerate short edges.
+            if (w >= h)
+            {
+                outW = Mathf.Max(1, longEdge);
+                outH = Mathf.Max(1, Mathf.RoundToInt(longEdge * (h / (float)w)));
+            }
+            else
+            {
+                outH = Mathf.Max(1, longEdge);
+                outW = Mathf.Max(1, Mathf.RoundToInt(longEdge * (w / (float)h)));
+            }
         }
 
         private RenderTexture Resample(RenderTexture source, int dstW, int dstH)

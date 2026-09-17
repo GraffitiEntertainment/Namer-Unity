@@ -237,7 +237,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 04.2-03: The rewire + retirement — projection hook through NamerComputePipeline.Process, NamerDipSource/Write Residual/dip-depth UI, fitter/ladder/cache/frequency-separation deletion, intentional test flips
+- [x] 04.2-03: The rewire + retirement — projection hook through NamerComputePipeline.Process, NamerDipSource/Write Residual/dip-depth UI, fitter/ladder/cache/frequency-separation deletion, intentional test flips
 
 **Wave 3** *(blocked on Wave 2 completion)*
 

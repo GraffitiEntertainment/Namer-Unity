@@ -14,10 +14,12 @@ namespace GraffitiEntertainment.Namer.Editor
     /// A/B judgment. Rotation is now one shared two-axis yaw+pitch quaternion applied to
     /// BOTH panes in sync (amended 2026-09-16: pane sync is the invariant, not axis
     /// restriction; pitch is clamped to ±89°). Zoom is orthographic size — a scale of the
-    /// pair, never camera distance or FOV — and the initial size fits both objects wide
-    /// plus a small gap under the rotation-invariant bounding-sphere bound. Orbit rotates
-    /// each instance IN PLACE about its own bounds center (the standard Unity
-    /// object-preview expectation — drag spins the object, camera stays put).
+    /// pair, never camera distance or FOV. The initial size frames EACH pane's own object
+    /// with a <see cref="MarginPx"/> screen-space margin under the rotation-invariant
+    /// bounding-sphere bound (holds at any orbit), and the pane centers track the
+    /// orthographic size so each object stays framed in its pane while zooming (GAP-2).
+    /// Orbit rotates each instance IN PLACE about its own bounds center (the standard
+    /// Unity object-preview expectation — drag spins the object, camera stays put).
     ///
     /// URP materials render magenta/fallback-error through the built-in preview path, so
     /// every render calls <see cref="PreviewRenderUtility.Render(bool, bool)"/> with
@@ -26,9 +28,8 @@ namespace GraffitiEntertainment.Namer.Editor
     /// </summary>
     public sealed class NamerPreviewRenderer : IDisposable
     {
-        public const float HalfSeparation = 0.7f;
+        public const float MarginPx = 15f;
         public const float ZoomSensitivity = 0.15f;
-        public const float PreviewGap = 0.1f;
 
         private const float MinPitch = -89f;
         private const float MaxPitch = 89f;
@@ -43,10 +44,10 @@ namespace GraffitiEntertainment.Namer.Editor
         private float _pitch;
         private float _zoomScale = 1f;
 
-        // Defaults mirror the degenerate-radius framing (radius fallback = 1) and only
-        // matter before the first Frame; Render always re-fits when the mesh changes.
-        private float _framedHalfWidth = HalfSeparation + 1f + PreviewGap;
-        private float _framedHalfHeight = 1f + PreviewGap;
+        // The rotation-invariant bounding-sphere radius (extents.magnitude) of the framed
+        // mesh. The degenerate default (1f) only matters before the first Frame; Render
+        // always re-fits when the mesh changes.
+        private float _framedRadius = 1f;
 
         /// <summary>True when the preview camera is orthographic (false before the preview scene exists).</summary>
         public bool IsOrthographic => _preview != null && _preview.camera.orthographic;
@@ -107,19 +108,23 @@ namespace GraffitiEntertainment.Namer.Editor
             // Fit the orthographic size to the rect aspect here (horizontal fit depends on
             // aspect, so the size is applied where the rect is known, not in Frame).
             float aspect = rect.width / Mathf.Max(rect.height, 1f);
-            _preview.camera.orthographicSize = OrthographicSizeForAspect(aspect);
+            float orthoSize = OrthographicSizeForAspect(aspect, rect.height);
+            _preview.camera.orthographicSize = orthoSize;
 
             _preview.lights[0].transform.rotation = Quaternion.Euler(50f, -30f, 0f);
             _preview.lights[1].transform.rotation = Quaternion.Euler(340f, 218f, 177f);
 
             // Draw each instance rotated IN PLACE about its own bounds center: the draw
             // transform maps v -> rotation * v + position, so countering the rotated
-            // bounds center keeps each pane's object centered on the ±separation offset
-            // while it spins (camera fixed — Unity Inspector-preview semantics).
+            // bounds center keeps each pane's object centered on the ±pane-center offset
+            // while it spins (camera fixed — Unity Inspector-preview semantics). The pane
+            // centers are derived from the orthographic size, so each object stays framed
+            // in its own pane while zooming.
             Quaternion meshRotation = Quaternion.Euler(_pitch, _yaw, 0f);
             Vector3 rotatedBoundsCenter = meshRotation * beforeMesh.bounds.center;
-            Vector3 beforePosition = new Vector3(-HalfSeparation, 0f, 0f) - rotatedBoundsCenter;
-            Vector3 afterPosition = new Vector3(HalfSeparation, 0f, 0f) - rotatedBoundsCenter;
+            float paneCenterWorld = orthoSize * aspect / 2f;
+            Vector3 beforePosition = new Vector3(-paneCenterWorld, 0f, 0f) - rotatedBoundsCenter;
+            Vector3 afterPosition = new Vector3(paneCenterWorld, 0f, 0f) - rotatedBoundsCenter;
 
             _preview.DrawMesh(beforeMesh, beforePosition, meshRotation, before, 0);
             _preview.DrawMesh(afterMesh, afterPosition, meshRotation, after, 0);
@@ -131,10 +136,10 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Re-fits the orthographic size to <paramref name="mesh"/>'s rotation-invariant
-        /// bounding-sphere bound so both side-by-side instances plus a small gap stay in
-        /// view at ANY yaw+pitch, and re-centers the camera (D-09: framing re-fits on
-        /// selection change). Resets zoom, yaw, and pitch.
+        /// Re-fits the framing to <paramref name="mesh"/>'s rotation-invariant
+        /// bounding-sphere radius so each pane's own object stays in view with a
+        /// <see cref="MarginPx"/> screen-space margin at ANY yaw+pitch (D-09: framing
+        /// re-fits on selection change). Resets zoom, yaw, and pitch.
         /// </summary>
         public void Frame(Mesh mesh)
         {
@@ -151,13 +156,11 @@ namespace GraffitiEntertainment.Namer.Editor
                 radius = 1f;
             }
 
-            // Rotation-invariant pair-plus-gap framing: the bounding-sphere half-extent
-            // bounds the silhouette at ANY yaw+pitch (under pitch the Y extent rotates
-            // into the horizontal footprint), so the horizontal bound never depends on
-            // yaw-only reasoning. Both objects wide = HalfSeparation + radius + PreviewGap;
-            // the vertical bound is just radius + PreviewGap.
-            _framedHalfWidth = HalfSeparation + radius + PreviewGap;
-            _framedHalfHeight = radius + PreviewGap;
+            // Rotation-invariant per-pane fit: the bounding-sphere radius bounds the
+            // silhouette at ANY yaw+pitch (under pitch the Y extent rotates into the
+            // horizontal footprint), so this one fit holds at any orbit — no re-fit on
+            // orbit is needed (Frame's existing neutral reset of yaw/pitch is kept).
+            _framedRadius = radius;
             _zoomScale = 1f;
             _yaw = 0f;
             _pitch = 0f;
@@ -186,14 +189,19 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// The orthographic half-height that fits the framed pair plus gap for the given
-        /// <paramref name="aspect"/> (width / height) at the current zoom scale — the same
-        /// pure expression <see cref="Render"/> applies to the camera.
+        /// The orthographic half-height that frames the framed object in ONE pane (half the
+        /// full rect) with a <see cref="MarginPx"/> screen-space margin on every edge, for
+        /// the given <paramref name="aspect"/> (width / height) and
+        /// <paramref name="rectHeightPx"/> at the current zoom scale — the same pure
+        /// expression <see cref="Render"/> applies to the camera.
         /// </summary>
-        public float OrthographicSizeForAspect(float aspect)
+        public float OrthographicSizeForAspect(float aspect, float rectHeightPx)
         {
-            return Mathf.Max(_framedHalfWidth / Mathf.Max(aspect, 0.01f), _framedHalfHeight)
-                * Mathf.Clamp(_zoomScale, MinZoomScale, MaxZoomScale);
+            float margin = MarginPx;
+            float paneWidthPx = aspect * rectHeightPx / 2f;   // one pane = half the full rect
+            float horizFit = _framedRadius * rectHeightPx / Mathf.Max(paneWidthPx - 2f * margin, 1f);
+            float vertFit  = _framedRadius * rectHeightPx / Mathf.Max(rectHeightPx - 2f * margin, 1f);
+            return Mathf.Max(horizFit, vertFit) * Mathf.Clamp(_zoomScale, MinZoomScale, MaxZoomScale);
         }
 
         /// <summary>Releases the underlying preview scene and camera (idempotent).</summary>

@@ -1,6 +1,5 @@
 using System;
 using System.Collections;
-using System.Collections.Generic;
 using System.IO;
 using GraffitiEntertainment.Namer.Editor;
 using NUnit.Framework;
@@ -13,12 +12,14 @@ using UnityEngine.TestTools;
 namespace GraffitiEntertainment.Namer.Tests
 {
     /// <summary>
-    /// Phase 04.1 fit-driven roughness estimator tests (plan 02). Proves (1) the deterministic
-    /// first-passing minimal-strength search, (2) the extraction-driven residual collapse via
-    /// the post-extraction (sharp-removal-cleaned) base refit (D-05), and (3) the 2A default-on
-    /// end-to-end acceptance through <see cref="NamerProcessor.Process"/>. GPU paths are
-    /// capability-gated (D-15) — they skip with an explicit report when compute/async-readback
-    /// is unavailable, never a silent pass.
+    /// Phase 04.2 projection-era roughness tests (plan 03, flipped from the retired 04.1
+    /// fit-driven suite). Proves (1) the by-construction residual collapse (the projection makes
+    /// base ÷ vcInterp white, so WriteResidual OFF writes no EXR), (2) the packed surface dip
+    /// follows the removed-detail transfer (strength 0 = authored scalar, strength &gt; 0 = dip),
+    /// (3) the dip signal is removed-luminance rather than a Sobel edge (a smooth interior patch
+    /// dips under RemovedDetail), and (4) the default-on one-texture end-to-end acceptance.
+    /// GPU paths are capability-gated (D-15) — they skip with an explicit report when
+    /// compute/async-readback is unavailable, never a silent pass.
     /// </summary>
     public class NamerRoughnessFitTests
     {
@@ -26,182 +27,82 @@ namespace GraffitiEntertainment.Namer.Tests
         private const int WorkingSize = 64;
         private const int RoughnessMask = 0x3F;
         private const float ErrorThreshold = 0.02f;
-        // Test-local fit/D-13 threshold for the three collapse tests. Measured on the
-        // white-occlusion BakedResponse fixture: the fit ladder's first passing strength is
-        // 0.70 with a fit-only maxError of 0.0438, so 0.06 gates the collapse with margin
-        // while the un-extracted error is 0.1098 (the full gloss amplitude) — passing
-        // still requires genuine extraction. The honest-gate test keeps the shipped 0.02.
-        private const float CollapseErrorThreshold = 0.06f;
         private const int ResidualResolution = 0;
 
         private static bool ComputeAvailable =>
             SystemInfo.supportsComputeShaders && SystemInfo.supportsAsyncGPUReadback;
 
-        // -- Pure-CPU minimizer (no GPU dispatch) ----------------------------
-
-        [Test]
-        public void FitDriven_SelectsFirstPassingStrength()
-        {
-            // A U-shaped objective whose global minimum is 0.5: the ascending walk must return
-            // the FIRST passing strength (0.3), NOT the global argmin (0.5).
-            var maxErrorByStrength = new Dictionary<float, float>
-            {
-                { 0.0f, 0.50f },
-                { 0.15f, 0.20f },
-                { 0.3f, 0.015f },
-                { 0.5f, 0.005f },
-                { 0.7f, 0.008f },
-                { 0.9f, 0.012f },
-                { 1.0f, 0.018f },
-            };
-
-            var visited = new List<float>();
-            NamerRoughnessFitResult result = NamerRoughnessFitter.Fit(
-                strength =>
-                {
-                    visited.Add(strength);
-                    return maxErrorByStrength[strength];
-                },
-                shouldCancel: () => false,
-                maxErrorThreshold: ErrorThreshold);
-
-            Assert.IsTrue(result.Passed, "the fit must pass within the threshold");
-            Assert.IsFalse(result.Cancelled, "the fit must not cancel");
-            Assert.AreEqual(0.3f, result.Strength, 1e-6f,
-                "first-passing minimal strength must be 0.3, NOT the global argmin 0.5");
-
-            // The ladder walked the fixed StrengthLadder deterministically, ascending, and
-            // stopped at the first pass (never System.Random, never a full argmin scan).
-            Assert.AreEqual(3, visited.Count, "must stop after three steps (0.0, 0.15, 0.3)");
-            Assert.AreEqual(0.0f, visited[0], 1e-6f, "ladder must start at 0.0");
-            Assert.AreEqual(0.15f, visited[1], 1e-6f, "ladder second step must be 0.15");
-            Assert.AreEqual(0.3f, visited[2], 1e-6f, "ladder third step must be 0.3");
-
-            // An always-above-threshold objective returns the max strength with Passed == false.
-            NamerRoughnessFitResult failing = NamerRoughnessFitter.Fit(
-                _ => 1.0f, shouldCancel: () => false, maxErrorThreshold: ErrorThreshold);
-            Assert.AreEqual(1.0f, failing.Strength, 1e-6f,
-                "a no-pass search returns the max ladder strength (1.0)");
-            Assert.IsFalse(failing.Passed, "an always-above-threshold objective must not pass");
-            Assert.IsFalse(failing.Cancelled);
-        }
-
-        // -- Fit-driven extraction collapse (D-05) ---------------------------
+        // --------------------------------------------------------------------
+        // 1. Projection collapse (end-to-end)
+        // --------------------------------------------------------------------
 
         [UnityTest]
-        public IEnumerator FitDriven_BakedResponse_ResidualCollapses()
+        public IEnumerator Projection_BakedResponse_ResidualCollapsesByConstruction()
         {
             if (!ComputeAvailable)
             {
-                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU fit-driven collapse test (D-15).");
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU projection-collapse test (D-15).");
                 yield break;
             }
 
-            Mesh mesh = CreateQuadMesh();
-            Texture2D baseMap = CreateBaseMap(WorkingSize, BakedResponse);
-            Texture2D whiteOcclusion = CreateWhiteOcclusion();
-            NamerMaterialInspection inspection = BuildFitDrivenInspection(baseMap, mesh, whiteOcclusion, strength: 1f);
-
-            NamerComputePipeline pipeline = new NamerComputePipeline();
+            EnsureTempFolder();
+            PrefsSnapshot prefs = CapturePrefs();
+            GameObject gameObject = null;
             try
             {
-                NamerSplitResult split = MeshVertexSplitter.Split(mesh);
-                Func<float, float> evaluate = ComposeEvaluate(pipeline, split);
+                Mesh sourceMesh = CreateQuadMeshAsset(TempFolder + "/SourceQuad.asset");
+                Texture2D baseMap = CreateImportedBaseMap(TempFolder + "/SourceBase.png", WorkingSize, BakedResponse);
+                Texture2D occlusion = CreateImportedWhiteOcclusion(TempFolder + "/SourceOcclusion.png");
+                Material source = CreateSourceMaterial(TempFolder, "SourceMat", baseMap, occlusion);
+                gameObject = CreateSceneObject(sourceMesh, source, "ProjectionTarget");
 
-                NamerComputeResult result = pipeline.Process(inspection, evaluate, null, CollapseErrorThreshold);
-                try
+                var settings = new NamerProcessorSettings
                 {
-                    // D-05: NormalizedBaseColor is the sharp-removal-cleaned base in the
-                    // fit-driven path, so this refit consumes the post-extraction base.
-                    NamerDecompErrorStats stats = Decompose(split, result.NormalizedBaseColor, CollapseErrorThreshold);
-                    Color32[] cleanedTexels = ReadBackColor32(result.NormalizedBaseColor, WorkingSize * WorkingSize);
-                    byte minAlpha = 255;
-                    foreach (Color32 t in cleanedTexels)
-                    {
-                        minAlpha = Math.Min(minAlpha, t.a);
-                    }
+                    Destination = TempFolder + "/Out",
+                    Prefix = "",
+                    Suffix = "",
+                    OverwriteGenerated = false,
+                    DecompositionEnabled = true,
+                    ErrorThreshold = ErrorThreshold,
+                    ResidualResolution = ResidualResolution,
+                    DipSource = (int)NamerDipSource.RemovedDetail,
+                    WriteResidual = false,
+                    RoughnessExtractStrength = NamerEditorConstants.DefaultRoughnessExtractStrength,
+                };
 
-                    Assert.IsFalse(stats.ResidualRequired,
-                        "fit-driven extraction must collapse the residual (D-05 refit consumes the cleaned base); fit-only maxError="
-                        + stats.FitOnlyMaxError.ToString("F4") + " vs threshold " + CollapseErrorThreshold
-                        + "; cleaned-base minAlpha=" + (minAlpha / 255f).ToString("F4")
-                        + "; coverage=" + stats.Coverage.ToString("F4")
-                        + "; cannotDecompose=" + stats.CannotDecompose);
+                NamerProcessResult result = NamerProcessor.Process(gameObject, settings);
+                Assert.IsNull(result.Error, "Process should succeed: " + result.Error);
+                Assert.AreEqual(1, result.GeneratedAssets.Count, "one material set expected");
 
-                    Color32[] surface = ReadBackColor32(result.PackedSurface, WorkingSize * WorkingSize);
-                    int maxBits = 0;
-                    for (int i = 0; i < surface.Length; i++)
-                    {
-                        maxBits = Mathf.Max(maxBits, surface[i].a & RoughnessMask);
-                    }
+                NamerGeneratedAsset asset = result.GeneratedAssets[0];
+                Assert.IsFalse(string.IsNullOrEmpty(asset.MeshPath), "decomposition ON writes the split mesh");
+                Assert.IsTrue(string.IsNullOrEmpty(asset.ResidualTexturePath),
+                    "the projection makes base ÷ vcInterp white by construction — WriteResidual OFF must write no residual EXR");
 
-                    Assert.Greater(maxBits, 0,
-                        "packed surface alpha bits 0-5 must carry non-zero extracted roughness where the base had baked gloss");
-                }
-                finally
-                {
-                    pipeline.ReleaseResult(result);
-                }
+                // The written split mesh carries Color32 vertex colors.
+                Mesh generatedMesh = AssetDatabase.LoadAssetAtPath<Mesh>(asset.MeshPath);
+                Assert.IsNotNull(generatedMesh, "generated mesh must load: " + asset.MeshPath);
+                Assert.Greater(generatedMesh.colors32.Length, 0, "the split mesh must carry Color32 vertex colors");
+
+                // The packed surface is written.
+                Assert.IsFalse(string.IsNullOrEmpty(asset.SurfaceTexturePath), "the packed surface PNG must be written");
             }
             finally
             {
-                pipeline.Dispose();
+                Destroy(gameObject);
+                RestorePrefs(prefs);
+                AssetDatabase.DeleteAsset(TempFolder);
             }
 
-            Destroy(baseMap, whiteOcclusion, mesh);
             yield return null;
         }
 
-        [UnityTest]
-        public IEnumerator FitDriven_CancelledFit_SurfacesCancelledFlag()
-        {
-            if (!ComputeAvailable)
-            {
-                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU fit-cancel test (D-15).");
-                yield break;
-            }
-
-            // WR-01 (04.1 review): a cancelled strength search must not vanish silently —
-            // the cancellation has to propagate out of NamerRoughnessFitter.Fit, through
-            // NamerRoughnessPipeline.ExtractRoughness, onto NamerComputeResult so asset-
-            // writing callers can warn that the output carries NO extraction.
-            Mesh mesh = CreateQuadMesh();
-            Texture2D baseMap = CreateBaseMap(WorkingSize, BakedResponse);
-            Texture2D whiteOcclusion = CreateWhiteOcclusion();
-            NamerMaterialInspection inspection = BuildFitDrivenInspection(baseMap, mesh, whiteOcclusion, strength: 1f);
-
-            NamerComputePipeline pipeline = new NamerComputePipeline();
-            try
-            {
-                NamerSplitResult split = MeshVertexSplitter.Split(mesh);
-                Func<float, float> evaluate = ComposeEvaluate(pipeline, split);
-
-                NamerComputeResult result = pipeline.Process(inspection, evaluate, () => true, CollapseErrorThreshold);
-                try
-                {
-                    Assert.IsTrue(result.RoughnessFitCancelled,
-                        "a cancelled fit must surface NamerComputeResult.RoughnessFitCancelled");
-                    Assert.IsNull(result.ExtractedRoughness,
-                        "a cancelled fit must not produce an extracted roughness texture");
-                    Assert.IsFalse(result.NormalizedBaseColorOwnedByRoughnessPool,
-                        "a cancelled fit must fall back to the identity (non-cleaned) normalized base");
-                }
-                finally
-                {
-                    pipeline.ReleaseResult(result);
-                }
-            }
-            finally
-            {
-                pipeline.Dispose();
-            }
-
-            Destroy(baseMap, whiteOcclusion, mesh);
-            yield return null;
-        }
+        // --------------------------------------------------------------------
+        // 2. Packed surface dip follows the transfer (pipeline-level)
+        // --------------------------------------------------------------------
 
         [UnityTest]
-        public IEnumerator FitDriven_PackedRoughness_AdoptsSearchedStrengthNotSliderBlend()
+        public IEnumerator Transfer_PackedRoughness_DipsBySliderDepth()
         {
             if (!ComputeAvailable)
             {
@@ -209,150 +110,115 @@ namespace GraffitiEntertainment.Namer.Tests
                 yield break;
             }
 
-            // The fit-driven roughness texture already carries the SEARCHED strength
-            // (RunFrequencySeparation bakes fit.Strength into both the cleaned base
-            // and the remap), and the fit validated that exact pairing. Re-blending
-            // the packed result by the user slider (NAMERPack _RoughnessExtractStrength
-            // lerp) under-applies the extraction the fit chose — with a live slider of
-            // 0.25 the packed surface adopts only ~25% of the searched response. The
-            // slider blend belongs to the Sobel path only (strength-free texture);
-            // fit-driven must pack at full adoption regardless of the slider.
             Mesh mesh = CreateQuadMesh();
             Texture2D baseMap = CreateBaseMap(WorkingSize, BakedResponse);
             Texture2D whiteOcclusion = CreateWhiteOcclusion();
-            NamerMaterialInspection inspection = BuildFitDrivenInspection(baseMap, mesh, whiteOcclusion, strength: 0.3f);
+            NamerSplitResult split = MeshVertexSplitter.Split(mesh);
 
-            NamerComputePipeline pipeline = new NamerComputePipeline();
-            try
+            using (NamerDecompPipeline decomp = new NamerDecompPipeline())
+            using (NamerComputePipeline pipeline = new NamerComputePipeline())
             {
-                NamerSplitResult split = MeshVertexSplitter.Split(mesh);
-                Func<float, float> evaluate = ComposeEvaluate(pipeline, split);
-
-                NamerComputeResult result = pipeline.Process(inspection, evaluate, null, CollapseErrorThreshold);
+                // Strength 0: no extraction runs, so the packed alpha encodes the authored
+                // scalar (roughness 1.0 -> 63 bits) exactly.
+                NamerMaterialInspection ins0 = BuildInspection(baseMap, mesh, whiteOcclusion, 0f);
+                NamerProjectionContext ctx0 = BuildProjectionContext(split, decomp);
+                NamerComputeResult result0 = pipeline.Process(ins0, ctx0);
+                int min0, max0;
                 try
                 {
-                    Assert.IsNotNull(result.ExtractedRoughness, "fit-driven branch must produce an extracted roughness texture");
-
-                    Color32[] extracted = ReadBackColor32(result.ExtractedRoughness, WorkingSize * WorkingSize);
-                    Color32[] surface = ReadBackColor32(result.PackedSurface, WorkingSize * WorkingSize);
-
-                    int maxBitDelta = 0;
-                    int nonZero = 0;
-                    for (int i = 0; i < surface.Length; i++)
-                    {
-                        int expectedBits = Mathf.RoundToInt((extracted[i].r / 255f) * RoughnessMask);
-                        int packedBits = surface[i].a & RoughnessMask;
-                        maxBitDelta = Mathf.Max(maxBitDelta, Mathf.Abs(packedBits - expectedBits));
-                        if (packedBits > 0)
-                        {
-                            nonZero++;
-                        }
-                    }
-
-                    Assert.Greater(nonZero, 0, "fixture must exercise non-zero extracted roughness");
-                    Assert.LessOrEqual(maxBitDelta, 1,
-                        "fit-driven packed alpha bits 0-5 must FULLY adopt the searched-strength texture (within 1 quantization step), "
-                        + "not lerp(scalar, extracted, userSlider). Max 6-bit delta was " + maxBitDelta);
+                    ReadResultAlphaBits(result0, out min0, out max0);
                 }
                 finally
                 {
-                    pipeline.ReleaseResult(result);
+                    ctx0.Decomp?.Dispose();
+                    pipeline.ReleaseResult(result0);
                 }
-            }
-            finally
-            {
-                pipeline.Dispose();
+
+                Assert.AreEqual(63, max0, "strength 0 must pack the authored scalar exactly (63 bits)");
+                Assert.AreEqual(63, min0, "strength 0 must leave every texel at the authored scalar");
+
+                // Strength 0.5: the removed-detail transfer runs and dips some texels below scalar.
+                NamerMaterialInspection ins5 = BuildInspection(baseMap, mesh, whiteOcclusion, 0.5f);
+                NamerProjectionContext ctx5 = BuildProjectionContext(split, decomp);
+                NamerComputeResult result5 = pipeline.Process(ins5, ctx5);
+                int min5, max5;
+                try
+                {
+                    ReadResultAlphaBits(result5, out min5, out max5);
+                }
+                finally
+                {
+                    ctx5.Decomp?.Dispose();
+                    pipeline.ReleaseResult(result5);
+                }
+
+                Assert.Less(min5, 63, "strength 0.5 must dip some texels below the authored scalar (dip present)");
             }
 
             Destroy(baseMap, whiteOcclusion, mesh);
             yield return null;
         }
 
+        // --------------------------------------------------------------------
+        // 3. The dip signal is removed-luminance, not a Sobel edge
+        // --------------------------------------------------------------------
+
         [UnityTest]
-        public IEnumerator FitDriven_Roughness_UsesSobelEdgeSignal()
+        public IEnumerator Transfer_Roughness_UsesRemovedLumaNotSobel()
         {
             if (!ComputeAvailable)
             {
-                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU Sobel-signal test (D-15).");
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU removed-luma signal test (D-15).");
                 yield break;
             }
 
-            // Design decision (D-08 anchored-inverted, 2026-09-16): the fit-driven roughness
-            // TEXTURE is saturate(scalar - fitStrength * standaloneSobel) — the authored scalar
-            // anchors the map and the direct-polarity Sobel signal dips texels toward gloss —
-            // not the retired high-pass detail remap. Proven by equality against the
-            // independently produced standalone-Sobel texture: same base, same deterministic
-            // kernels.
+            // A smooth interior bump (no sharp edges): the quad's vertex-color fit is ~the
+            // corner value everywhere, so the Gouraud projection removes the bump — removed
+            // luma is large at the bump center and ~0 at the corners. Sobel-of-base is ~0 in
+            // the smooth interior, so a Sobel signal would NOT dip the center; removed-luma
+            // does. The discriminator is smoothness.
             Mesh mesh = CreateQuadMesh();
-            Texture2D baseMap = CreateBaseMap(WorkingSize, BakedResponse);
+            Texture2D baseMap = CreateBaseMap(WorkingSize, SmoothBump);
             Texture2D whiteOcclusion = CreateWhiteOcclusion();
-            NamerMaterialInspection fitInspection = BuildFitDrivenInspection(baseMap, mesh, whiteOcclusion, strength: 0.3f);
-            NamerMaterialInspection sobelInspection = BuildFitDrivenInspection(baseMap, mesh, whiteOcclusion, strength: 1f);
-            sobelInspection.RoughnessEstimator = NamerRoughnessEstimator.Sobel;
+            NamerSplitResult split = MeshVertexSplitter.Split(mesh);
 
-            NamerComputePipeline pipeline = new NamerComputePipeline();
-            try
+            using (NamerDecompPipeline decomp = new NamerDecompPipeline())
+            using (NamerComputePipeline pipeline = new NamerComputePipeline())
             {
-                NamerSplitResult split = MeshVertexSplitter.Split(mesh);
-                Func<float, float> evaluate = ComposeEvaluate(pipeline, split);
-
-                NamerComputeResult fitResult = pipeline.Process(fitInspection, evaluate, null, CollapseErrorThreshold);
-                NamerComputeResult sobelResult = pipeline.Process(sobelInspection, null, null, CollapseErrorThreshold);
+                NamerMaterialInspection inspection = BuildInspection(baseMap, mesh, whiteOcclusion, 0.5f);
+                NamerProjectionContext context = BuildProjectionContext(split, decomp);
+                NamerComputeResult result = pipeline.Process(inspection, context);
                 try
                 {
-                    Assert.IsNotNull(fitResult.ExtractedRoughness, "fit-driven branch must extract");
-                    Assert.IsNotNull(sobelResult.ExtractedRoughness, "standalone Sobel branch must extract");
+                    Color32[] surface = ReadBackColor32(result.PackedSurface, WorkingSize * WorkingSize);
 
-                    Assert.IsTrue(
-                        pipeline.TryGetFitStrength(fitInspection, WorkingSize, WorkingSize, CollapseErrorThreshold, out float fitStrength),
-                        "a PASSED fit must be cached for the readback");
-                    Assert.Greater(fitStrength, 0f,
-                        "the fixture must adopt a non-zero strength, or the signal assertion below is vacuous");
+                    int centerIndex = (WorkingSize / 2) * WorkingSize + (WorkingSize / 2);
+                    int cornerIndex = 0;
+                    int centerBits = surface[centerIndex].a & RoughnessMask;
+                    int cornerBits = surface[cornerIndex].a & RoughnessMask;
 
-                    Color32[] fitTex = ReadBackColor32(fitResult.ExtractedRoughness, WorkingSize * WorkingSize);
-                    Color32[] sobelTex = ReadBackColor32(sobelResult.ExtractedRoughness, WorkingSize * WorkingSize);
-
-                    // scalar for the fit path is inspection.Roughness (the CSNormalize no-map
-                    // branch) — BuildFitDrivenInspection pins it to 1f.
-                    const float scalar = 1f;
-                    const float tolerance = 2f / 255f;
-                    int violations = 0;
-                    float worst = 0f;
-                    for (int i = 0; i < fitTex.Length; i++)
-                    {
-                        float expected = Mathf.Clamp01(scalar - fitStrength * (sobelTex[i].r / 255f));
-                        float delta = Mathf.Abs(fitTex[i].r / 255f - expected);
-                        if (delta > tolerance)
-                        {
-                            violations++;
-                            worst = Mathf.Max(worst, delta);
-                        }
-                    }
-
-                    Assert.AreEqual(0, violations,
-                        "fit-driven roughness must be saturate(scalar - fitStrength * standaloneSobel, fitStrength=" + fitStrength.ToString("0.##")
-                        + ") within " + tolerance.ToString("F3") + " per texel; " + violations + " violations, worst delta "
-                        + worst.ToString("F3") + " (anchored-inverted D-08; the high-pass detail remap is retired)");
+                    Assert.Less(centerBits, cornerBits,
+                        "the smooth interior bump must dip BELOW the quiet corner under RemovedDetail "
+                        + "(removed-luma is high at the center, ~0 at the corner; a Sobel signal would "
+                        + "leave the smooth interior undipped). center=" + centerBits + " corner=" + cornerBits);
                 }
                 finally
                 {
-                    pipeline.ReleaseResult(fitResult);
-                    pipeline.ReleaseResult(sobelResult);
+                    context.Decomp?.Dispose();
+                    pipeline.ReleaseResult(result);
                 }
-            }
-            finally
-            {
-                pipeline.Dispose();
             }
 
             Destroy(baseMap, whiteOcclusion, mesh);
             yield return null;
         }
 
-        // -- 2A: default-on end-to-end acceptance ---------------------------
+        // --------------------------------------------------------------------
+        // 4. Default-on one-texture acceptance (end-to-end)
+        // --------------------------------------------------------------------
 
         [UnityTest]
-        public IEnumerator FitDriven_DefaultOn_DecomposedNoMapAsset_ExtractsAndDropsResidual()
+        public IEnumerator DefaultOn_OneTextureWithDip()
         {
             if (!ComputeAvailable)
             {
@@ -369,8 +235,10 @@ namespace GraffitiEntertainment.Namer.Tests
                 Texture2D baseMap = CreateImportedBaseMap(TempFolder + "/SourceBase.png", WorkingSize, BakedResponse);
                 Texture2D occlusion = CreateImportedWhiteOcclusion(TempFolder + "/SourceOcclusion.png");
                 Material source = CreateSourceMaterial(TempFolder, "SourceMat", baseMap, occlusion);
-                gameObject = CreateSceneObject(sourceMesh, source, "FitDrivenDefaultTarget");
+                gameObject = CreateSceneObject(sourceMesh, source, "DefaultOnTarget");
 
+                // Fresh-default controls: decomposition on, RemovedDetail dip source, Write
+                // Residual off, dip depth at the shipped default (0.25).
                 var settings = new NamerProcessorSettings
                 {
                     Destination = TempFolder + "/Out",
@@ -378,13 +246,10 @@ namespace GraffitiEntertainment.Namer.Tests
                     Suffix = "",
                     OverwriteGenerated = false,
                     DecompositionEnabled = true,
-                    ErrorThreshold = CollapseErrorThreshold,
+                    ErrorThreshold = ErrorThreshold,
                     ResidualResolution = ResidualResolution,
-                    // Pinned explicitly (2026-09-15 regression): both live in EditorPrefs,
-                    // and the live user session held Estimator = Sobel, which routed this
-                    // "DefaultOn" run through the Sobel path and kept the residual. The
-                    // file's CapturePrefs/RestorePrefs keeps the user's session intact.
-                    RoughnessEstimator = (int)NamerRoughnessEstimator.FitDriven,
+                    DipSource = (int)NamerDipSource.RemovedDetail,
+                    WriteResidual = false,
                     RoughnessExtractStrength = NamerEditorConstants.DefaultRoughnessExtractStrength,
                 };
 
@@ -395,12 +260,12 @@ namespace GraffitiEntertainment.Namer.Tests
                 NamerGeneratedAsset asset = result.GeneratedAssets[0];
                 Assert.IsFalse(string.IsNullOrEmpty(asset.MeshPath), "decomposition ON writes the split mesh");
                 Assert.IsTrue(string.IsNullOrEmpty(asset.ResidualTexturePath),
-                    "fit-driven extraction must collapse the residual (no residual written)");
+                    "default WriteResidual OFF produces the one-texture outcome (no residual EXR)");
 
-                // Extraction ran: the packed surface alpha bits 0-5 carry non-trivial roughness.
-                Color32 packed = ReadPngPixel32(asset.SurfaceTexturePath);
-                Assert.Greater((int)(packed.a & RoughnessMask), 0,
-                    "default-on fit-driven extraction must pack non-zero roughness into alpha bits 0-5");
+                // The default dip-depth 0.25 transfers the removed-luma into the packed alpha.
+                ReadSurfaceAlphaBits(asset.SurfaceTexturePath, out int minBits, out int maxBits);
+                Assert.Less(minBits, 63,
+                    "the default-on transfer must pack a non-scalar roughness dip into surface alpha bits 0-5");
 
                 Material generatedMaterial = AssetDatabase.LoadAssetAtPath<Material>(asset.MaterialPath);
                 Assert.IsNotNull(generatedMaterial, "generated material must load: " + asset.MaterialPath);
@@ -419,55 +284,34 @@ namespace GraffitiEntertainment.Namer.Tests
 
         // --------------------------------------------------------------------
 
-        /// <summary>Composes the 3A evaluate callback the way NamerProcessor does: per-strength
-        /// GPU sharp-removal -> readback -> vertex-color refit + residual -> post-refit MaxError.</summary>
-        private static Func<float, float> ComposeEvaluate(NamerComputePipeline pipeline, NamerSplitResult split)
+        /// <summary>Builds a projection context the way NamerProcessor does (its internal
+        /// CreateProjectionContext is assembly-private, so the test mirrors the Run contract).</summary>
+        private static NamerProjectionContext BuildProjectionContext(NamerSplitResult split, NamerDecompPipeline decomp)
         {
-            return strength =>
+            var context = new NamerProjectionContext { Split = split };
+            context.Run = (sourceBase, projectedOut) =>
             {
-                RenderTexture cleaned = pipeline.ExtractSharpRemoval(WorkingSize, WorkingSize, strength);
+                NativeArray<Color32> texels = ReadBack(sourceBase);
                 try
                 {
-                    // FitOnlyMaxError (the D-13 gate statistic, residual == identity) is the
-                    // search objective — mirroring NamerProcessor.EvaluateRefitMaxError. The
-                    // with-residual MaxError reconstructs near-perfectly whenever the residual
-                    // is kept (it is the exact quotient base/vc) and would stop the ladder at
-                    // strength 0.0. Both stats are threshold-independent (the threshold only
-                    // drives the D-13 ResidualRequired gate / resolution search), so the
-                    // evaluate callback keeps the shipped ErrorThreshold while the fit uses
-                    // CollapseErrorThreshold.
-                    return Decompose(split, cleaned, ErrorThreshold).FitOnlyMaxError;
+                    using (VertexColorFitResult fit = VertexColorFitter.Fit(split, texels, WorkingSize, WorkingSize))
+                    {
+                        context.Colors = fit.ToColor32Array();
+                        context.Decomp = decomp.GenerateResidual(
+                            split, context.Colors, sourceBase, WorkingSize, WorkingSize,
+                            ErrorThreshold, ResidualResolution, projectedOut, NamerResidualMode.NeverKeep);
+                    }
                 }
                 finally
                 {
-                    pipeline.ReleaseExtractedRoughness(cleaned);
+                    texels.Dispose();
                 }
             };
+
+            return context;
         }
 
-        private static NamerDecompErrorStats Decompose(NamerSplitResult split, RenderTexture baseRt, float threshold)
-        {
-            NativeArray<Color32> texels = ReadBack(baseRt);
-            try
-            {
-                using (VertexColorFitResult fit = VertexColorFitter.Fit(split, texels, WorkingSize, WorkingSize))
-                {
-                    Color32[] colors = fit.ToColor32Array();
-                    using (NamerDecompPipeline decomp = new NamerDecompPipeline())
-                    using (NamerDecompOutput output = decomp.GenerateResidual(
-                        split, colors, baseRt, WorkingSize, WorkingSize, threshold, ResidualResolution))
-                    {
-                        return output.Stats;
-                    }
-                }
-            }
-            finally
-            {
-                texels.Dispose();
-            }
-        }
-
-        private static NamerMaterialInspection BuildFitDrivenInspection(Texture2D baseMap, Mesh mesh, Texture2D occlusionMap, float strength)
+        private static NamerMaterialInspection BuildInspection(Texture2D baseMap, Mesh mesh, Texture2D occlusionMap, float strength)
         {
             return new NamerMaterialInspection
             {
@@ -476,17 +320,16 @@ namespace GraffitiEntertainment.Namer.Tests
                 NormalMap = null,
                 // Authored (white) occlusion keeps the D-07 gate on the authored branch: with
                 // a null map the pipeline EXTRACTS AO from the base's own luminance and the
-                // normalize pass un-multiplies it, so the BakedResponse gradient is read as
-                // baked shading and the left half of NormalizedBaseColor is destroyed
-                // (measured fit-only error 0.2869 — un-fittable, collapse impossible). The
-                // fixtures isolate vertex-fit/extraction behavior, so no AO may interfere.
+                // normalize pass un-multiplies it, so the fixture's gradient is read as baked
+                // shading and the base is destroyed. The fixtures isolate the projection/transfer
+                // behavior, so no AO may interfere.
                 OcclusionMap = occlusionMap,
                 MetallicGlossMap = null, // baked response — no authored metallic/gloss map
                 Metallic = 0f,
                 Smoothness = 0f,
                 Roughness = 1f,
                 RoughnessExtractStrength = strength,
-                RoughnessEstimator = NamerRoughnessEstimator.FitDriven,
+                DipSource = NamerDipSource.RemovedDetail,
                 Emissive = 0f,
                 AoUnmultiplyStrength = 1f,
                 SmoothnessTextureChannel = 0,
@@ -495,13 +338,25 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         /// <summary>Baked-response base: a low-frequency gradient (fittable by vertex colors)
-        /// with a baked high-frequency gloss detail (what the fit-driven extraction removes).</summary>
+        /// with a baked high-frequency gloss detail (what the Gouraud projection removes).</summary>
         private static Color BakedResponse(int x, int y, int size)
         {
             float gradient = (float)x / size;
             float gloss = 0.10f * Mathf.Sin(x * 0.6f) * Mathf.Sin(y * 0.6f);
             float v = Mathf.Clamp01(gradient + gloss);
             return new Color(v, v, v, 1f);
+        }
+
+        /// <summary>Smooth interior bump (no sharp edges): the removed-luma is large at the
+        /// center and ~0 at the corners; the Sobel magnitude is ~0 across the smooth interior.</summary>
+        private static Color SmoothBump(int x, int y, int size)
+        {
+            float cx = (size - 1) * 0.5f;
+            float cy = (size - 1) * 0.5f;
+            float dx = (x - cx) / (size * 0.45f);
+            float dy = (y - cy) / (size * 0.45f);
+            float g = Mathf.Exp(-(dx * dx + dy * dy));
+            return new Color(g, g, g, 1f);
         }
 
         // -- fixture helpers -------------------------------------------------
@@ -573,7 +428,39 @@ namespace GraffitiEntertainment.Namer.Tests
             }
         }
 
-        // -- AssetDatabase fixture helpers (test 3) --------------------------
+        private static void ReadResultAlphaBits(NamerComputeResult result, out int minBits, out int maxBits)
+        {
+            Color32[] surface = ReadBackColor32(result.PackedSurface, result.Width * result.Height);
+            minBits = 63;
+            maxBits = 0;
+            for (int i = 0; i < surface.Length; i++)
+            {
+                int bits = surface[i].a & RoughnessMask;
+                minBits = Mathf.Min(minBits, bits);
+                maxBits = Mathf.Max(maxBits, bits);
+            }
+        }
+
+        private static void ReadSurfaceAlphaBits(string path, out int minBits, out int maxBits)
+        {
+            byte[] bytes = File.ReadAllBytes(path);
+            Texture2D texture = new Texture2D(2, 2, TextureFormat.RGBA32, false, true);
+            bool loaded = ImageConversion.LoadImage(texture, bytes);
+            Assert.IsTrue(loaded, "failed to decode PNG at " + path);
+            Color32[] pixels = texture.GetPixels32();
+            Destroy(texture);
+
+            minBits = 63;
+            maxBits = 0;
+            for (int i = 0; i < pixels.Length; i++)
+            {
+                int bits = pixels[i].a & RoughnessMask;
+                minBits = Mathf.Min(minBits, bits);
+                maxBits = Mathf.Max(maxBits, bits);
+            }
+        }
+
+        // -- AssetDatabase fixture helpers --------------------------------
 
         private static Mesh CreateQuadMeshAsset(string path)
         {
@@ -647,9 +534,9 @@ namespace GraffitiEntertainment.Namer.Tests
 
             Material material = new Material(shader) { name = name };
             material.SetTexture("_BaseMap", baseMap);
-            // Same D-07 isolation as BuildFitDrivenInspection: an authored white
-            // _OcclusionMap keeps the pipeline from extracting (and un-multiplying)
-            // synthetic AO out of the base's own gradient.
+            // Same D-07 isolation as BuildInspection: an authored white _OcclusionMap keeps
+            // the pipeline from extracting (and un-multiplying) synthetic AO out of the base's
+            // own gradient.
             if (occlusionMap != null)
             {
                 material.SetTexture("_OcclusionMap", occlusionMap);
@@ -670,21 +557,6 @@ namespace GraffitiEntertainment.Namer.Tests
             MeshRenderer renderer = go.AddComponent<MeshRenderer>();
             renderer.sharedMaterial = material;
             return go;
-        }
-
-        private static Color32 ReadPngPixel32(string path)
-        {
-            byte[] bytes = File.ReadAllBytes(path);
-            Texture2D texture = new Texture2D(2, 2, TextureFormat.RGBA32, false, true);
-            bool loaded = ImageConversion.LoadImage(texture, bytes);
-            Assert.IsTrue(loaded, "failed to decode PNG at " + path);
-            Color pixel = texture.GetPixel(0, 0);
-            Destroy(texture);
-            return new Color32(
-                (byte)Mathf.RoundToInt(pixel.r * 255f),
-                (byte)Mathf.RoundToInt(pixel.g * 255f),
-                (byte)Mathf.RoundToInt(pixel.b * 255f),
-                (byte)Mathf.RoundToInt(pixel.a * 255f));
         }
 
         private static void EnsureTempFolder()
@@ -720,7 +592,8 @@ namespace GraffitiEntertainment.Namer.Tests
             public float ErrorThreshold;
             public int ResidualResolution;
             public float RoughnessExtractStrength;
-            public int RoughnessEstimator;
+            public int DipSource;
+            public bool WriteResidual;
             public bool HadDestination;
             public bool HadPrefix;
             public bool HadSuffix;
@@ -729,7 +602,8 @@ namespace GraffitiEntertainment.Namer.Tests
             public bool HadErrorThreshold;
             public bool HadResidualResolution;
             public bool HadRoughnessExtractStrength;
-            public bool HadRoughnessEstimator;
+            public bool HadDipSource;
+            public bool HadWriteResidual;
         }
 
         private static PrefsSnapshot CapturePrefs()
@@ -744,7 +618,8 @@ namespace GraffitiEntertainment.Namer.Tests
                 ErrorThreshold = EditorPrefs.GetFloat("NamerProcessor.ErrorThreshold", 0.02f),
                 ResidualResolution = EditorPrefs.GetInt("NamerProcessor.ResidualResolution", 0),
                 RoughnessExtractStrength = EditorPrefs.GetFloat("NamerProcessor.RoughnessExtractStrength", 1f),
-                RoughnessEstimator = EditorPrefs.GetInt("NamerProcessor.RoughnessEstimator", 0),
+                DipSource = EditorPrefs.GetInt("NamerProcessor.DipSource", 0),
+                WriteResidual = EditorPrefs.GetBool("NamerProcessor.WriteResidual", false),
                 HadDestination = EditorPrefs.HasKey("NamerProcessor.Destination"),
                 HadPrefix = EditorPrefs.HasKey("NamerProcessor.Prefix"),
                 HadSuffix = EditorPrefs.HasKey("NamerProcessor.Suffix"),
@@ -753,7 +628,8 @@ namespace GraffitiEntertainment.Namer.Tests
                 HadErrorThreshold = EditorPrefs.HasKey("NamerProcessor.ErrorThreshold"),
                 HadResidualResolution = EditorPrefs.HasKey("NamerProcessor.ResidualResolution"),
                 HadRoughnessExtractStrength = EditorPrefs.HasKey("NamerProcessor.RoughnessExtractStrength"),
-                HadRoughnessEstimator = EditorPrefs.HasKey("NamerProcessor.RoughnessEstimator"),
+                HadDipSource = EditorPrefs.HasKey("NamerProcessor.DipSource"),
+                HadWriteResidual = EditorPrefs.HasKey("NamerProcessor.WriteResidual"),
             };
         }
 
@@ -783,8 +659,11 @@ namespace GraffitiEntertainment.Namer.Tests
             if (snapshot.HadRoughnessExtractStrength) { EditorPrefs.SetFloat("NamerProcessor.RoughnessExtractStrength", snapshot.RoughnessExtractStrength); }
             else { EditorPrefs.DeleteKey("NamerProcessor.RoughnessExtractStrength"); }
 
-            if (snapshot.HadRoughnessEstimator) { EditorPrefs.SetInt("NamerProcessor.RoughnessEstimator", snapshot.RoughnessEstimator); }
-            else { EditorPrefs.DeleteKey("NamerProcessor.RoughnessEstimator"); }
+            if (snapshot.HadDipSource) { EditorPrefs.SetInt("NamerProcessor.DipSource", snapshot.DipSource); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.DipSource"); }
+
+            if (snapshot.HadWriteResidual) { EditorPrefs.SetBool("NamerProcessor.WriteResidual", snapshot.WriteResidual); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.WriteResidual"); }
         }
     }
 }

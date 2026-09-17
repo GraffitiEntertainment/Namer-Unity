@@ -15,7 +15,7 @@ namespace GraffitiEntertainment.Namer.Tests
     /// <summary>
     /// Phase 04.1 plan 03 acceptance tests (the one-texture Neo outcome + the D-06
     /// roughness-offset escape hatch). Proves: (1) an extraction-processed asset whose
-    /// fit-driven refit collapses the residual leaves <c>_BaseResidualMap</c> UNBOUND (one
+    /// projection collapses the residual leaves <c>_BaseResidualMap</c> UNBOUND (one
     /// surface PNG + vertex-colored mesh, no residual EXR) while the Base PNG is still
     /// written (D-06/D-14 switch-back); (2) the D-06 <c>_RoughnessOffsetMap</c> is neutral
     /// when unset (the shader <c>"black" {}</c> default samples <c>.r == 0</c>, so decode is
@@ -76,7 +76,7 @@ namespace GraffitiEntertainment.Namer.Tests
                     ResidualResolution = ResidualResolution,
                     // Extraction ENABLED explicitly (the plan's headline path, not just defaults):
                     RoughnessExtractStrength = 1f,
-                    RoughnessEstimator = (int)NamerRoughnessEstimator.FitDriven,
+                    DipSource = (int)NamerDipSource.RemovedDetail,
                 };
 
                 NamerProcessResult result = NamerProcessor.Process(gameObject, settings);
@@ -92,7 +92,7 @@ namespace GraffitiEntertainment.Namer.Tests
 
                 // The residual collapses -> no residual EXR, and _BaseResidualMap stays unbound.
                 Assert.IsTrue(string.IsNullOrEmpty(asset.ResidualTexturePath),
-                    "fit-driven extraction must collapse the residual (no residual EXR written)");
+                    "the projection must collapse the residual (no residual EXR written)");
 
                 // The Base PNG is STILL written to disk (D-06/D-14 switch-back representation),
                 // even though it is not bound to _BaseResidualMap.
@@ -166,7 +166,7 @@ namespace GraffitiEntertainment.Namer.Tests
         // --------------------------------------------------------------------
 
         [UnityTest]
-        public IEnumerator HonestGate_AlbedoDetail_StillRequiresResidual()
+        public IEnumerator HonestGate_AlbedoDetail_OneTextureByDefault()
         {
             if (!ComputeAvailable)
             {
@@ -177,8 +177,10 @@ namespace GraffitiEntertainment.Namer.Tests
             const int w = 64;
             const int h = 64;
 
-            // Constant vertex colors cannot represent a high-frequency base, so the residual
-            // must be required (D-13 honest gate: one-texture is earned, never assumed).
+            // Constant vertex colors cannot represent a high-frequency base, so the removed
+            // detail is non-trivial. 04.2: the residual gate is the Write Residual checkbox —
+            // OFF (NeverKeep) = one-texture outcome (no EXR); ON (AlwaysKeep) = EXR written
+            // carrying the removed detail.
             NamerSplitResult split = CreateSplitQuad(0f, 1f);
             Color32[] colors = ConstantColors(split.VertexCount, 128);
             RenderTexture baseRt = CreateHighFrequencyBase(w, h);
@@ -187,17 +189,36 @@ namespace GraffitiEntertainment.Namer.Tests
             {
                 try
                 {
-                    NamerDecompOutput output = pipeline.GenerateResidual(split, colors, baseRt, w, h, ErrorThreshold, ResidualResolution);
+                    // Write Residual OFF (default): one-texture — residual dropped.
+                    NamerDecompOutput off = pipeline.GenerateResidual(
+                        split, colors, baseRt, w, h, ErrorThreshold, ResidualResolution,
+                        projectedOut: null, mode: NamerResidualMode.NeverKeep);
                     try
                     {
-                        Assert.IsTrue(output.Stats.ResidualRequired,
-                            "genuine high-frequency albedo detail must require a residual (honest gate)");
-                        Assert.IsNotNull(output.Residual,
-                            "a required residual must be non-null");
+                        Assert.IsFalse(off.Stats.ResidualRequired,
+                            "Write Residual OFF must drop the residual (one-texture outcome by default)");
+                        Assert.IsNull(off.Residual,
+                            "a dropped residual must be null (no EXR written)");
                     }
                     finally
                     {
-                        output.Dispose();
+                        off.Dispose();
+                    }
+
+                    // Write Residual ON: the EXR is written.
+                    NamerDecompOutput on = pipeline.GenerateResidual(
+                        split, colors, baseRt, w, h, ErrorThreshold, ResidualResolution,
+                        projectedOut: null, mode: NamerResidualMode.AlwaysKeep);
+                    try
+                    {
+                        Assert.IsTrue(on.Stats.ResidualRequired,
+                            "Write Residual ON must force the residual required");
+                        Assert.IsNotNull(on.Residual,
+                            "a forced-kept residual must be non-null");
+                    }
+                    finally
+                    {
+                        on.Dispose();
                     }
                 }
                 finally
@@ -312,7 +333,7 @@ namespace GraffitiEntertainment.Namer.Tests
                 Smoothness = 0f,
                 Roughness = 1f,
                 RoughnessExtractStrength = 0f,
-                RoughnessEstimator = NamerRoughnessEstimator.FitDriven,
+                DipSource = NamerDipSource.RemovedDetail,
                 Emissive = 0f,
                 AoUnmultiplyStrength = 1f,
                 SmoothnessTextureChannel = 0,
@@ -320,7 +341,7 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         /// <summary>Baked-response base: a low-frequency gradient (fittable by vertex colors)
-        /// with a baked high-frequency gloss detail (what the fit-driven extraction removes).</summary>
+        /// with a baked high-frequency gloss detail (what the Gouraud projection removes).</summary>
         private static Color BakedResponse(int x, int y, int size)
         {
             float gradient = (float)x / size;
@@ -575,7 +596,8 @@ namespace GraffitiEntertainment.Namer.Tests
             public float ErrorThreshold;
             public int ResidualResolution;
             public float RoughnessExtractStrength;
-            public int RoughnessEstimator;
+            public int DipSource;
+            public bool WriteResidual;
             public bool HadDestination;
             public bool HadPrefix;
             public bool HadSuffix;
@@ -584,7 +606,8 @@ namespace GraffitiEntertainment.Namer.Tests
             public bool HadErrorThreshold;
             public bool HadResidualResolution;
             public bool HadRoughnessExtractStrength;
-            public bool HadRoughnessEstimator;
+            public bool HadDipSource;
+            public bool HadWriteResidual;
         }
 
         private static PrefsSnapshot CapturePrefs()
@@ -599,7 +622,8 @@ namespace GraffitiEntertainment.Namer.Tests
                 ErrorThreshold = EditorPrefs.GetFloat("NamerProcessor.ErrorThreshold", 0.02f),
                 ResidualResolution = EditorPrefs.GetInt("NamerProcessor.ResidualResolution", 0),
                 RoughnessExtractStrength = EditorPrefs.GetFloat("NamerProcessor.RoughnessExtractStrength", 1f),
-                RoughnessEstimator = EditorPrefs.GetInt("NamerProcessor.RoughnessEstimator", 0),
+                DipSource = EditorPrefs.GetInt("NamerProcessor.DipSource", 0),
+                WriteResidual = EditorPrefs.GetBool("NamerProcessor.WriteResidual", false),
                 HadDestination = EditorPrefs.HasKey("NamerProcessor.Destination"),
                 HadPrefix = EditorPrefs.HasKey("NamerProcessor.Prefix"),
                 HadSuffix = EditorPrefs.HasKey("NamerProcessor.Suffix"),
@@ -608,7 +632,8 @@ namespace GraffitiEntertainment.Namer.Tests
                 HadErrorThreshold = EditorPrefs.HasKey("NamerProcessor.ErrorThreshold"),
                 HadResidualResolution = EditorPrefs.HasKey("NamerProcessor.ResidualResolution"),
                 HadRoughnessExtractStrength = EditorPrefs.HasKey("NamerProcessor.RoughnessExtractStrength"),
-                HadRoughnessEstimator = EditorPrefs.HasKey("NamerProcessor.RoughnessEstimator"),
+                HadDipSource = EditorPrefs.HasKey("NamerProcessor.DipSource"),
+                HadWriteResidual = EditorPrefs.HasKey("NamerProcessor.WriteResidual"),
             };
         }
 
@@ -638,8 +663,11 @@ namespace GraffitiEntertainment.Namer.Tests
             if (snapshot.HadRoughnessExtractStrength) { EditorPrefs.SetFloat("NamerProcessor.RoughnessExtractStrength", snapshot.RoughnessExtractStrength); }
             else { EditorPrefs.DeleteKey("NamerProcessor.RoughnessExtractStrength"); }
 
-            if (snapshot.HadRoughnessEstimator) { EditorPrefs.SetInt("NamerProcessor.RoughnessEstimator", snapshot.RoughnessEstimator); }
-            else { EditorPrefs.DeleteKey("NamerProcessor.RoughnessEstimator"); }
+            if (snapshot.HadDipSource) { EditorPrefs.SetInt("NamerProcessor.DipSource", snapshot.DipSource); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.DipSource"); }
+
+            if (snapshot.HadWriteResidual) { EditorPrefs.SetBool("NamerProcessor.WriteResidual", snapshot.WriteResidual); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.WriteResidual"); }
         }
     }
 }

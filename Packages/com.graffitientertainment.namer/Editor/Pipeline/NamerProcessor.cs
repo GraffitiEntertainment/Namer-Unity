@@ -137,10 +137,9 @@ namespace GraffitiEntertainment.Namer.Editor
                     inspection.RoughnessExtractStrength = settings.RoughnessExtractStrength;
                     inspection.DipSource = (NamerDipSource)settings.DipSource;
 
-                    // ResolveSourceMesh ordering (plan 02): attach the source mesh BEFORE
-                    // Process so the fit-driven estimator can resolve its 1A refit-precondition
-                    // and the composed evaluate callback can reference it. (The decomp block's
-                    // old assignment here moved up.)
+                    // ResolveSourceMesh ordering: attach the source mesh BEFORE Process so the
+                    // projection/transfer and the AO three-way gate can reference it. (The
+                    // decomp block's old assignment here moved up.)
                     if (settings.DecompositionEnabled)
                     {
                         inspection.BakeSourceMesh = decomposeSourceMesh;

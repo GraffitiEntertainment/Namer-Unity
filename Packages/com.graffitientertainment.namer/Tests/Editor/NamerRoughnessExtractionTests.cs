@@ -46,7 +46,7 @@ namespace GraffitiEntertainment.Namer.Tests
                     NamerMaterialInspection inspection = BuildInspection(
                         baseMap, baseIsSrgb: false, metallicGlossMap: null,
                         smoothness: 0f, roughness: 1f,
-                        roughnessExtractStrength: 1f, roughnessEstimator: NamerRoughnessEstimator.Sobel);
+                        roughnessExtractStrength: 1f, dipSource: NamerDipSource.SobelEdge);
 
                     NamerComputeResult result = pipeline.Process(inspection);
                     try
@@ -114,7 +114,7 @@ namespace GraffitiEntertainment.Namer.Tests
                     NamerMaterialInspection inspection = BuildInspection(
                         baseMap, baseIsSrgb: false, metallicGlossMap: null,
                         smoothness: 0f, roughness: 1f,
-                        roughnessExtractStrength: 1f, roughnessEstimator: NamerRoughnessEstimator.Sobel);
+                        roughnessExtractStrength: 1f, dipSource: NamerDipSource.SobelEdge);
 
                     NamerComputeResult result = pipeline.Process(inspection);
                     try
@@ -196,7 +196,7 @@ namespace GraffitiEntertainment.Namer.Tests
                     NamerMaterialInspection inspection = BuildInspection(
                         baseMap, baseIsSrgb: false, metallicGlossMap: null,
                         smoothness: 0f, roughness: 1f,
-                        roughnessExtractStrength: 1f, roughnessEstimator: NamerRoughnessEstimator.Sobel);
+                        roughnessExtractStrength: 1f, dipSource: NamerDipSource.SobelEdge);
 
                     NamerComputeResult result = pipeline.Process(inspection);
                     try
@@ -270,7 +270,7 @@ namespace GraffitiEntertainment.Namer.Tests
                     NamerMaterialInspection inspection = BuildInspection(
                         baseMap, baseIsSrgb: false, metallicGlossMap: metallicGlossMap,
                         smoothness: 1f, roughness: 0.5f,
-                        roughnessExtractStrength: 0f, roughnessEstimator: NamerRoughnessEstimator.FitDriven);
+                        roughnessExtractStrength: 0f, dipSource: NamerDipSource.RemovedDetail);
 
                     Color32[] surfaceOff;
                     NamerComputeResult resultOff = pipeline.Process(inspection);
@@ -327,7 +327,7 @@ namespace GraffitiEntertainment.Namer.Tests
             float smoothness,
             float roughness,
             float roughnessExtractStrength,
-            NamerRoughnessEstimator roughnessEstimator)
+            NamerDipSource dipSource)
         {
             return new NamerMaterialInspection
             {
@@ -340,7 +340,7 @@ namespace GraffitiEntertainment.Namer.Tests
                 Smoothness = smoothness,
                 Roughness = roughness,
                 RoughnessExtractStrength = roughnessExtractStrength,
-                RoughnessEstimator = roughnessEstimator,
+                DipSource = dipSource,
                 Emissive = 0.0f,
                 AoUnmultiplyStrength = 1.0f,
                 SmoothnessTextureChannel = 0,

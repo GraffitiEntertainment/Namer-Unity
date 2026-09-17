@@ -32,6 +32,8 @@ namespace GraffitiEntertainment.Namer.Tests
         private const string ThresholdKey = "NamerProcessor.ErrorThreshold";
         private const string ResolutionKey = "NamerProcessor.ResidualResolution";
         private const string RoughnessExtractStrengthKey = "NamerProcessor.RoughnessExtractStrength";
+        private const string DipSourceKey = "NamerProcessor.DipSource";
+        private const string WriteResidualKey = "NamerProcessor.WriteResidual";
 
         private static bool ComputeAvailable =>
             SystemInfo.supportsComputeShaders && SystemInfo.supportsAsyncGPUReadback;
@@ -59,6 +61,7 @@ namespace GraffitiEntertainment.Namer.Tests
                 Assert.AreEqual(sourceMesh, filter.sharedMesh, "scene object must start on the source mesh");
 
                 var settings = NewSettings(decompositionEnabled: true);
+                settings.WriteResidual = true; // force the EXR — the residual-ON subject of this test
 
                 NamerProcessResult result = NamerProcessor.Process(gameObject, settings);
 
@@ -67,7 +70,7 @@ namespace GraffitiEntertainment.Namer.Tests
 
                 NamerGeneratedAsset generated = result.GeneratedAssets[0];
                 Assert.IsFalse(string.IsNullOrEmpty(generated.MeshPath), "decomposition ON must write a split mesh");
-                Assert.IsFalse(string.IsNullOrEmpty(generated.ResidualTexturePath), "a checkerboard base must require a residual");
+                Assert.IsFalse(string.IsNullOrEmpty(generated.ResidualTexturePath), "a checkerboard base must require a residual when Write Residual is ON");
 
                 Mesh generatedMesh = AssetDatabase.LoadAssetAtPath<Mesh>(generated.MeshPath);
                 Texture2D generatedResidual = AssetDatabase.LoadAssetAtPath<Texture2D>(generated.ResidualTexturePath);
@@ -180,6 +183,58 @@ namespace GraffitiEntertainment.Namer.Tests
                 Material generatedMaterial = AssetDatabase.LoadAssetAtPath<Material>(generated.MaterialPath);
                 Assert.IsNull(generatedMaterial.GetTexture("_BaseResidualMap"),
                     "auto-dropped material must leave _BaseResidualMap unbound (white default)");
+
+                Assert.AreNotEqual(sourceMesh, filter.sharedMesh, "the renderer mesh must still swap to the split mesh");
+                Assert.AreEqual(AssetDatabase.LoadAssetAtPath<Mesh>(generated.MeshPath), filter.sharedMesh,
+                    "the renderer must wear the generated split mesh");
+            }
+            finally
+            {
+                Destroy(gameObject);
+                RestorePrefs(prefs);
+                AssetDatabase.DeleteAsset(TempFolder);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Process_WriteResidualOff_WritesOneTextureNoExr()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU one-texture default test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            EnsureTempFolder();
+            PrefsSnapshot prefs = CapturePrefs();
+            GameObject gameObject = null;
+            try
+            {
+                Mesh sourceMesh = CreateQuadMeshAsset(TempFolder + "/SourceQuad.asset");
+                Texture2D baseMap = CreateImportedBaseMap(TempFolder + "/SourceBase.png", 64, 64, Checkerboard);
+                Material source = CreateSourceMaterial(TempFolder, "SourceMat", baseMap);
+                gameObject = CreateSceneObject(sourceMesh, source, "OneTextureDefaultTarget");
+
+                MeshFilter filter = gameObject.GetComponent<MeshFilter>();
+                var settings = NewSettings(decompositionEnabled: true); // WriteResidual OFF (default)
+
+                NamerProcessResult result = NamerProcessor.Process(gameObject, settings);
+
+                Assert.IsNull(result.Error, "Process should succeed: " + result.Error);
+                NamerGeneratedAsset generated = result.GeneratedAssets[0];
+
+                // 04.2 one-texture default: the projection makes base ÷ vcInterp white by
+                // construction, so WriteResidual OFF writes NO residual EXR (the mesh is
+                // still written and swapped).
+                Assert.IsFalse(string.IsNullOrEmpty(generated.MeshPath), "the split mesh is still written");
+                Assert.IsTrue(string.IsNullOrEmpty(generated.ResidualTexturePath), "Write Residual OFF must not write a residual EXR");
+
+                Material generatedMaterial = AssetDatabase.LoadAssetAtPath<Material>(generated.MaterialPath);
+                Assert.IsNotNull(generatedMaterial, "generated material must load");
+                Assert.IsNull(generatedMaterial.GetTexture("_BaseResidualMap"),
+                    "one-texture outcome must leave _BaseResidualMap unbound (white default)");
 
                 Assert.AreNotEqual(sourceMesh, filter.sharedMesh, "the renderer mesh must still swap to the split mesh");
                 Assert.AreEqual(AssetDatabase.LoadAssetAtPath<Mesh>(generated.MeshPath), filter.sharedMesh,
@@ -352,6 +407,7 @@ namespace GraffitiEntertainment.Namer.Tests
                 gameObject = CreateSceneObject(sourceMesh, source, "ReducedResidualTarget");
 
                 var settings = NewSettings(decompositionEnabled: true);
+                settings.WriteResidual = true; // the reduced-resolution EXR is the subject of this test
                 settings.ResidualResolution = 5; // popup index 5 -> ResolutionLadder[4] = 128 px (< 256 source)
 
                 NamerProcessResult result = NamerProcessor.Process(gameObject, settings);
@@ -361,7 +417,7 @@ namespace GraffitiEntertainment.Namer.Tests
 
                 NamerGeneratedAsset generated = result.GeneratedAssets[0];
                 Assert.IsFalse(string.IsNullOrEmpty(generated.ResidualTexturePath),
-                    "a checkerboard base must require a residual");
+                    "a checkerboard base must require a residual when Write Residual is ON");
 
                 Texture2D generatedResidual = AssetDatabase.LoadAssetAtPath<Texture2D>(generated.ResidualTexturePath);
                 Assert.IsNotNull(generatedResidual, "generated residual EXR must load: " + generated.ResidualTexturePath);
@@ -618,12 +674,15 @@ namespace GraffitiEntertainment.Namer.Tests
                 ErrorThreshold = 0.02f,
                 ResidualResolution = 0,
                 // Phase 04.1 plan 02: pin roughness extraction OFF. These fixtures test the
-                // pre-extraction vertex-color decomposition in isolation (the checkerboard must
-                // still require a residual); the default-on fit-driven path is covered by
-                // NamerRoughnessFitTests. Without this pin the shipped default (strength 1)
-                // would sharp-remove the checkerboard and collapse the residual these tests
-                // assert must exist.
+                // vertex-color decomposition in isolation (the checkerboard must still
+                // require a residual when WriteResidual is ON); the projection still runs on
+                // the default RemovedDetail dip source. Without the strength pin the shipped
+                // default would transfer the removed-luma dip into the packed roughness.
                 RoughnessExtractStrength = 0f,
+                // 04.2: pin the projection path explicitly — a live user session holding
+                // SobelEdge would otherwise route these fixtures down the legacy branch.
+                DipSource = (int)NamerDipSource.RemovedDetail,
+                WriteResidual = false,
             };
         }
 
@@ -828,6 +887,8 @@ namespace GraffitiEntertainment.Namer.Tests
             public float ErrorThreshold;
             public int ResidualResolution;
             public float RoughnessExtractStrength;
+            public int DipSource;
+            public bool WriteResidual;
             public bool HadDestination;
             public bool HadPrefix;
             public bool HadSuffix;
@@ -836,6 +897,8 @@ namespace GraffitiEntertainment.Namer.Tests
             public bool HadErrorThreshold;
             public bool HadResidualResolution;
             public bool HadRoughnessExtractStrength;
+            public bool HadDipSource;
+            public bool HadWriteResidual;
         }
 
         private static PrefsSnapshot CapturePrefs()
@@ -850,6 +913,8 @@ namespace GraffitiEntertainment.Namer.Tests
                 ErrorThreshold = EditorPrefs.GetFloat(ThresholdKey, 0.02f),
                 ResidualResolution = EditorPrefs.GetInt(ResolutionKey, 0),
                 RoughnessExtractStrength = EditorPrefs.GetFloat(RoughnessExtractStrengthKey, 1f),
+                DipSource = EditorPrefs.GetInt(DipSourceKey, 0),
+                WriteResidual = EditorPrefs.GetBool(WriteResidualKey, false),
                 HadDestination = EditorPrefs.HasKey(DestinationKey),
                 HadPrefix = EditorPrefs.HasKey(PrefixKey),
                 HadSuffix = EditorPrefs.HasKey(SuffixKey),
@@ -858,6 +923,8 @@ namespace GraffitiEntertainment.Namer.Tests
                 HadErrorThreshold = EditorPrefs.HasKey(ThresholdKey),
                 HadResidualResolution = EditorPrefs.HasKey(ResolutionKey),
                 HadRoughnessExtractStrength = EditorPrefs.HasKey(RoughnessExtractStrengthKey),
+                HadDipSource = EditorPrefs.HasKey(DipSourceKey),
+                HadWriteResidual = EditorPrefs.HasKey(WriteResidualKey),
             };
         }
 
@@ -933,6 +1000,24 @@ namespace GraffitiEntertainment.Namer.Tests
             else
             {
                 EditorPrefs.DeleteKey(RoughnessExtractStrengthKey);
+            }
+
+            if (snapshot.HadDipSource)
+            {
+                EditorPrefs.SetInt(DipSourceKey, snapshot.DipSource);
+            }
+            else
+            {
+                EditorPrefs.DeleteKey(DipSourceKey);
+            }
+
+            if (snapshot.HadWriteResidual)
+            {
+                EditorPrefs.SetBool(WriteResidualKey, snapshot.WriteResidual);
+            }
+            else
+            {
+                EditorPrefs.DeleteKey(WriteResidualKey);
             }
         }
     }

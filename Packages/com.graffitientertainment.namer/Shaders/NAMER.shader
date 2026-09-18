@@ -18,6 +18,18 @@ Shader "GraffitiEntertainment.Namer/NAMER"
 
         _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
 
+        // DIP-02 debug dip-switch gates (hidden — written by the processor window via
+        // Shader.PropertyToID; the "__"-prefixed display string keeps the default
+        // inspector clean). All neutral-default (1.0) so an untouched material decodes
+        // byte-identically to today; _DbgRoughnessNeutral is the mid-roughness value
+        // used when the roughness input is gated off.
+        [HideInInspector] _DbgEnableResidual("__dbgEnableResidual", Float) = 1.0
+        [HideInInspector] _DbgEnableRoughness("__dbgEnableRoughness", Float) = 1.0
+        [HideInInspector] _DbgEnableAO("__dbgEnableAO", Float) = 1.0
+        [HideInInspector] _DbgEnableMetallic("__dbgEnableMetallic", Float) = 1.0
+        [HideInInspector] _DbgEnableEmissive("__dbgEnableEmissive", Float) = 1.0
+        [HideInInspector] _DbgRoughnessNeutral("__dbgRoughnessNeutral", Float) = 0.5
+
         // Keyword-setting toggles: each checkbox writes its float AND sets the
         // matching shader keyword, so the keyword-gated code paths (AlphaDiscard,
         // emission, transparency) are reachable from the default inspector

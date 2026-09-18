@@ -26,6 +26,12 @@ CBUFFER_START(UnityPerMaterial)
     half   _OcclusionStrength;
     half   _Cutoff;
     half   _Surface;
+    half   _DbgEnableResidual;
+    half   _DbgEnableRoughness;
+    half   _DbgEnableAO;
+    half   _DbgEnableMetallic;
+    half   _DbgEnableEmissive;
+    half   _DbgRoughnessNeutral;
 CBUFFER_END
 
 // _SurfaceMap:  LINEAR (non-sRGB) R8G8B8A8_UNorm packed surface texture.
@@ -82,6 +88,9 @@ void InitializeNamerSurfaceData(float2 uv, float4 vertexColor, out SurfaceData s
 {
     float4 surface      = SAMPLE_TEXTURE2D(_SurfaceMap, sampler_SurfaceMap, uv);
     float4 baseResidual = SAMPLE_TEXTURE2D(_BaseResidualMap, sampler_BaseResidualMap, uv);
+    // DIP-02 residual gate: 1.0 keeps the sampled color (byte-identical), 0 neutralizes
+    // to white. Alpha is preserved for AlphaDiscard (.a) below.
+    baseResidual.rgb = lerp(half3(1.0, 1.0, 1.0), baseResidual.rgb, _DbgEnableResidual);
 
     bool metallic;
     bool emissive;
@@ -90,12 +99,17 @@ void InitializeNamerSurfaceData(float2 uv, float4 vertexColor, out SurfaceData s
     float ao;
     float3 normalTS;
     NAMER_DECODE_SURFACE(surface, metallic, emissive, roughness, smoothness, normalTS, ao);
+    // DIP-02 AO gate: 1.0 keeps the decoded AO, 0 neutralizes to 1.0 (white/no AO).
+    ao = lerp(1.0, ao, _DbgEnableAO);
 
     // D-06: additive roughness offset, neutral-when-unset ("black" {} default => .r == 0 =>
     // roughness unchanged => byte-identical decode). Applied here (not inside
     // NAMER_DECODE_SURFACE) so the shared macro's signature is unchanged and the Meta-pass
     // call site (which only reads emissive) is untouched.
     roughness = saturate(roughness + SAMPLE_TEXTURE2D(_RoughnessOffsetMap, sampler_RoughnessOffsetMap, uv).r);
+    // DIP-02 roughness gate: 1.0 keeps the decoded roughness, 0 neutralizes to
+    // _DbgRoughnessNeutral. The existing smoothness recompute on the next line follows.
+    roughness = lerp(_DbgRoughnessNeutral, roughness, _DbgEnableRoughness);
     smoothness = 1.0 - roughness;
 
     half alpha = baseResidual.a * _BaseColor.a;
@@ -104,13 +118,13 @@ void InitializeNamerSurfaceData(float2 uv, float4 vertexColor, out SurfaceData s
     surfaceData.albedo = baseResidual.rgb * _BaseColor.rgb * vertexColor.rgb;
     surfaceData.albedo = AlphaModulate(surfaceData.albedo, alpha);
 
-    surfaceData.metallic   = metallic ? 1.0 : 0.0;
+    surfaceData.metallic   = (metallic ? 1.0 : 0.0) * _DbgEnableMetallic;
     surfaceData.specular   = half3(0.0, 0.0, 0.0);
     surfaceData.smoothness = smoothness;
     surfaceData.normalTS   = normalTS;
     surfaceData.occlusion  = ao;
 #ifdef _EMISSION
-    surfaceData.emission   = _EmissionColor.rgb * (emissive ? 1.0 : 0.0);
+    surfaceData.emission   = _EmissionColor.rgb * (emissive ? 1.0 : 0.0) * _DbgEnableEmissive;
 #else
     surfaceData.emission   = half3(0.0, 0.0, 0.0);
 #endif

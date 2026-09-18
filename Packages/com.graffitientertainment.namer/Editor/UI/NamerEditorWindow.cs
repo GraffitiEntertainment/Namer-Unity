@@ -24,13 +24,13 @@ namespace GraffitiEntertainment.Namer.Editor
     public sealed class NamerEditorWindow : EditorWindow
     {
         /// <summary>
-        /// Shaded-view input toggle labels (DIP-02): the six neutral-default debug gates
+        /// Shaded-view input toggle labels (DIP-02): the seven neutral-default debug gates
         /// exposed as checkboxes in the Preview/Debug section. Read via reflection by
         /// <c>NamerEditorWindowSmokeTests</c>.
         /// </summary>
         internal static readonly string[] ShaderInputToggleLabels =
         {
-            "Base/Residual", "Roughness", "AO", "Metallic", "Emissive", "Vertex Color",
+            "Base/Residual", "Roughness", "AO", "Metallic", "Emissive", "Vertex Color", "Normal",
         };
 
         /// <summary>
@@ -62,6 +62,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private static readonly int DbgEnableMetallicId = Shader.PropertyToID("_DbgEnableMetallic");
         private static readonly int DbgEnableEmissiveId = Shader.PropertyToID("_DbgEnableEmissive");
         private static readonly int DbgEnableVertexColorId = Shader.PropertyToID("_DbgEnableVertexColor");
+        private static readonly int DbgEnableNormalId = Shader.PropertyToID("_DbgEnableNormal");
         private static readonly int DbgRoughnessNeutralId = Shader.PropertyToID("_DbgRoughnessNeutral");
         private static readonly Color TriangleWireframeColor = new Color(0f, 1f, 1f, 1f);
 
@@ -105,6 +106,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private bool _dbgMetallicEnabled = true;
         private bool _dbgEmissiveEnabled = true;
         private bool _dbgVertexColorEnabled = true;
+        private bool _dbgNormalEnabled = true;
         private bool _showTriangles;
         private float _errorThreshold = NamerEditorConstants.DefaultErrorThreshold;
         private int _residualResolution;
@@ -473,6 +475,7 @@ namespace GraffitiEntertainment.Namer.Editor
             float metallic = (_metallicContributionEnabled && _dbgMetallicEnabled) ? 1f : 0f;
             float emissive = (_emissiveContributionEnabled && _dbgEmissiveEnabled) ? 1f : 0f;
             float vertexColor = _dbgVertexColorEnabled ? 1f : 0f;
+            float normal = _dbgNormalEnabled ? 1f : 0f;
             float roughnessNeutral = PrimaryInspection != null ? PrimaryInspection.Roughness : 0.5f;
 
             if (_namerMaterial != null)
@@ -483,6 +486,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 _namerMaterial.SetFloat(DbgEnableMetallicId, metallic);
                 _namerMaterial.SetFloat(DbgEnableEmissiveId, emissive);
                 _namerMaterial.SetFloat(DbgEnableVertexColorId, vertexColor);
+                _namerMaterial.SetFloat(DbgEnableNormalId, normal);
                 _namerMaterial.SetFloat(DbgRoughnessNeutralId, roughnessNeutral);
             }
 
@@ -494,6 +498,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 _generatedMaterial.SetFloat(DbgEnableMetallicId, metallic);
                 _generatedMaterial.SetFloat(DbgEnableEmissiveId, emissive);
                 _generatedMaterial.SetFloat(DbgEnableVertexColorId, vertexColor);
+                _generatedMaterial.SetFloat(DbgEnableNormalId, normal);
                 _generatedMaterial.SetFloat(DbgRoughnessNeutralId, roughnessNeutral);
             }
         }
@@ -945,6 +950,7 @@ namespace GraffitiEntertainment.Namer.Editor
             DrawShaderInputToggle(3, ref _dbgMetallicEnabled);
             DrawShaderInputToggle(4, ref _dbgEmissiveEnabled);
             DrawShaderInputToggle(5, ref _dbgVertexColorEnabled);
+            DrawShaderInputToggle(6, ref _dbgNormalEnabled);
             EditorGUILayout.EndHorizontal();
             EditorGUI.EndDisabledGroup();
             EditorGUILayout.LabelField(

@@ -32,6 +32,7 @@ CBUFFER_START(UnityPerMaterial)
     half   _DbgEnableMetallic;
     half   _DbgEnableEmissive;
     half   _DbgEnableVertexColor;
+    half   _DbgEnableNormal;
     half   _DbgRoughnessNeutral;
 CBUFFER_END
 
@@ -100,6 +101,9 @@ void InitializeNamerSurfaceData(float2 uv, float4 vertexColor, out SurfaceData s
     float ao;
     float3 normalTS;
     NAMER_DECODE_SURFACE(surface, metallic, emissive, roughness, smoothness, normalTS, ao);
+    // DIP-02 normal gate: 1.0 keeps the decoded tangent-space normal, 0 neutralizes to
+    // the flat normal (0,0,1) — a shader-only flat-normal bisect.
+    normalTS = lerp(half3(0.0h, 0.0h, 1.0h), normalTS, _DbgEnableNormal);
     // DIP-02 AO gate: 1.0 keeps the decoded AO, 0 neutralizes to 1.0 (white/no AO).
     ao = lerp(1.0, ao, _DbgEnableAO);
 

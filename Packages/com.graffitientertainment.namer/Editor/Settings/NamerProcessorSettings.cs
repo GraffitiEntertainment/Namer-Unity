@@ -25,6 +25,10 @@ namespace GraffitiEntertainment.Namer.Editor
         private const string RoughnessExtractStrengthKey = "NamerProcessor.RoughnessExtractStrength";
         private const string DipSourceKey = "NamerProcessor.DipSource";
         private const string WriteResidualKey = "NamerProcessor.WriteResidual";
+        private const string RoughnessStageEnabledKey = "NamerProcessor.RoughnessStageEnabled";
+        private const string AoStageEnabledKey = "NamerProcessor.AoStageEnabled";
+        private const string MetallicContributionEnabledKey = "NamerProcessor.MetallicContributionEnabled";
+        private const string EmissiveContributionEnabledKey = "NamerProcessor.EmissiveContributionEnabled";
         private const string FoldoutSourceKey = "NamerProcessor.FoldoutSource";
         private const string FoldoutPreviewKey = "NamerProcessor.FoldoutPreview";
         private const string FoldoutRoughnessExtractionKey = "NamerProcessor.FoldoutRoughnessExtraction";
@@ -93,6 +97,34 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             get { return EditorPrefs.GetBool(DecompositionEnabledKey, NamerEditorConstants.DefaultDecompositionEnabled); }
             set { EditorPrefs.SetBool(DecompositionEnabledKey, value); }
+        }
+
+        /// <summary>Hard stage gate for roughness extraction (DIP-01; default ON = pipeline unchanged).</summary>
+        public bool RoughnessStageEnabled
+        {
+            get { return EditorPrefs.GetBool(RoughnessStageEnabledKey, NamerEditorConstants.DefaultRoughnessStageEnabled); }
+            set { EditorPrefs.SetBool(RoughnessStageEnabledKey, value); }
+        }
+
+        /// <summary>Hard stage gate for AO un-multiply (DIP-01; default ON = pipeline unchanged).</summary>
+        public bool AoStageEnabled
+        {
+            get { return EditorPrefs.GetBool(AoStageEnabledKey, NamerEditorConstants.DefaultAoStageEnabled); }
+            set { EditorPrefs.SetBool(AoStageEnabledKey, value); }
+        }
+
+        /// <summary>Shader-only gate for the metallic contribution (DIP-02; default ON = shader unchanged).</summary>
+        public bool MetallicContributionEnabled
+        {
+            get { return EditorPrefs.GetBool(MetallicContributionEnabledKey, NamerEditorConstants.DefaultMetallicContributionEnabled); }
+            set { EditorPrefs.SetBool(MetallicContributionEnabledKey, value); }
+        }
+
+        /// <summary>Shader-only gate for the emissive contribution (DIP-02; default ON = shader unchanged).</summary>
+        public bool EmissiveContributionEnabled
+        {
+            get { return EditorPrefs.GetBool(EmissiveContributionEnabledKey, NamerEditorConstants.DefaultEmissiveContributionEnabled); }
+            set { EditorPrefs.SetBool(EmissiveContributionEnabledKey, value); }
         }
 
         /// <summary>Max reconstruction error before a residual is required (D-15; default 0.02).</summary>

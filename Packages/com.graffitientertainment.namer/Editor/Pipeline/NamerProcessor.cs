@@ -130,11 +130,11 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 foreach (NamerMaterialInspection inspection in model.Materials)
                 {
-                    inspection.AoUnmultiplyStrength = settings.AoUnmultiplyStrength;
+                    inspection.AoUnmultiplyStrength = settings.AoStageEnabled ? settings.AoUnmultiplyStrength : 0f;
                     inspection.AoBlurRadius = settings.AoBlurRadius;
                     inspection.AoStrength = settings.AoStrength;
                     inspection.AoContrast = settings.AoContrast;
-                    inspection.RoughnessExtractStrength = settings.RoughnessExtractStrength;
+                    inspection.RoughnessExtractStrength = settings.RoughnessStageEnabled ? settings.RoughnessExtractStrength : 0f;
                     inspection.DipSource = (NamerDipSource)settings.DipSource;
 
                     // ResolveSourceMesh ordering: attach the source mesh BEFORE Process so the
@@ -266,6 +266,21 @@ namespace GraffitiEntertainment.Namer.Editor
 
                             NamerGeneratedAsset asset = generator.Generate(computeResult, inspection, settings, destinationFolder, decomp);
                             result.GeneratedAssets.Add(asset);
+
+                            // Surface the chosen residual resolution so a residual-resolution
+                            // choice is never silent (04.2 residual-smeared-reconstruction
+                            // investigation: a manual 128 popup produced a smeared residual
+                            // that read like an adaptive-ladder metric bug). Mirror the
+                            // AssetGenerator writeResidual gate so this logs exactly when a
+                            // residual was actually written.
+                            if (decomp != null && decomp.Stats != null
+                                && decomp.Stats.ResidualRequired && decomp.Residual != null)
+                            {
+                                Debug.Log("[NAMER] Residual written for '"
+                                    + (inspection.Material != null ? inspection.Material.name : "(null)")
+                                    + "' at " + decomp.Stats.ChosenResolution + "px long edge ("
+                                    + decomp.Residual.width + "x" + decomp.Residual.height + " texels).");
+                            }
                         }
                         finally
                         {

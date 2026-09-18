@@ -59,6 +59,18 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>Default vertex-color decomposition toggle (D-05: opt-in, OFF).</summary>
         public const bool DefaultDecompositionEnabled = false;
 
+        /// <summary>Default roughness-extraction stage hard gate (DIP-01; true = opt-out gate, pipeline unchanged).</summary>
+        public const bool DefaultRoughnessStageEnabled = true;
+
+        /// <summary>Default AO un-multiply stage hard gate (DIP-01; true = opt-out gate, pipeline unchanged).</summary>
+        public const bool DefaultAoStageEnabled = true;
+
+        /// <summary>Default metallic-contribution shader gate (DIP-02; true = opt-out, shader unchanged).</summary>
+        public const bool DefaultMetallicContributionEnabled = true;
+
+        /// <summary>Default emissive-contribution shader gate (DIP-02; true = opt-out, shader unchanged).</summary>
+        public const bool DefaultEmissiveContributionEnabled = true;
+
         /// <summary>Default reconstruction-error threshold (D-15).</summary>
         public const float DefaultErrorThreshold = 0.02f;
 

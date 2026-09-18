@@ -193,6 +193,19 @@ namespace GraffitiEntertainment.Namer.Editor
                         residualWritePath = residualPath;
                     }
                 }
+                else
+                {
+                    // D-06 stale-mesh fix: a decomposition-off reprocess re-binds the base
+                    // PNG at _BaseResidualMap, but the previously generated split mesh keeps
+                    // its fitted vertex colors (the mesh write is gated on decomp != null),
+                    // so albedo = base × stale vertex colors double applies. Clear the
+                    // existing mesh's colors to white IN PLACE so the scene reference stays
+                    // intact and decomposition-off renders base-only. No-op when no mesh was
+                    // generated yet.
+                    ClearStaleMeshVertexColors(
+                        ComposePath(inspection, settings, destinationFolder, ".asset"),
+                        settings.OverwriteGenerated);
+                }
 
                 // D-07: bind the residual EXR when decomposed, the base PNG otherwise;
                 // null leaves _BaseResidualMap at its white {} default (D-13 no-texture).
@@ -489,6 +502,42 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             Stamp(AssetDatabase.LoadAssetAtPath<Mesh>(path));
+        }
+
+        /// <summary>
+        /// D-06 stale-mesh fix: clears the vertex colors of an existing generated split
+        /// mesh to white IN PLACE (same asset instance, same path) so a decomposition-off
+        /// reprocess — which re-binds the base PNG while the mesh write stays skipped —
+        /// renders base-only instead of base × previously fitted vertex colors. The in-place
+        /// overwrite keeps scene references pointing at valid geometry (the same discipline
+        /// as <see cref="WriteMeshAsset"/>'s existing overwrite path). No-op when no mesh
+        /// asset exists at the composed path yet.
+        /// </summary>
+        private static void ClearStaleMeshVertexColors(string path, bool overwriteGenerated)
+        {
+            Mesh existing = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+            if (existing == null)
+            {
+                return;
+            }
+
+            EnsureWritableTarget(path, overwriteGenerated);
+
+            int vertexCount = existing.vertexCount;
+            if (vertexCount <= 0)
+            {
+                return;
+            }
+
+            Color32[] white = new Color32[vertexCount];
+            for (int i = 0; i < vertexCount; i++)
+            {
+                white[i] = new Color32(255, 255, 255, 255);
+            }
+
+            existing.colors32 = white;
+            EditorUtility.SetDirty(existing);
+            AssetDatabase.SaveAssetIfDirty(existing);
         }
 
         /// <summary>

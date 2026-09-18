@@ -9,7 +9,7 @@ namespace GraffitiEntertainment.Namer.Tests
     /// <summary>
     /// Headless EditMode smoke for the window facts that do not require window rendering:
     /// the <see cref="NamerProcessorSettings"/> foldout defaults (Source open, others collapsed)
-    /// and the <see cref="NamerEditorWindow.ShaderInputToggleLabels"/> contents/order (the five
+    /// and the <see cref="NamerEditorWindow.ShaderInputToggleLabels"/> contents/order (the six
     /// neutral-default shaded-view toggles, read via reflection). The render-only claims (window
     /// fits a small screen with all sections collapsed; every control reachable by scrolling) are
     /// manual-verification checklist items, not automated tests.
@@ -54,9 +54,9 @@ namespace GraffitiEntertainment.Namer.Tests
             string[] labels = (string[])field.GetValue(null);
             Assert.IsNotNull(labels, "ShaderInputToggleLabels must resolve to a string array");
 
-            string[] expected = { "Residual", "Roughness", "AO", "Metallic", "Emissive" };
+            string[] expected = { "Base/Residual", "Roughness", "AO", "Metallic", "Emissive", "Vertex Color" };
             CollectionAssert.AreEqual(expected, labels,
-                "ShaderInputToggleLabels must be the five neutral-default shaded-view input toggles");
+                "ShaderInputToggleLabels must be the six neutral-default shaded-view input toggles");
         }
 
         // -- EditorPrefs isolation for the foldout keys -----------------------

@@ -31,6 +31,7 @@ CBUFFER_START(UnityPerMaterial)
     half   _DbgEnableAO;
     half   _DbgEnableMetallic;
     half   _DbgEnableEmissive;
+    half   _DbgEnableVertexColor;
     half   _DbgRoughnessNeutral;
 CBUFFER_END
 
@@ -114,6 +115,10 @@ void InitializeNamerSurfaceData(float2 uv, float4 vertexColor, out SurfaceData s
 
     half alpha = baseResidual.a * _BaseColor.a;
     alpha = AlphaDiscard(alpha, _Cutoff);
+
+    // DIP-02 vertex-color gate: 1.0 keeps the fitted vertex colors, 0 neutralizes to
+    // white so albedo shows the sampled base/residual term alone.
+    vertexColor.rgb = lerp(half3(1.0, 1.0, 1.0), vertexColor.rgb, _DbgEnableVertexColor);
 
     surfaceData.albedo = baseResidual.rgb * _BaseColor.rgb * vertexColor.rgb;
     surfaceData.albedo = AlphaModulate(surfaceData.albedo, alpha);

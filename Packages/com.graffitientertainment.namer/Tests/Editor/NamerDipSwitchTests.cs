@@ -8,7 +8,7 @@ namespace GraffitiEntertainment.Namer.Tests
     /// <summary>
     /// DIP-01/DIP-02 debug dip-switch tests. Pins the four persisted step-gate bools
     /// (EditorPrefs round-trip + fresh defaults) and the shader's neutral-default debug
-    /// gates (five _DbgEnable* floats default 1.0, _DbgRoughnessNeutral defaults 0.5).
+    /// gates (six _DbgEnable* floats default 1.0, _DbgRoughnessNeutral defaults 0.5).
     /// Mirrors <see cref="NamerUIControlsTests"/> prefs snapshot/restore and
     /// <see cref="NamerOneTextureTests"/> shader-default patterns.
     /// </summary>
@@ -126,7 +126,7 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         /// <summary>
-        /// Shader defaults: the five _DbgEnable* gates default to neutral 1.0 and
+        /// Shader defaults: the six _DbgEnable* gates default to neutral 1.0 and
         /// _DbgRoughnessNeutral defaults to 0.5 on a freshly created material, so an
         /// untouched material decodes byte-identically to the pre-dip-switch shader.
         /// </summary>
@@ -143,6 +143,7 @@ namespace GraffitiEntertainment.Namer.Tests
                 "_DbgEnableAO",
                 "_DbgEnableMetallic",
                 "_DbgEnableEmissive",
+                "_DbgEnableVertexColor",
             };
             foreach (string gate in gates)
             {

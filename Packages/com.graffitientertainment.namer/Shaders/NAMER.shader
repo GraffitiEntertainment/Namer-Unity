@@ -28,6 +28,7 @@ Shader "GraffitiEntertainment.Namer/NAMER"
         [HideInInspector] _DbgEnableAO("__dbgEnableAO", Float) = 1.0
         [HideInInspector] _DbgEnableMetallic("__dbgEnableMetallic", Float) = 1.0
         [HideInInspector] _DbgEnableEmissive("__dbgEnableEmissive", Float) = 1.0
+        [HideInInspector] _DbgEnableVertexColor("__dbgEnableVertexColor", Float) = 1.0
         [HideInInspector] _DbgRoughnessNeutral("__dbgRoughnessNeutral", Float) = 0.5
 
         // Keyword-setting toggles: each checkbox writes its float AND sets the

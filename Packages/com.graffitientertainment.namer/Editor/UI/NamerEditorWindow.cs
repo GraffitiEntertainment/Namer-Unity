@@ -24,13 +24,13 @@ namespace GraffitiEntertainment.Namer.Editor
     public sealed class NamerEditorWindow : EditorWindow
     {
         /// <summary>
-        /// Shaded-view input toggle labels (DIP-02): the five neutral-default debug gates
+        /// Shaded-view input toggle labels (DIP-02): the six neutral-default debug gates
         /// exposed as checkboxes in the Preview/Debug section. Read via reflection by
         /// <c>NamerEditorWindowSmokeTests</c>.
         /// </summary>
         internal static readonly string[] ShaderInputToggleLabels =
         {
-            "Residual", "Roughness", "AO", "Metallic", "Emissive",
+            "Base/Residual", "Roughness", "AO", "Metallic", "Emissive", "Vertex Color",
         };
 
         /// <summary>
@@ -61,7 +61,9 @@ namespace GraffitiEntertainment.Namer.Editor
         private static readonly int DbgEnableAoId = Shader.PropertyToID("_DbgEnableAO");
         private static readonly int DbgEnableMetallicId = Shader.PropertyToID("_DbgEnableMetallic");
         private static readonly int DbgEnableEmissiveId = Shader.PropertyToID("_DbgEnableEmissive");
+        private static readonly int DbgEnableVertexColorId = Shader.PropertyToID("_DbgEnableVertexColor");
         private static readonly int DbgRoughnessNeutralId = Shader.PropertyToID("_DbgRoughnessNeutral");
+        private static readonly Color TriangleWireframeColor = new Color(0f, 1f, 1f, 1f);
 
         private NamerProcessorSettings _settings;
         private NamerPreviewRenderer _preview;
@@ -102,6 +104,8 @@ namespace GraffitiEntertainment.Namer.Editor
         private bool _dbgAoEnabled = true;
         private bool _dbgMetallicEnabled = true;
         private bool _dbgEmissiveEnabled = true;
+        private bool _dbgVertexColorEnabled = true;
+        private bool _showTriangles;
         private float _errorThreshold = NamerEditorConstants.DefaultErrorThreshold;
         private int _residualResolution;
         private float _roughnessExtractStrength = NamerEditorConstants.DefaultRoughnessExtractStrength;
@@ -468,6 +472,7 @@ namespace GraffitiEntertainment.Namer.Editor
             float ao = _dbgAoEnabled ? 1f : 0f;
             float metallic = (_metallicContributionEnabled && _dbgMetallicEnabled) ? 1f : 0f;
             float emissive = (_emissiveContributionEnabled && _dbgEmissiveEnabled) ? 1f : 0f;
+            float vertexColor = _dbgVertexColorEnabled ? 1f : 0f;
             float roughnessNeutral = PrimaryInspection != null ? PrimaryInspection.Roughness : 0.5f;
 
             if (_namerMaterial != null)
@@ -477,6 +482,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 _namerMaterial.SetFloat(DbgEnableAoId, ao);
                 _namerMaterial.SetFloat(DbgEnableMetallicId, metallic);
                 _namerMaterial.SetFloat(DbgEnableEmissiveId, emissive);
+                _namerMaterial.SetFloat(DbgEnableVertexColorId, vertexColor);
                 _namerMaterial.SetFloat(DbgRoughnessNeutralId, roughnessNeutral);
             }
 
@@ -487,6 +493,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 _generatedMaterial.SetFloat(DbgEnableAoId, ao);
                 _generatedMaterial.SetFloat(DbgEnableMetallicId, metallic);
                 _generatedMaterial.SetFloat(DbgEnableEmissiveId, emissive);
+                _generatedMaterial.SetFloat(DbgEnableVertexColorId, vertexColor);
                 _generatedMaterial.SetFloat(DbgRoughnessNeutralId, roughnessNeutral);
             }
         }
@@ -923,6 +930,7 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 DrawPreviewPaneTexture(previewRect, previewResult);
                 DrawPreviewPaneOutline(previewRect);
+                DrawTriangleWireframe(previewRect, afterMesh);
             }
             else
             {
@@ -936,11 +944,22 @@ namespace GraffitiEntertainment.Namer.Editor
             DrawShaderInputToggle(2, ref _dbgAoEnabled);
             DrawShaderInputToggle(3, ref _dbgMetallicEnabled);
             DrawShaderInputToggle(4, ref _dbgEmissiveEnabled);
+            DrawShaderInputToggle(5, ref _dbgVertexColorEnabled);
             EditorGUILayout.EndHorizontal();
             EditorGUI.EndDisabledGroup();
             EditorGUILayout.LabelField(
                 new GUIContent("Toggles neutralize the matching input in the full shaded After view."),
                 EditorStyles.miniLabel);
+
+            bool newShowTriangles = EditorGUILayout.Toggle(
+                new GUIContent("Triangles",
+                    "Overlays the After mesh's triangle wireframe on the preview render (visual debug only)."),
+                _showTriangles);
+            if (newShowTriangles != _showTriangles)
+            {
+                _showTriangles = newShowTriangles;
+                Repaint();
+            }
 
             EditorGUILayout.Space();
         }
@@ -981,6 +1000,64 @@ namespace GraffitiEntertainment.Namer.Editor
             Rect rightPane = new Rect(previewRect.x + previewRect.width * 0.5f, previewRect.y, previewRect.width * 0.5f, previewRect.height);
             GUI.DrawTextureWithTexCoords(leftPane, result.Before, new Rect(0f, 0f, 0.5f, 1f));   // before pane: before RT's left half
             GUI.DrawTextureWithTexCoords(rightPane, result.After, new Rect(0.5f, 0f, 0.5f, 1f)); // after pane: after RT's right half
+        }
+
+        /// <summary>
+        /// Draws the After pane mesh's triangle wireframe over the preview render (04.2 debug
+        /// overlay). Projects the after mesh through the same shared orthographic camera,
+        /// rotation, and per-pane anchor <see cref="NamerPreviewRenderer"/> used, so the
+        /// overlay aligns with the rendered After pane. No-op when the overlay is off or the
+        /// mesh is missing.
+        /// </summary>
+        private void DrawTriangleWireframe(Rect previewRect, Mesh mesh)
+        {
+            if (!_showTriangles || mesh == null)
+            {
+                return;
+            }
+
+            float aspect = previewRect.width / Mathf.Max(previewRect.height, 1f);
+            float orthoSize = _preview.OrthographicSizeForAspect(aspect, previewRect.height);
+            Vector2 drawOffsets = _preview.GetPaneDrawOffsets(aspect, previewRect.height);
+            Quaternion meshRotation = Quaternion.Euler(_preview.PitchDegrees, _preview.YawDegrees, 0f);
+            Vector3 boundsCenter = _previewMesh != null ? _previewMesh.bounds.center : Vector3.zero;
+            Vector3 afterPosition = new Vector3(drawOffsets.y, 0f, 0f) - (meshRotation * boundsCenter);
+            float halfWidthWorld = orthoSize * aspect;
+
+            Vector3[] vertices = mesh.vertices;
+            Handles.BeginGUI();
+            Handles.color = TriangleWireframeColor;
+            for (int subMesh = 0; subMesh < mesh.subMeshCount; subMesh++)
+            {
+                int[] triangles = mesh.GetTriangles(subMesh);
+                for (int i = 0; i + 2 < triangles.Length; i += 3)
+                {
+                    Vector2 a = ProjectPreviewVertex(vertices[triangles[i]], meshRotation, afterPosition, halfWidthWorld, orthoSize, previewRect);
+                    Vector2 b = ProjectPreviewVertex(vertices[triangles[i + 1]], meshRotation, afterPosition, halfWidthWorld, orthoSize, previewRect);
+                    Vector2 c = ProjectPreviewVertex(vertices[triangles[i + 2]], meshRotation, afterPosition, halfWidthWorld, orthoSize, previewRect);
+                    Handles.DrawLine(a, b);
+                    Handles.DrawLine(b, c);
+                    Handles.DrawLine(c, a);
+                }
+            }
+
+            Handles.EndGUI();
+        }
+
+        /// <summary>
+        /// Projects one mesh-local vertex through the same rotation/anchor the preview
+        /// renderer applied to the After pane, then to GUI pixel coordinates. The preview
+        /// camera is orthographic, fixed, and looks down +Z, so world x/y map linearly into
+        /// the pane.
+        /// </summary>
+        private static Vector2 ProjectPreviewVertex(Vector3 vertex, Quaternion rotation, Vector3 position, float halfWidthWorld, float orthoSize, Rect previewRect)
+        {
+            Vector3 world = rotation * vertex + position;
+            float ndcX = world.x / halfWidthWorld;
+            float ndcY = world.y / orthoSize;
+            return new Vector2(
+                previewRect.x + (ndcX + 1f) * 0.5f * previewRect.width,
+                previewRect.y + (1f - ndcY) * 0.5f * previewRect.height);
         }
 
         private void HandlePreviewCameraInput(Rect previewRect)

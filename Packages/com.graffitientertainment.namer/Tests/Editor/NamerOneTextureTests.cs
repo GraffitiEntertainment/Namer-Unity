@@ -77,6 +77,10 @@ namespace GraffitiEntertainment.Namer.Tests
                     // Extraction ENABLED explicitly (the plan's headline path, not just defaults):
                     RoughnessExtractStrength = 1f,
                     DipSource = (int)NamerDipSource.RemovedDetail,
+                    // The dropped-residual outcome under test requires the one-texture
+                    // switch OFF regardless of the live editor session's Write Residual
+                    // state (VCOL-05 is EditorPrefs-backed; unpinned it leaked ON here).
+                    WriteResidual = false,
                 };
 
                 NamerProcessResult result = NamerProcessor.Process(gameObject, settings);

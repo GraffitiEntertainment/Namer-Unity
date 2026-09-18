@@ -165,8 +165,9 @@ namespace GraffitiEntertainment.Namer.Tests
 
         /// <summary>
         /// D-10 gate discipline: no NEW un-multiply toggle was introduced. The settings
-        /// surface exposes exactly the four AO controls (un-multiply, blur, strength,
-        /// contrast), and <c>AoUnmultiplyStrength</c> remains the SINGLE un-multiply on/off
+        /// surface exposes exactly the five AO controls (un-multiply, blur, strength,
+        /// contrast, plus the DIP-01 hard stage gate <c>AoStageEnabled</c>), and
+        /// <c>AoUnmultiplyStrength</c> remains the SINGLE un-multiply on/off
         /// (a continuous float, not a separate boolean gate).
         /// </summary>
         [Test]
@@ -185,11 +186,12 @@ namespace GraffitiEntertainment.Namer.Tests
                 }
             }
 
-            Assert.AreEqual(4, count, "NamerProcessorSettings must expose exactly four AO controls");
+            Assert.AreEqual(5, count, "NamerProcessorSettings must expose exactly five AO controls");
             AssertContains(aoNames, count, "AoBlurRadius");
             AssertContains(aoNames, count, "AoStrength");
             AssertContains(aoNames, count, "AoContrast");
             AssertContains(aoNames, count, "AoUnmultiplyStrength");
+            AssertContains(aoNames, count, "AoStageEnabled");
 
             int unmultiplyCount = 0;
             for (int i = 0; i < count; i++)

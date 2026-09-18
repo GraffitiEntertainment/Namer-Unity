@@ -238,7 +238,9 @@ namespace GraffitiEntertainment.Namer.Tests
                 gameObject = CreateSceneObject(sourceMesh, source, "DefaultOnTarget");
 
                 // Fresh-default controls: decomposition on, RemovedDetail dip source, Write
-                // Residual off, dip depth at the shipped default (0.25).
+                // Residual off, dip depth at the shipped default (0.25), and the four
+                // DIP-01 step gates on (unpinned EditorPrefs from a live bisect session
+                // would otherwise hard-gate the roughness dip out of this E2E run).
                 var settings = new NamerProcessorSettings
                 {
                     Destination = TempFolder + "/Out",
@@ -251,6 +253,10 @@ namespace GraffitiEntertainment.Namer.Tests
                     DipSource = (int)NamerDipSource.RemovedDetail,
                     WriteResidual = false,
                     RoughnessExtractStrength = NamerEditorConstants.DefaultRoughnessExtractStrength,
+                    RoughnessStageEnabled = true,
+                    AoStageEnabled = true,
+                    MetallicContributionEnabled = true,
+                    EmissiveContributionEnabled = true,
                 };
 
                 NamerProcessResult result = NamerProcessor.Process(gameObject, settings);

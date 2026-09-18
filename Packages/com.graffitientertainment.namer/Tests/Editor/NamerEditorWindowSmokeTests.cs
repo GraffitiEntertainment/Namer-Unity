@@ -59,6 +59,20 @@ namespace GraffitiEntertainment.Namer.Tests
                 "ShaderInputToggleLabels must be the seven neutral-default shaded-view input toggles");
         }
 
+        [Test]
+        public void ChannelPaneLabels_AreSixChannelPanes()
+        {
+            FieldInfo field = typeof(NamerEditorWindow).GetField(
+                "ChannelPaneLabels", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.IsNotNull(field, "ChannelPaneLabels field must exist on NamerEditorWindow");
+            string[] labels = (string[])field.GetValue(null);
+            Assert.IsNotNull(labels, "ChannelPaneLabels must resolve to a string array");
+
+            string[] expected = { "Base", "Roughness", "AO", "Metallic", "Emissive", "Normal" };
+            CollectionAssert.AreEqual(expected, labels,
+                "ChannelPaneLabels must be the six channel panes decoded from the After material's packed textures");
+        }
+
         // -- EditorPrefs isolation for the foldout keys -----------------------
 
         private sealed class PrefsSnapshot

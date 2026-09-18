@@ -34,6 +34,16 @@ namespace GraffitiEntertainment.Namer.Editor
         };
 
         /// <summary>
+        /// Channel pane labels (D-12): the six per-channel views of the After material's
+        /// packed textures, each decoded through the shared NAMER decode (no drift).
+        /// Read via reflection by <c>NamerEditorWindowSmokeTests</c>.
+        /// </summary>
+        internal static readonly string[] ChannelPaneLabels =
+        {
+            "Base", "Roughness", "AO", "Metallic", "Emissive", "Normal",
+        };
+
+        /// <summary>
         /// Decomposition statistics row labels (D-09 / VCOL-04), relabeled in 04.2 to
         /// removed-detail semantics: Coverage / Avg Error / Max Error / Removed-detail max
         /// error / Residual. Read via reflection by <c>NamerUIControlsTests</c>; the Residual
@@ -64,7 +74,11 @@ namespace GraffitiEntertainment.Namer.Editor
         private static readonly int DbgEnableVertexColorId = Shader.PropertyToID("_DbgEnableVertexColor");
         private static readonly int DbgEnableNormalId = Shader.PropertyToID("_DbgEnableNormal");
         private static readonly int DbgRoughnessNeutralId = Shader.PropertyToID("_DbgRoughnessNeutral");
+        private static readonly int ChannelId = Shader.PropertyToID("_Channel");
         private static readonly Color TriangleWireframeColor = new Color(0f, 1f, 1f, 1f);
+
+        private const float ChannelPaneSize = 48f;
+        private const float ChannelPopupSize = 384f;
 
         private NamerProcessorSettings _settings;
         private NamerPreviewRenderer _preview;
@@ -81,6 +95,8 @@ namespace GraffitiEntertainment.Namer.Editor
         private Mesh _generatedMesh;
         private NamerComputeResult _liveResult;
         private RenderTexture _previewBaseRt;
+        private Material _channelViewMaterial;
+        private RenderTexture _channelPaneRt;
 
         private UnityEngine.Object _selection;
         private NamerSourceModel _model;
@@ -211,6 +227,19 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 DestroyImmediate(_namerMaterial);
                 _namerMaterial = null;
+            }
+
+            if (_channelPaneRt != null)
+            {
+                _channelPaneRt.Release();
+                DestroyImmediate(_channelPaneRt);
+                _channelPaneRt = null;
+            }
+
+            if (_channelViewMaterial != null)
+            {
+                DestroyImmediate(_channelViewMaterial);
+                _channelViewMaterial = null;
             }
 
             if (_preview != null)
@@ -953,6 +982,7 @@ namespace GraffitiEntertainment.Namer.Editor
             DrawShaderInputToggle(6, ref _dbgNormalEnabled);
             EditorGUILayout.EndHorizontal();
             EditorGUI.EndDisabledGroup();
+            DrawChannelPanes();
             EditorGUILayout.LabelField(
                 new GUIContent("Toggles neutralize the matching input in the full shaded After view."),
                 EditorStyles.miniLabel);
@@ -987,6 +1017,189 @@ namespace GraffitiEntertainment.Namer.Editor
                 enabled = newValue;
                 ApplyDebugGates();
                 Repaint();
+            }
+        }
+
+        /// <summary>
+        /// D-12 channel pane row: six small panes directly under the shaded-view toggle
+        /// row, each blitted through the <c>NamerChannelView</c> material so the pane shows
+        /// exactly what the After material's packed textures decode to via the shared
+        /// NAMER decode (no drift from the runtime material). Neutral no-op boxes when
+        /// the After material has no generated textures yet. Clicking a pane opens a
+        /// large popup of that channel (click-away closes).
+        /// </summary>
+        private void DrawChannelPanes()
+        {
+            Material afterMaterial = (_afterPanelState.PreferGenerated && _generatedMaterial != null)
+                ? _generatedMaterial
+                : _namerMaterial;
+
+            EditorGUILayout.BeginHorizontal();
+            for (int i = 0; i < ChannelPaneLabels.Length; i++)
+            {
+                Rect paneRect = GUILayoutUtility.GetRect(
+                    ChannelPaneSize, ChannelPaneSize,
+                    GUILayout.Width(ChannelPaneSize), GUILayout.Height(ChannelPaneSize));
+
+                if (afterMaterial == null || afterMaterial.GetTexture(SurfaceMapId) == null)
+                {
+                    // No generated textures yet: neutral no-op box, no blit/tooltip/click.
+                    GUI.Box(paneRect, GUIContent.none);
+                    continue;
+                }
+
+                EnsureChannelViewMaterial();
+                _channelViewMaterial.SetTexture(SurfaceMapId, afterMaterial.GetTexture(SurfaceMapId));
+                _channelViewMaterial.SetTexture(BaseResidualMapId, afterMaterial.GetTexture(BaseResidualMapId));
+                _channelViewMaterial.SetFloat(OcclusionStrengthId, afterMaterial.GetFloat(OcclusionStrengthId));
+                _channelViewMaterial.SetFloat(ChannelId, i);
+                EnsureChannelPaneRt();
+                Graphics.Blit(Texture2D.whiteTexture, _channelPaneRt, _channelViewMaterial, 0);
+                GUI.DrawTexture(paneRect, _channelPaneRt);
+
+                GUI.Label(paneRect, new GUIContent(string.Empty,
+                    ChannelPaneLabels[i] + " — source: " + (i == 0 ? "_BaseResidualMap" : "_SurfaceMap")));
+                EditorGUIUtility.AddCursorRect(paneRect, MouseCursor.Zoom);
+
+                if (Event.current.type == EventType.MouseDown && paneRect.Contains(Event.current.mousePosition))
+                {
+                    Event.current.Use();
+                    ShowChannelPopup(paneRect, i, afterMaterial);
+                }
+            }
+
+            EditorGUILayout.EndHorizontal();
+        }
+
+        /// <summary>
+        /// Lazily creates the hidden <c>NamerChannelView</c> blit material used by the
+        /// channel panes. The popup creates and owns its own instance.
+        /// </summary>
+        private void EnsureChannelViewMaterial()
+        {
+            if (_channelViewMaterial == null)
+            {
+                Shader shader = Shader.Find("GraffitiEntertainment.Namer/NamerChannelView");
+                if (shader == null)
+                {
+                    throw new InvalidOperationException(
+                        "Shader 'GraffitiEntertainment.Namer/NamerChannelView' was not found. Ensure the channel-view shader compiled and imported.");
+                }
+
+                _channelViewMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+            }
+        }
+
+        /// <summary>Ensures the small shared pane render target exists (reused per pane draw).</summary>
+        private void EnsureChannelPaneRt()
+        {
+            if (_channelPaneRt == null)
+            {
+                _channelPaneRt = new RenderTexture(
+                    (int)ChannelPaneSize, (int)ChannelPaneSize, 0, GraphicsFormat.R8G8B8A8_UNorm);
+            }
+        }
+
+        /// <summary>
+        /// Opens the large channel popup anchored below the clicked pane, capturing the
+        /// After material's textures/occlusion strength so the popup is immune to later
+        /// material edits.
+        /// </summary>
+        private static void ShowChannelPopup(Rect paneRect, int channel, Material afterMaterial)
+        {
+            ChannelViewPopup.Show(
+                paneRect,
+                afterMaterial.GetTexture(SurfaceMapId),
+                afterMaterial.GetTexture(BaseResidualMapId),
+                afterMaterial.GetFloat(OcclusionStrengthId),
+                channel);
+        }
+
+        /// <summary>
+        /// The click-to-open large channel view (D-12). A chromeless
+        /// <see cref="EditorWindow.ShowPopup"/> window that closes when it loses focus
+        /// (click away). Creates, owns, and disposes its own material and render target
+        /// so the popup never leaks editor resources.
+        /// </summary>
+        private sealed class ChannelViewPopup : EditorWindow
+        {
+            private Texture _surface;
+            private Texture _baseResidual;
+            private float _occlusionStrength;
+            private int _channel;
+            private Material _material;
+            private RenderTexture _rt;
+
+            /// <summary>
+            /// Creates and shows the popup below the clicked pane (GUI-to-screen space),
+            /// capturing the After material's channel inputs at click time.
+            /// </summary>
+            public static void Show(Rect paneRect, Texture surface, Texture baseResidual,
+                float occlusionStrength, int channel)
+            {
+                Shader shader = Shader.Find("GraffitiEntertainment.Namer/NamerChannelView");
+                if (shader == null)
+                {
+                    throw new InvalidOperationException(
+                        "Shader 'GraffitiEntertainment.Namer/NamerChannelView' was not found. Ensure the channel-view shader compiled and imported.");
+                }
+
+                ChannelViewPopup popup = CreateInstance<ChannelViewPopup>();
+                popup._surface = surface;
+                popup._baseResidual = baseResidual;
+                popup._occlusionStrength = occlusionStrength;
+                popup._channel = channel;
+                popup._material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+
+                Rect screenAnchor = GUIUtility.GUIToScreenRect(paneRect);
+                popup.position = new Rect(screenAnchor.x, screenAnchor.yMax, ChannelPopupSize, ChannelPopupSize);
+                popup.ShowPopup();
+            }
+
+            private void OnGUI()
+            {
+                Rect rect = new Rect(0f, 0f, position.width, position.height);
+
+                _material.SetTexture(SurfaceMapId, _surface);
+                _material.SetTexture(BaseResidualMapId, _baseResidual);
+                _material.SetFloat(OcclusionStrengthId, _occlusionStrength);
+                _material.SetFloat(ChannelId, _channel);
+
+                if (_rt == null || _rt.width != (int)rect.width || _rt.height != (int)rect.height)
+                {
+                    if (_rt != null)
+                    {
+                        _rt.Release();
+                        DestroyImmediate(_rt);
+                    }
+
+                    _rt = new RenderTexture((int)rect.width, (int)rect.height, 0, GraphicsFormat.R8G8B8A8_UNorm);
+                }
+
+                Graphics.Blit(Texture2D.whiteTexture, _rt, _material, 0);
+                GUI.DrawTexture(rect, _rt, ScaleMode.ScaleToFit);
+            }
+
+            /// <summary>Click-away close: the popup loses focus when the user clicks elsewhere.</summary>
+            private void OnLostFocus()
+            {
+                Close();
+            }
+
+            private void OnDisable()
+            {
+                if (_rt != null)
+                {
+                    _rt.Release();
+                    DestroyImmediate(_rt);
+                    _rt = null;
+                }
+
+                if (_material != null)
+                {
+                    DestroyImmediate(_material);
+                    _material = null;
+                }
             }
         }
 

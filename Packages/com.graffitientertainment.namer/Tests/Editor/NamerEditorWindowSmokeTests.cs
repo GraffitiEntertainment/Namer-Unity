@@ -7,13 +7,12 @@ using UnityEngine;
 namespace GraffitiEntertainment.Namer.Tests
 {
     /// <summary>
-    /// Headless EditMode smoke for the D-07 window facts that do not require window rendering:
+    /// Headless EditMode smoke for the window facts that do not require window rendering:
     /// the <see cref="NamerProcessorSettings"/> foldout defaults (Source open, others collapsed)
-    /// and the <see cref="NamerEditorWindow.DebugChannelLabels"/> contents/order ending with the
-    /// new index-10 "Extracted Roughness" entry (read via reflection) plus the index -> shader
-    /// channel pairing. The render-only D-07 claims (window fits a small screen with all sections
-    /// collapsed; every control reachable by scrolling) are manual-verification checklist items,
-    /// not automated tests.
+    /// and the <see cref="NamerEditorWindow.ShaderInputToggleLabels"/> contents/order (the five
+    /// neutral-default shaded-view toggles, read via reflection). The render-only claims (window
+    /// fits a small screen with all sections collapsed; every control reachable by scrolling) are
+    /// manual-verification checklist items, not automated tests.
     /// </summary>
     public class NamerEditorWindowSmokeTests
     {
@@ -47,32 +46,17 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         [Test]
-        public void DebugChannelLabels_AppendsExtractedRoughnessAtIndex10()
+        public void ShaderInputToggleLabels_AreFiveNeutralToggles()
         {
             FieldInfo field = typeof(NamerEditorWindow).GetField(
-                "DebugChannelLabels", BindingFlags.NonPublic | BindingFlags.Static);
-            Assert.IsNotNull(field, "DebugChannelLabels field must exist on NamerEditorWindow");
+                "ShaderInputToggleLabels", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.IsNotNull(field, "ShaderInputToggleLabels field must exist on NamerEditorWindow");
             string[] labels = (string[])field.GetValue(null);
-            Assert.IsNotNull(labels, "DebugChannelLabels must resolve to a string array");
+            Assert.IsNotNull(labels, "ShaderInputToggleLabels must resolve to a string array");
 
-            // The first 10 labels are unchanged; the new entry is APPENDED (never inserted
-            // mid-array, which would shift the five subsequent labels one slot wrong).
-            string[] expected =
-            {
-                "Shaded", "Base Color", "AO", "Normal", "Roughness", "Metallic", "Emissive",
-                "Vertex Colors", "Residual", "Error Heatmap", "Extracted Roughness",
-            };
+            string[] expected = { "Residual", "Roughness", "AO", "Metallic", "Emissive" };
             CollectionAssert.AreEqual(expected, labels,
-                "DebugChannelLabels must keep the first 10 labels and append 'Extracted Roughness' last");
-
-            Assert.AreEqual("Extracted Roughness", labels[10], "index 10 must be 'Extracted Roughness'");
-            Assert.AreEqual("Error Heatmap", labels[9], "Error Heatmap must not move (stays at index 9)");
-
-            // Index/shader-channel pairing: the window's SetChannel(Mathf.Max(0, _debugChannel - 1))
-            // maps toolbar index 10 -> shader channel 9, exactly the new _DebugChannel >= 8.5
-            // extracted-roughness branch.
-            Assert.AreEqual(9, Mathf.Max(0, 10 - 1),
-                "toolbar index 10 must map to shader channel 9 (the _DebugChannel >= 8.5 branch)");
+                "ShaderInputToggleLabels must be the five neutral-default shaded-view input toggles");
         }
 
         // -- EditorPrefs isolation for the foldout keys -----------------------

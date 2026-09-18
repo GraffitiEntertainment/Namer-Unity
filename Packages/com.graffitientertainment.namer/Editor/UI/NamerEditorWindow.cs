@@ -23,18 +23,21 @@ namespace GraffitiEntertainment.Namer.Editor
     /// </summary>
     public sealed class NamerEditorWindow : EditorWindow
     {
-        private static readonly string[] DebugChannelLabels =
+        /// <summary>
+        /// Shaded-view input toggle labels (DIP-02): the five neutral-default debug gates
+        /// exposed as checkboxes in the Preview/Debug section. Read via reflection by
+        /// <c>NamerEditorWindowSmokeTests</c>.
+        /// </summary>
+        internal static readonly string[] ShaderInputToggleLabels =
         {
-            "Shaded", "Base Color", "AO", "Normal", "Roughness", "Metallic", "Emissive",
-            "Vertex Colors", "Residual", "Error Heatmap", "Extracted Roughness",
+            "Residual", "Roughness", "AO", "Metallic", "Emissive",
         };
 
         /// <summary>
         /// Decomposition statistics row labels (D-09 / VCOL-04), relabeled in 04.2 to
         /// removed-detail semantics: Coverage / Avg Error / Max Error / Removed-detail max
-        /// error / Residual. Read via reflection by <c>NamerUIControlsTests</c> (mirrors
-        /// <see cref="DebugChannelLabels"/>); the Residual row value is dynamic — see
-        /// <see cref="ResidualNotWrittenLabel"/>.
+        /// error / Residual. Read via reflection by <c>NamerUIControlsTests</c>; the Residual
+        /// row value is dynamic — see <see cref="ResidualNotWrittenLabel"/>.
         /// </summary>
         internal static readonly string[] DecompStatLabels =
         {
@@ -53,10 +56,15 @@ namespace GraffitiEntertainment.Namer.Editor
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
         private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
         private static readonly int OcclusionStrengthId = Shader.PropertyToID("_OcclusionStrength");
+        private static readonly int DbgEnableResidualId = Shader.PropertyToID("_DbgEnableResidual");
+        private static readonly int DbgEnableRoughnessId = Shader.PropertyToID("_DbgEnableRoughness");
+        private static readonly int DbgEnableAoId = Shader.PropertyToID("_DbgEnableAO");
+        private static readonly int DbgEnableMetallicId = Shader.PropertyToID("_DbgEnableMetallic");
+        private static readonly int DbgEnableEmissiveId = Shader.PropertyToID("_DbgEnableEmissive");
+        private static readonly int DbgRoughnessNeutralId = Shader.PropertyToID("_DbgRoughnessNeutral");
 
         private NamerProcessorSettings _settings;
         private NamerPreviewRenderer _preview;
-        private NamerDebugChannelMaterial _debugMaterialFactory;
         private NamerComputePipeline _pipeline;
         private NamerDecompPipeline _decompPipeline;
         private NamerDecompOutput _decompOutput;
@@ -65,12 +73,8 @@ namespace GraffitiEntertainment.Namer.Editor
         private NamerDecompErrorStats _decompStats;
 
         private Material _namerMaterial;
-        private Material _debugMaterial;
         private NamerAfterPanelState _afterPanelState = new NamerAfterPanelState();
         private Material _generatedMaterial;
-        private Texture2D _generatedSurface;
-        private Texture2D _generatedBase;
-        private Texture2D _generatedResidual;
         private Mesh _generatedMesh;
         private NamerComputeResult _liveResult;
         private RenderTexture _previewBaseRt;
@@ -89,9 +93,17 @@ namespace GraffitiEntertainment.Namer.Editor
         private float _aoStrength = 1f;
         private float _aoContrast = 1f;
         private bool _decompositionEnabled;
+        private bool _roughnessStageEnabled;
+        private bool _aoStageEnabled;
+        private bool _metallicContributionEnabled;
+        private bool _emissiveContributionEnabled;
+        private bool _dbgResidualEnabled = true;
+        private bool _dbgRoughnessEnabled = true;
+        private bool _dbgAoEnabled = true;
+        private bool _dbgMetallicEnabled = true;
+        private bool _dbgEmissiveEnabled = true;
         private float _errorThreshold = NamerEditorConstants.DefaultErrorThreshold;
         private int _residualResolution;
-        private int _debugChannel;
         private float _roughnessExtractStrength = NamerEditorConstants.DefaultRoughnessExtractStrength;
         private NamerDipSource _dipSource;
         private bool _writeResidual;
@@ -161,7 +173,6 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             _settings = new NamerProcessorSettings();
             _preview = new NamerPreviewRenderer();
-            _debugMaterialFactory = new NamerDebugChannelMaterial();
 
             EditorApplication.update += Tick;
             Selection.selectionChanged += OnSelectionChanged;
@@ -196,12 +207,6 @@ namespace GraffitiEntertainment.Namer.Editor
                 _namerMaterial = null;
             }
 
-            if (_debugMaterial != null)
-            {
-                DestroyImmediate(_debugMaterial);
-                _debugMaterial = null;
-            }
-
             if (_preview != null)
             {
                 _preview.Dispose();
@@ -229,6 +234,10 @@ namespace GraffitiEntertainment.Namer.Editor
             _aoStrength = _settings.AoStrength;
             _aoContrast = _settings.AoContrast;
             _decompositionEnabled = _settings.DecompositionEnabled;
+            _roughnessStageEnabled = _settings.RoughnessStageEnabled;
+            _aoStageEnabled = _settings.AoStageEnabled;
+            _metallicContributionEnabled = _settings.MetallicContributionEnabled;
+            _emissiveContributionEnabled = _settings.EmissiveContributionEnabled;
             _errorThreshold = _settings.ErrorThreshold;
             _residualResolution = _settings.ResidualResolution;
             _roughnessExtractStrength = _settings.RoughnessExtractStrength;
@@ -242,7 +251,6 @@ namespace GraffitiEntertainment.Namer.Editor
                 _preview.Frame(_previewMesh);
             }
 
-            _debugChannel = 0;
             _status = string.Empty;
             _statusIsError = false;
 
@@ -253,18 +261,16 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>
         /// Resolves whether generated assets exist for the current selection and, when they
-        /// do, binds the generated surface/base textures to the debug material. Loaded
-        /// generated materials/textures are persistent <c>AssetDatabase</c> assets and are
-        /// never destroyed here (including in <c>OnDisable</c>).
+        /// do, binds the generated material/mesh for the After pane and applies the current
+        /// shaded-view debug gates. Loaded generated materials/meshes are persistent
+        /// <c>AssetDatabase</c> assets and are never destroyed here (including in
+        /// <c>OnDisable</c>).
         /// </summary>
         private void ResolveGeneratedPreview()
         {
             _afterPanelState.Reset();
             _afterPanelState.GeneratedAvailable = false;
             _generatedMaterial = null;
-            _generatedSurface = null;
-            _generatedBase = null;
-            _generatedResidual = null;
             _generatedMesh = null;
 
             NamerMaterialInspection inspection = PrimaryInspection;
@@ -276,12 +282,6 @@ namespace GraffitiEntertainment.Namer.Editor
             string folder = AssetGenerator.ComposeDestinationFolder(_settings.Destination, _selection.name);
             _generatedMaterial = AssetDatabase.LoadAssetAtPath<Material>(
                 AssetGenerator.ComposePath(inspection, _settings, folder, ".mat"));
-            _generatedSurface = AssetDatabase.LoadAssetAtPath<Texture2D>(
-                AssetGenerator.ComposePath(inspection, _settings, folder, "_Surface.png"));
-            _generatedBase = AssetDatabase.LoadAssetAtPath<Texture2D>(
-                AssetGenerator.ComposePath(inspection, _settings, folder, "_Base.png"));
-            _generatedResidual = AssetDatabase.LoadAssetAtPath<Texture2D>(
-                AssetGenerator.ComposePath(inspection, _settings, folder, "_Residual.exr"));
             _generatedMesh = AssetDatabase.LoadAssetAtPath<Mesh>(
                 AssetGenerator.ComposePath(inspection, _settings, folder, ".asset"));
 
@@ -291,13 +291,7 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             _afterPanelState.GeneratedAvailable = true;
-
-            if (_debugMaterial != null)
-            {
-                _debugMaterialFactory.SetTextures(
-                    _debugMaterial, _generatedSurface, _generatedResidual != null ? _generatedResidual : _generatedBase);
-                _debugMaterialFactory.SetDebugBaseMap(_debugMaterial, _generatedBase);
-            }
+            ApplyDebugGates();
         }
 
         private void Tick()
@@ -342,11 +336,11 @@ namespace GraffitiEntertainment.Namer.Editor
                 ReleaseDecompPreview();
                 EnsureMaterials();
 
-                inspection.AoUnmultiplyStrength = _aoUnmultiplyStrength;
+                inspection.AoUnmultiplyStrength = _aoStageEnabled ? _aoUnmultiplyStrength : 0f;
                 inspection.AoBlurRadius = _aoBlurRadius;
                 inspection.AoStrength = _aoStrength;
                 inspection.AoContrast = _aoContrast;
-                inspection.RoughnessExtractStrength = _roughnessExtractStrength;
+                inspection.RoughnessExtractStrength = _roughnessStageEnabled ? _roughnessExtractStrength : 0f;
                 inspection.DipSource = _dipSource;
 
                 // CR-01 mirror: when Process would skip decomposition for this selection
@@ -419,23 +413,7 @@ namespace GraffitiEntertainment.Namer.Editor
                     _namerMaterial.DisableKeyword("_EMISSION");
                 }
 
-                if (_afterPanelState.PreferGenerated && _generatedSurface != null && _generatedBase != null)
-                {
-                    _debugMaterialFactory.SetTextures(
-                        _debugMaterial, _generatedSurface, _generatedResidual != null ? _generatedResidual : _generatedBase);
-                    _debugMaterialFactory.SetDebugBaseMap(_debugMaterial, _generatedBase);
-                }
-                else
-                {
-                    Texture liveResidual = (_decompOutput != null && _decompOutput.Residual != null)
-                        ? _decompOutput.Residual
-                        : previewBaseMap;
-                    _debugMaterialFactory.SetTextures(_debugMaterial, _liveResult.PackedSurface, liveResidual);
-                    _debugMaterialFactory.SetDebugBaseMap(_debugMaterial, previewBaseMap);
-                }
-                _debugMaterialFactory.SetChannel(_debugMaterial, Mathf.Max(0, _debugChannel - 1));
-                _debugMaterialFactory.SetExtractedRoughness(_debugMaterial, _liveResult.ExtractedRoughness);
-                _debugMaterial.SetFloat(OcclusionStrengthId, inspection.OcclusionStrength);
+                ApplyDebugGates();
 
                 _status = string.Empty;
                 _statusIsError = false;
@@ -474,11 +452,42 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 _namerMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
             }
+        }
 
-            if (_debugMaterial == null)
+        /// <summary>
+        /// DIP-02: writes the shaded-view debug dip-switch values onto the live preview
+        /// material and (when present) the generated After material. These are transient
+        /// preview toggles — no <c>EditorUtility.SetDirty</c> — so the on-disk generated
+        /// .mat keeps its neutral 1.0 defaults. Metallic/Emissive are additionally ANDed
+        /// with their persisted step-gate contribution flags (shader-only, no pipeline stage).
+        /// </summary>
+        private void ApplyDebugGates()
+        {
+            float residual = _dbgResidualEnabled ? 1f : 0f;
+            float roughness = _dbgRoughnessEnabled ? 1f : 0f;
+            float ao = _dbgAoEnabled ? 1f : 0f;
+            float metallic = (_metallicContributionEnabled && _dbgMetallicEnabled) ? 1f : 0f;
+            float emissive = (_emissiveContributionEnabled && _dbgEmissiveEnabled) ? 1f : 0f;
+            float roughnessNeutral = PrimaryInspection != null ? PrimaryInspection.Roughness : 0.5f;
+
+            if (_namerMaterial != null)
             {
-                _debugMaterial = _debugMaterialFactory.Create();
-                _debugMaterial.hideFlags = HideFlags.HideAndDontSave;
+                _namerMaterial.SetFloat(DbgEnableResidualId, residual);
+                _namerMaterial.SetFloat(DbgEnableRoughnessId, roughness);
+                _namerMaterial.SetFloat(DbgEnableAoId, ao);
+                _namerMaterial.SetFloat(DbgEnableMetallicId, metallic);
+                _namerMaterial.SetFloat(DbgEnableEmissiveId, emissive);
+                _namerMaterial.SetFloat(DbgRoughnessNeutralId, roughnessNeutral);
+            }
+
+            if (_generatedMaterial != null)
+            {
+                _generatedMaterial.SetFloat(DbgEnableResidualId, residual);
+                _generatedMaterial.SetFloat(DbgEnableRoughnessId, roughness);
+                _generatedMaterial.SetFloat(DbgEnableAoId, ao);
+                _generatedMaterial.SetFloat(DbgEnableMetallicId, metallic);
+                _generatedMaterial.SetFloat(DbgEnableEmissiveId, emissive);
+                _generatedMaterial.SetFloat(DbgRoughnessNeutralId, roughnessNeutral);
             }
         }
 
@@ -718,6 +727,7 @@ namespace GraffitiEntertainment.Namer.Editor
             // (state persisted via NamerProcessorSettings). The Process button + status stay
             // OUTSIDE the scroll view so the primary action is always reachable.
             _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
+            DrawStepSwitches();
             DrawSourceSection();
             DrawPreviewSection(inspection);
             DrawRoughnessExtractionSection(inspection);
@@ -727,6 +737,80 @@ namespace GraffitiEntertainment.Namer.Editor
             EditorGUILayout.EndScrollView();
 
             DrawActionSection(inspection);
+        }
+
+        /// <summary>
+        /// DIP-01 hard stage dip-switch row rendered above the foldouts. VC + Residual reuses
+        /// the existing <see cref="NamerProcessorSettings.DecompositionEnabled"/> setting;
+        /// Roughness/AO hard-gate the matching pipeline stages independently of their strength
+        /// sliders; Metallic/Emissive gate the shader only (no pipeline stage exists). Each
+        /// toggle writes through to its persisted setting.
+        /// </summary>
+        private void DrawStepSwitches()
+        {
+            EditorGUI.BeginDisabledGroup(_busy);
+            EditorGUILayout.BeginHorizontal();
+
+            bool newDecomposition = EditorGUILayout.ToggleLeft(
+                new GUIContent("VC + Residual",
+                    "Hard stage gate for vertex-color decomposition + residual (reuses DecompositionEnabled). Independent of the strength sliders."),
+                _decompositionEnabled);
+            if (newDecomposition != _decompositionEnabled)
+            {
+                _decompositionEnabled = newDecomposition;
+                _settings.DecompositionEnabled = newDecomposition;
+                _afterPanelState.MarkTweaking();
+                MarkDirty();
+            }
+
+            bool newRoughness = EditorGUILayout.ToggleLeft(
+                new GUIContent("Roughness",
+                    "Hard stage gate for roughness extraction — skips extraction without touching the strength slider."),
+                _roughnessStageEnabled);
+            if (newRoughness != _roughnessStageEnabled)
+            {
+                _roughnessStageEnabled = newRoughness;
+                _settings.RoughnessStageEnabled = newRoughness;
+                MarkDirty();
+            }
+
+            bool newAo = EditorGUILayout.ToggleLeft(
+                new GUIContent("AO",
+                    "Hard stage gate for AO un-multiply — skips the un-multiply without touching the strength slider."),
+                _aoStageEnabled);
+            if (newAo != _aoStageEnabled)
+            {
+                _aoStageEnabled = newAo;
+                _settings.AoStageEnabled = newAo;
+                MarkDirty();
+            }
+
+            bool newMetallic = EditorGUILayout.ToggleLeft(
+                new GUIContent("Metallic",
+                    "Shader-only gate for the metallic contribution (no pipeline stage exists)."),
+                _metallicContributionEnabled);
+            if (newMetallic != _metallicContributionEnabled)
+            {
+                _metallicContributionEnabled = newMetallic;
+                _settings.MetallicContributionEnabled = newMetallic;
+                ApplyDebugGates();
+                Repaint();
+            }
+
+            bool newEmissive = EditorGUILayout.ToggleLeft(
+                new GUIContent("Emissive",
+                    "Shader-only gate for the emissive contribution (no pipeline stage exists)."),
+                _emissiveContributionEnabled);
+            if (newEmissive != _emissiveContributionEnabled)
+            {
+                _emissiveContributionEnabled = newEmissive;
+                _settings.EmissiveContributionEnabled = newEmissive;
+                ApplyDebugGates();
+                Repaint();
+            }
+
+            EditorGUILayout.EndHorizontal();
+            EditorGUI.EndDisabledGroup();
         }
 
         private void DrawSourceSection()
@@ -798,22 +882,14 @@ namespace GraffitiEntertainment.Namer.Editor
             GUILayout.Label("After", EditorStyles.largeLabel);
             EditorGUILayout.EndHorizontal();
 
-            float previewWidth = Mathf.Max(EditorGUIUtility.currentViewWidth, 256f);
+            float previewWidth = Mathf.Max(EditorGUIUtility.currentViewWidth - GUI.skin.verticalScrollbar.fixedWidth, 256f);
             Rect previewRect = GUILayoutUtility.GetRect(previewWidth, previewWidth * 0.5f);
             HandlePreviewCameraInput(previewRect);
 
             Material beforeMaterial = inspection.Material;
-            Material afterMaterial;
-            if (_debugChannel == 0)
-            {
-                afterMaterial = (_afterPanelState.PreferGenerated && _generatedMaterial != null)
-                    ? _generatedMaterial
-                    : _namerMaterial;
-            }
-            else
-            {
-                afterMaterial = _debugMaterial;
-            }
+            Material afterMaterial = (_afterPanelState.PreferGenerated && _generatedMaterial != null)
+                ? _generatedMaterial
+                : _namerMaterial;
 
             if (afterMaterial == null)
             {
@@ -854,21 +930,39 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             EditorGUI.BeginDisabledGroup(_busy);
-            int newChannel = GUILayout.Toolbar(_debugChannel, DebugChannelLabels);
-            if (newChannel != _debugChannel)
-            {
-                _debugChannel = newChannel;
-                if (_debugMaterial != null)
-                {
-                    _debugMaterialFactory.SetChannel(_debugMaterial, Mathf.Max(0, _debugChannel - 1));
-                }
-
-                Repaint();
-            }
-
+            EditorGUILayout.BeginHorizontal();
+            DrawShaderInputToggle(0, ref _dbgResidualEnabled);
+            DrawShaderInputToggle(1, ref _dbgRoughnessEnabled);
+            DrawShaderInputToggle(2, ref _dbgAoEnabled);
+            DrawShaderInputToggle(3, ref _dbgMetallicEnabled);
+            DrawShaderInputToggle(4, ref _dbgEmissiveEnabled);
+            EditorGUILayout.EndHorizontal();
             EditorGUI.EndDisabledGroup();
+            EditorGUILayout.LabelField(
+                new GUIContent("Toggles neutralize the matching input in the full shaded After view."),
+                EditorStyles.miniLabel);
 
             EditorGUILayout.Space();
+        }
+
+        /// <summary>
+        /// Renders one shaded-view input toggle (DIP-02) from
+        /// <see cref="ShaderInputToggleLabels"/>. On change it writes the gate onto the
+        /// preview materials and repaints — shader-only, no GPU recompute, not persisted.
+        /// </summary>
+        private void DrawShaderInputToggle(int index, ref bool enabled)
+        {
+            bool newValue = EditorGUILayout.Toggle(
+                new GUIContent(ShaderInputToggleLabels[index],
+                    "Neutralizes the '" + ShaderInputToggleLabels[index]
+                        + "' input in the full shaded After view (shader-only, no GPU recompute)."),
+                enabled);
+            if (newValue != enabled)
+            {
+                enabled = newValue;
+                ApplyDebugGates();
+                Repaint();
+            }
         }
 
         private void DrawPreviewPaneOutline(Rect previewRect)

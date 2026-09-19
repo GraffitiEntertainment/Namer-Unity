@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 Phase: 04.2 (gouraud-projection-one-texture-with-roughness-transfer-resid) — EXECUTING
 Plan: 5 of 5
 Status: Phase complete — ready for verification
-Last activity: 2026-09-18 - Completed quick task 260918-k8k: NAMER Normal shaded-view gate + texture-channel panes with pop-out viewer
+Last activity: 2026-09-19 - Completed quick task 260919-fp3: fix black NAMER Processor window (channel-pane OnGUI Blit replaced by Repaint-guarded Graphics.DrawTexture)
 
 Progress: [██████████] 100%
 
@@ -203,6 +203,7 @@ None yet.
 | 260829-n6x | Remove silent geometry-bake override from NAMER window so AO slider updates reshape the extracted AO live, matching Process output | 2026-08-29 | da45cf7 | [260829-n6x-remove-silent-geometry-bake-override-fro](./quick/260829-n6x-remove-silent-geometry-bake-override-fro/) |
 | 260918-fcx | NAMER debug dip-switches: step-checkbox row (VC+Residual/Roughness/AO hard gates), shaded-view input toggles via neutral-default shader gates, scrollbar fix | 2026-09-18 | cfe83b7 | [260918-fcx-namer-debug-dip-switches](./quick/260918-fcx-namer-debug-dip-switches/) |
 | 260918-k8k | NAMER Normal shaded-view gate (7th DIP-02 toggle) + six texture-channel panes with pop-out viewer under the toggle row; live EditMode suite 157/157 | 2026-09-18 | eba6901 | [260918-k8k-namer-normal-shaded-view-gate-texture-ch](./quick/260918-k8k-namer-normal-shaded-view-gate-texture-ch/) |
+| 260919-fp3 | Fix black NAMER Processor window: channel panes/popup now Repaint-guarded Graphics.DrawTexture instead of OnGUI Graphics.Blit (RenderTexture.active leak, CAMetalLayer 0x0 drawable); live EditMode suite 157/157 | 2026-09-19 | 70ba14a | [260919-fp3-namer-black-window-channel-pane-blit](./quick/260919-fp3-namer-black-window-channel-pane-blit/) |
 
 ## Deferred Items
 

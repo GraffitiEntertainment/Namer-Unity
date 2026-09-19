@@ -98,6 +98,8 @@ namespace GraffitiEntertainment.Namer.Editor
         private RenderTexture _previewBaseRt;
         private Material _channelViewMaterial;
         private Material _wireMaterial;
+        private Mesh _previewWireSource;
+        private Mesh _previewWireMesh;
 
         private UnityEngine.Object _selection;
         private NamerSourceModel _model;
@@ -240,6 +242,13 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 DestroyImmediate(_wireMaterial);
                 _wireMaterial = null;
+            }
+
+            if (_previewWireMesh != null)
+            {
+                DestroyImmediate(_previewWireMesh);
+                _previewWireMesh = null;
+                _previewWireSource = null;
             }
 
             if (_preview != null)
@@ -455,6 +464,7 @@ namespace GraffitiEntertainment.Namer.Editor
             }
             catch (Exception ex)
             {
+                Debug.LogException(ex);
                 _status = "Processing failed: " + ex.Message;
                 _statusIsError = true;
             }
@@ -833,7 +843,7 @@ namespace GraffitiEntertainment.Namer.Editor
             EditorGUI.BeginDisabledGroup(_busy);
             EditorGUILayout.BeginHorizontal();
 
-            bool newDecomposition = EditorGUILayout.ToggleLeft(
+            bool newDecomposition = EditorGUILayout.Toggle(
                 new GUIContent("VC + Residual",
                     "Hard stage gate for vertex-color decomposition + residual (reuses DecompositionEnabled). Independent of the strength sliders."),
                 _decompositionEnabled);
@@ -845,7 +855,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 MarkDirty();
             }
 
-            bool newRoughness = EditorGUILayout.ToggleLeft(
+            bool newRoughness = EditorGUILayout.Toggle(
                 new GUIContent("Roughness",
                     "Hard stage gate for roughness extraction — skips extraction without touching the strength slider."),
                 _roughnessStageEnabled);
@@ -856,7 +866,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 MarkDirty();
             }
 
-            bool newAo = EditorGUILayout.ToggleLeft(
+            bool newAo = EditorGUILayout.Toggle(
                 new GUIContent("AO",
                     "Hard stage gate for AO un-multiply — skips the un-multiply without touching the strength slider."),
                 _aoStageEnabled);
@@ -867,7 +877,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 MarkDirty();
             }
 
-            bool newMetallic = EditorGUILayout.ToggleLeft(
+            bool newMetallic = EditorGUILayout.Toggle(
                 new GUIContent("Metallic",
                     "Shader-only gate for the metallic contribution (no pipeline stage exists)."),
                 _metallicContributionEnabled);
@@ -879,7 +889,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 Repaint();
             }
 
-            bool newEmissive = EditorGUILayout.ToggleLeft(
+            bool newEmissive = EditorGUILayout.Toggle(
                 new GUIContent("Emissive",
                     "Shader-only gate for the emissive contribution (no pipeline stage exists)."),
                 _emissiveContributionEnabled);
@@ -1000,20 +1010,29 @@ namespace GraffitiEntertainment.Namer.Editor
                 }
             }
 
-            // Wireframe second pass (04.2): the wire renders only for the in-memory split
-            // mesh — it carries the line-topology submesh. When the After pane falls back
-            // to the source/generated mesh the toggle is a no-op; imported/generated ASSET
-            // meshes are never mutated.
+            // Wireframe second pass (04.2): renders over whatever mesh the After pane
+            // shows — the split mesh's own line-topology submesh, or a cached standalone
+            // wire mesh built from the source/generated mesh (assets are never mutated).
+            Mesh wireMesh = null;
             Material wireMaterial = null;
             int wireSubmesh = -1;
-            if (_showTriangles && afterMesh == _previewSplitMesh)
+            if (_showTriangles && afterMesh != null)
             {
                 EnsureWireMaterial();
                 wireMaterial = _wireMaterial;
-                wireSubmesh = afterMesh.subMeshCount - 1;
+                if (afterMesh == _previewSplitMesh)
+                {
+                    wireMesh = afterMesh;
+                    wireSubmesh = afterMesh.subMeshCount - 1;
+                }
+                else
+                {
+                    wireMesh = GetOrCreatePreviewWireMesh(afterMesh);
+                    wireSubmesh = 0;
+                }
             }
 
-            PreviewRenderResult previewResult = _preview.Render(_previewMesh, afterMesh, beforeMaterial, afterMaterial, previewRect, wireMaterial, wireSubmesh);
+            PreviewRenderResult previewResult = _preview.Render(_previewMesh, afterMesh, beforeMaterial, afterMaterial, previewRect, wireMesh, wireMaterial, wireSubmesh);
             if (previewResult.IsValid)
             {
                 DrawPreviewPaneTexture(previewRect, previewResult);
@@ -1174,6 +1193,79 @@ namespace GraffitiEntertainment.Namer.Editor
                 _wireMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
                 _wireMaterial.SetColor(WireColorId, TriangleWireframeColor);
             }
+        }
+
+        /// <summary>
+        /// Builds (and caches) a standalone hidden line-topology mesh carrying every
+        /// triangle edge of <paramref name="source"/> — the wireframe second pass for
+        /// After-pane states that show the source or generated mesh (they carry no
+        /// wire submesh and are never mutated). Cached per source instance so
+        /// repaints do not rebuild it; rebuilt when the after mesh changes; disposed
+        /// in OnDisable.
+        /// </summary>
+        private Mesh GetOrCreatePreviewWireMesh(Mesh source)
+        {
+            if (source == null)
+            {
+                return null;
+            }
+
+            if (_previewWireMesh != null && _previewWireSource == source)
+            {
+                return _previewWireMesh;
+            }
+
+            if (_previewWireMesh != null)
+            {
+                DestroyImmediate(_previewWireMesh);
+            }
+
+            Mesh wire = new Mesh { hideFlags = HideFlags.HideAndDontSave };
+            if (source.indexFormat == UnityEngine.Rendering.IndexFormat.UInt32)
+            {
+                wire.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            }
+
+            wire.SetVertices(source.vertices);
+            wire.subMeshCount = 1;
+            wire.SetIndices(BuildWireEdgeIndices(source), MeshTopology.Lines, 0);
+            wire.RecalculateBounds();
+            _previewWireSource = source;
+            _previewWireMesh = wire;
+            return wire;
+        }
+
+        /// <summary>
+        /// Line-list indices for a wire mesh built from <paramref name="mesh"/>: every
+        /// triangle's three edges — (a,b), (b,c), (c,a) — across all submeshes, sharing
+        /// the source vertex positions. No edge deduplication (interior shared edges
+        /// overdraw the same wire color, which is invisible).
+        /// </summary>
+        private static int[] BuildWireEdgeIndices(Mesh mesh)
+        {
+            int totalTriangles = 0;
+            for (int i = 0; i < mesh.subMeshCount; i++)
+            {
+                totalTriangles += (int)mesh.GetIndexCount(i) / 3;
+            }
+
+            int[] edges = new int[totalTriangles * 6];
+            int write = 0;
+            for (int i = 0; i < mesh.subMeshCount; i++)
+            {
+                int[] triangles = mesh.GetTriangles(i);
+                for (int t = 0; t + 2 < triangles.Length; t += 3)
+                {
+                    edges[write++] = triangles[t];
+                    edges[write++] = triangles[t + 1];
+                    edges[write++] = triangles[t + 1];
+                    edges[write++] = triangles[t + 2];
+                    edges[write++] = triangles[t + 2];
+                    edges[write++] = triangles[t];
+                }
+            }
+
+            return edges;
         }
 
         /// <summary>
@@ -1723,6 +1815,7 @@ namespace GraffitiEntertainment.Namer.Editor
             }
             catch (Exception ex)
             {
+                Debug.LogException(ex);
                 _status = "Processing failed: " + ex.Message;
                 _statusIsError = true;
             }

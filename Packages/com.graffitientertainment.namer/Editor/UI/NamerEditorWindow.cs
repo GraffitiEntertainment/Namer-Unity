@@ -843,7 +843,7 @@ namespace GraffitiEntertainment.Namer.Editor
             EditorGUI.BeginDisabledGroup(_busy);
             EditorGUILayout.BeginHorizontal();
 
-            bool newDecomposition = EditorGUILayout.Toggle(
+            bool newDecomposition = EditorGUILayout.ToggleLeft(
                 new GUIContent("VC + Residual",
                     "Hard stage gate for vertex-color decomposition + residual (reuses DecompositionEnabled). Independent of the strength sliders."),
                 _decompositionEnabled);
@@ -855,7 +855,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 MarkDirty();
             }
 
-            bool newRoughness = EditorGUILayout.Toggle(
+            bool newRoughness = EditorGUILayout.ToggleLeft(
                 new GUIContent("Roughness",
                     "Hard stage gate for roughness extraction — skips extraction without touching the strength slider."),
                 _roughnessStageEnabled);
@@ -866,7 +866,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 MarkDirty();
             }
 
-            bool newAo = EditorGUILayout.Toggle(
+            bool newAo = EditorGUILayout.ToggleLeft(
                 new GUIContent("AO",
                     "Hard stage gate for AO un-multiply — skips the un-multiply without touching the strength slider."),
                 _aoStageEnabled);
@@ -877,7 +877,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 MarkDirty();
             }
 
-            bool newMetallic = EditorGUILayout.Toggle(
+            bool newMetallic = EditorGUILayout.ToggleLeft(
                 new GUIContent("Metallic",
                     "Shader-only gate for the metallic contribution (no pipeline stage exists)."),
                 _metallicContributionEnabled);
@@ -889,7 +889,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 Repaint();
             }
 
-            bool newEmissive = EditorGUILayout.Toggle(
+            bool newEmissive = EditorGUILayout.ToggleLeft(
                 new GUIContent("Emissive",
                     "Shader-only gate for the emissive contribution (no pipeline stage exists)."),
                 _emissiveContributionEnabled);
@@ -1079,7 +1079,7 @@ namespace GraffitiEntertainment.Namer.Editor
         /// </summary>
         private void DrawShaderInputToggle(int index, ref bool enabled)
         {
-            bool newValue = EditorGUILayout.Toggle(
+            bool newValue = EditorGUILayout.ToggleLeft(
                 new GUIContent(ShaderInputToggleLabels[index],
                     "Neutralizes the '" + ShaderInputToggleLabels[index]
                         + "' input in the full shaded After view (shader-only, no GPU recompute)."),
@@ -1329,7 +1329,14 @@ namespace GraffitiEntertainment.Namer.Editor
                 popup._channel = channel;
                 popup._material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
 
-                popup.ShowAsDropDown(paneRect, new Vector2(ChannelPopupSize, ChannelPopupSize));
+                // ShowAsDropDown anchors in SCREEN space, but the pane rect is GUI space
+                // (window-local) — convert first or the popup lands at that raw point on
+                // the desktop instead of over the NAMER panel. Horizontally center the
+                // popup on the clicked pane; ShowAsDropDown itself clamps to the screen.
+                Vector2 screenPos = GUIUtility.GUIToScreenPoint(new Vector2(paneRect.x, paneRect.y));
+                float anchorX = screenPos.x + paneRect.width * 0.5f - ChannelPopupSize * 0.5f;
+                Rect screenAnchor = new Rect(anchorX, screenPos.y, paneRect.width, paneRect.height);
+                popup.ShowAsDropDown(screenAnchor, new Vector2(ChannelPopupSize, ChannelPopupSize));
                 _activePopup = popup;
             }
 
@@ -1345,6 +1352,14 @@ namespace GraffitiEntertainment.Namer.Editor
                 if (Event.current.type == EventType.Repaint)
                 {
                     Graphics.DrawTexture(rect, Texture2D.whiteTexture, _material);
+
+                    // Window-style 1px outline (same treatment as the preview panes) so
+                    // the popup edge reads clearly against the panel content underneath.
+                    Color outline = new Color(0.4f, 0.4f, 0.4f, 1f);
+                    EditorGUI.DrawRect(new Rect(0f, 0f, position.width, 1f), outline);                     // top
+                    EditorGUI.DrawRect(new Rect(0f, position.height - 1f, position.width, 1f), outline);   // bottom
+                    EditorGUI.DrawRect(new Rect(0f, 0f, 1f, position.height), outline);                    // left
+                    EditorGUI.DrawRect(new Rect(position.width - 1f, 0f, 1f, position.height), outline);   // right
                 }
             }
 
@@ -1411,7 +1426,9 @@ namespace GraffitiEntertainment.Namer.Editor
             else if (current.type == EventType.ScrollWheel
                 && (current.shift || current.control || current.alt))
             {
-                _preview.Zoom(current.delta.y);
+                // Negated so wheel-up (Unity reports negative delta.y) zooms IN — the
+                // convention users expect from editors and viewers.
+                _preview.Zoom(-current.delta.y);
                 current.Use();
                 Repaint();
             }

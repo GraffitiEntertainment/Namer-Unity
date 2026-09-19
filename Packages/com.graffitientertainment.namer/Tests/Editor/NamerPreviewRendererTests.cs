@@ -20,7 +20,7 @@ namespace GraffitiEntertainment.Namer.Tests
     /// </summary>
     public class NamerPreviewRendererTests
     {
-        private const float ZoomSensitivity = 0.15f;
+        private const float ZoomSensitivity = 0.05f;
         private const float MinZoomScale = 0.05f;
         private const float MaxZoomScale = 10f;
         private const float MinPitch = -89f;
@@ -102,8 +102,8 @@ namespace GraffitiEntertainment.Namer.Tests
         public void Zoom_ClampedScaleFactor_SameWheelDirection()
         {
             _renderer.Zoom(1f);
-            Assert.AreEqual(1f - ZoomSensitivity, _renderer.ZoomScale, 1e-4f,
-                "positive scroll (zoom in) must shrink the ortho size by ZoomSensitivity");
+            Assert.AreEqual(1f / (1f + ZoomSensitivity), _renderer.ZoomScale, 1e-4f,
+                "positive scroll (zoom in) must shrink the ortho size by the exponential zoom step");
 
             // Zoom accumulates multiplicatively (the retired distance zoom's curve), so the
             // opposite wheel direction is probed from a fresh neutral scale via Frame.
@@ -111,7 +111,7 @@ namespace GraffitiEntertainment.Namer.Tests
 
             _renderer.Zoom(-1f);
             Assert.AreEqual(1f + ZoomSensitivity, _renderer.ZoomScale, 1e-4f,
-                "negative scroll (zoom out) must grow the ortho size by ZoomSensitivity");
+                "negative scroll (zoom out) must grow the ortho size by the exponential zoom step");
 
             for (int i = 0; i < 20; i++)
             {

@@ -60,7 +60,7 @@ namespace GraffitiEntertainment.Namer.Editor
     {
         public const float MarginPx = 15f;
         public const float InnerMarginPx = 10f;
-        public const float ZoomSensitivity = 0.15f;
+        public const float ZoomSensitivity = 0.05f;
 
         private const float MinPitch = -89f;
         private const float MaxPitch = 89f;
@@ -280,12 +280,14 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>
         /// Zooms the preview by scaling the orthographic size (positive scroll = zoom in,
-        /// i.e. a smaller size), clamped to a sane scale range. The camera transform never
-        /// moves.
+        /// i.e. a smaller size), clamped to a sane scale range. Exponential in the delta —
+        /// each scroll unit applies a constant ratio, so the step feels uniform across the
+        /// zoom range, zoom in/out are exactly reciprocal, and the factor never flips sign
+        /// under large trackpad-momentum deltas. The camera transform never moves.
         /// </summary>
         public void Zoom(float scrollDelta)
         {
-            _zoomScale = Mathf.Clamp(_zoomScale * (1f - scrollDelta * ZoomSensitivity), MinZoomScale, MaxZoomScale);
+            _zoomScale = Mathf.Clamp(_zoomScale * Mathf.Pow(1f + ZoomSensitivity, -scrollDelta), MinZoomScale, MaxZoomScale);
         }
 
         /// <summary>

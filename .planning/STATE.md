@@ -204,6 +204,7 @@ None yet.
 | 260918-fcx | NAMER debug dip-switches: step-checkbox row (VC+Residual/Roughness/AO hard gates), shaded-view input toggles via neutral-default shader gates, scrollbar fix | 2026-09-18 | cfe83b7 | [260918-fcx-namer-debug-dip-switches](./quick/260918-fcx-namer-debug-dip-switches/) |
 | 260918-k8k | NAMER Normal shaded-view gate (7th DIP-02 toggle) + six texture-channel panes with pop-out viewer under the toggle row; live EditMode suite 157/157 | 2026-09-18 | eba6901 | [260918-k8k-namer-normal-shaded-view-gate-texture-ch](./quick/260918-k8k-namer-normal-shaded-view-gate-texture-ch/) |
 | 260919-fp3 | Fix black NAMER Processor window: channel panes/popup now Repaint-guarded Graphics.DrawTexture instead of OnGUI Graphics.Blit (RenderTexture.active leak, CAMetalLayer 0x0 drawable); live EditMode suite 157/157 | 2026-09-19 | 70ba14a | [260919-fp3-namer-black-window-channel-pane-blit](./quick/260919-fp3-namer-black-window-channel-pane-blit/) |
+| 260919-ge4 | NAMER Processor window UX: channel popups replace each other and anchor below the clicked pane via ShowAsDropDown (framework click-away), preview zoom gated to shift/ctrl/alt+scroll (plain scroll scrolls the dialog), channel panes column-aligned with the shaded-view toggle row; live EditMode suite 157/157 | 2026-09-19 | 135782d | [260919-ge4-namer-window-ux-popup-zoom-align](./quick/260919-ge4-namer-window-ux-popup-zoom-align/) |
 
 ## Deferred Items
 

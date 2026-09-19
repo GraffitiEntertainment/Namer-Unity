@@ -75,6 +75,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private static readonly int DbgEnableNormalId = Shader.PropertyToID("_DbgEnableNormal");
         private static readonly int DbgRoughnessNeutralId = Shader.PropertyToID("_DbgRoughnessNeutral");
         private static readonly int ChannelId = Shader.PropertyToID("_Channel");
+        private static readonly int WireColorId = Shader.PropertyToID("_WireColor");
         private static readonly Color TriangleWireframeColor = new Color(0f, 1f, 1f, 1f);
 
         private const float ChannelPaneSize = 48f;
@@ -96,6 +97,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private NamerComputeResult _liveResult;
         private RenderTexture _previewBaseRt;
         private Material _channelViewMaterial;
+        private Material _wireMaterial;
 
         private UnityEngine.Object _selection;
         private NamerSourceModel _model;
@@ -232,6 +234,12 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 DestroyImmediate(_channelViewMaterial);
                 _channelViewMaterial = null;
+            }
+
+            if (_wireMaterial != null)
+            {
+                DestroyImmediate(_wireMaterial);
+                _wireMaterial = null;
             }
 
             if (_preview != null)
@@ -742,8 +750,49 @@ namespace GraffitiEntertainment.Namer.Editor
                 mesh.SetTriangles(split.SubMeshTriangles[i], i);
             }
 
+            // Wireframe submesh (04.2 second pass): one extra line-topology submesh
+            // after the triangle submeshes, drawn over the after pane with the unlit
+            // NamerPreviewWire material when the Triangles toggle is on.
+            int wireSubmesh = split.SubMeshTriangles.Length;
+            mesh.subMeshCount = wireSubmesh + 1;
+            mesh.SetIndices(BuildWireEdgeIndices(split), MeshTopology.Lines, wireSubmesh);
+
             mesh.RecalculateBounds();
             return mesh;
+        }
+
+        /// <summary>
+        /// Builds the line-list indices for the preview split mesh's wireframe submesh:
+        /// every triangle's three edges — (a,b), (b,c), (c,a) — across all submeshes,
+        /// sharing the mesh's vertex buffer (no vertex duplication). NO edge
+        /// deduplication: interior shared edges overdraw the same wire color, which is
+        /// invisible.
+        /// </summary>
+        private static int[] BuildWireEdgeIndices(NamerSplitResult split)
+        {
+            int totalTriangles = 0;
+            for (int i = 0; i < split.SubMeshTriangles.Length; i++)
+            {
+                totalTriangles += split.SubMeshTriangles[i].Length / 3;
+            }
+
+            int[] edges = new int[totalTriangles * 6];
+            int write = 0;
+            for (int i = 0; i < split.SubMeshTriangles.Length; i++)
+            {
+                int[] triangles = split.SubMeshTriangles[i];
+                for (int t = 0; t + 2 < triangles.Length; t += 3)
+                {
+                    edges[write++] = triangles[t];
+                    edges[write++] = triangles[t + 1];
+                    edges[write++] = triangles[t + 1];
+                    edges[write++] = triangles[t + 2];
+                    edges[write++] = triangles[t + 2];
+                    edges[write++] = triangles[t];
+                }
+            }
+
+            return edges;
         }
 
         private void MarkDirty()
@@ -951,12 +1000,24 @@ namespace GraffitiEntertainment.Namer.Editor
                 }
             }
 
-            PreviewRenderResult previewResult = _preview.Render(_previewMesh, afterMesh, beforeMaterial, afterMaterial, previewRect);
+            // Wireframe second pass (04.2): the wire renders only for the in-memory split
+            // mesh — it carries the line-topology submesh. When the After pane falls back
+            // to the source/generated mesh the toggle is a no-op; imported/generated ASSET
+            // meshes are never mutated.
+            Material wireMaterial = null;
+            int wireSubmesh = -1;
+            if (_showTriangles && afterMesh == _previewSplitMesh)
+            {
+                EnsureWireMaterial();
+                wireMaterial = _wireMaterial;
+                wireSubmesh = afterMesh.subMeshCount - 1;
+            }
+
+            PreviewRenderResult previewResult = _preview.Render(_previewMesh, afterMesh, beforeMaterial, afterMaterial, previewRect, wireMaterial, wireSubmesh);
             if (previewResult.IsValid)
             {
                 DrawPreviewPaneTexture(previewRect, previewResult);
                 DrawPreviewPaneOutline(previewRect);
-                DrawTriangleWireframe(previewRect, afterMesh);
             }
             else
             {
@@ -981,7 +1042,7 @@ namespace GraffitiEntertainment.Namer.Editor
 
             bool newShowTriangles = EditorGUILayout.Toggle(
                 new GUIContent("Triangles",
-                    "Overlays the After mesh's triangle wireframe on the preview render (visual debug only)."),
+                    "Renders the split mesh's triangle edges as a second pass in the After preview (visual debug only)."),
                 _showTriangles);
             if (newShowTriangles != _showTriangles)
             {
@@ -1091,6 +1152,27 @@ namespace GraffitiEntertainment.Namer.Editor
                 }
 
                 _channelViewMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+            }
+        }
+
+        /// <summary>
+        /// Lazily creates the hidden <c>NamerPreviewWire</c> material used by the
+        /// After-pane wireframe second pass, with the wire color from
+        /// <see cref="TriangleWireframeColor"/>.
+        /// </summary>
+        private void EnsureWireMaterial()
+        {
+            if (_wireMaterial == null)
+            {
+                Shader shader = Shader.Find("GraffitiEntertainment.Namer/NamerPreviewWire");
+                if (shader == null)
+                {
+                    throw new InvalidOperationException(
+                        "Shader 'GraffitiEntertainment.Namer/NamerPreviewWire' was not found. Ensure the wire shader compiled and imported.");
+                }
+
+                _wireMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+                _wireMaterial.SetColor(WireColorId, TriangleWireframeColor);
             }
         }
 
@@ -1205,80 +1287,6 @@ namespace GraffitiEntertainment.Namer.Editor
             Rect rightPane = new Rect(previewRect.x + previewRect.width * 0.5f, previewRect.y, previewRect.width * 0.5f, previewRect.height);
             GUI.DrawTextureWithTexCoords(leftPane, result.Before, new Rect(0f, 0f, 0.5f, 1f));   // before pane: before RT's left half
             GUI.DrawTextureWithTexCoords(rightPane, result.After, new Rect(0.5f, 0f, 0.5f, 1f)); // after pane: after RT's right half
-        }
-
-        /// <summary>
-        /// Draws the After pane mesh's triangle wireframe over the preview render (04.2 debug
-        /// overlay). Projects the after mesh through the same shared orthographic camera,
-        /// rotation, and per-pane anchor <see cref="NamerPreviewRenderer"/> used, so the
-        /// overlay aligns with the rendered After pane. No-op when the overlay is off or the
-        /// mesh is missing.
-        /// </summary>
-        private void DrawTriangleWireframe(Rect previewRect, Mesh mesh)
-        {
-            if (!_showTriangles || mesh == null)
-            {
-                return;
-            }
-
-            float aspect = previewRect.width / Mathf.Max(previewRect.height, 1f);
-            float orthoSize = _preview.OrthographicSizeForAspect(aspect, previewRect.height);
-            Vector2 drawOffsets = _preview.GetPaneDrawOffsets(aspect, previewRect.height);
-            Quaternion meshRotation = Quaternion.Euler(_preview.PitchDegrees, _preview.YawDegrees, 0f);
-            Vector3 boundsCenter = _previewMesh != null ? _previewMesh.bounds.center : Vector3.zero;
-            Vector3 afterPosition = new Vector3(drawOffsets.y, 0f, 0f) - (meshRotation * boundsCenter);
-            float halfWidthWorld = orthoSize * aspect;
-            Vector2 pan = _preview.PanOffset;
-
-            Vector3[] vertices = mesh.vertices;
-            Handles.BeginGUI();
-            Handles.color = TriangleWireframeColor;
-            for (int subMesh = 0; subMesh < mesh.subMeshCount; subMesh++)
-            {
-                int[] triangles = mesh.GetTriangles(subMesh);
-                for (int i = 0; i + 2 < triangles.Length; i += 3)
-                {
-                    Vector2 a = ProjectPreviewVertex(vertices[triangles[i]], meshRotation, afterPosition, pan, halfWidthWorld, orthoSize, previewRect);
-                    Vector2 b = ProjectPreviewVertex(vertices[triangles[i + 1]], meshRotation, afterPosition, pan, halfWidthWorld, orthoSize, previewRect);
-                    Vector2 c = ProjectPreviewVertex(vertices[triangles[i + 2]], meshRotation, afterPosition, pan, halfWidthWorld, orthoSize, previewRect);
-
-                    // Per-edge clip to the preview rect: only segments with both endpoints
-                    // inside are drawn, so the overlay never spills outside the rect
-                    // (border-crossing segments vanish; interior edges still draw).
-                    if (previewRect.Contains(a) && previewRect.Contains(b))
-                    {
-                        Handles.DrawLine(a, b);
-                    }
-
-                    if (previewRect.Contains(b) && previewRect.Contains(c))
-                    {
-                        Handles.DrawLine(b, c);
-                    }
-
-                    if (previewRect.Contains(c) && previewRect.Contains(a))
-                    {
-                        Handles.DrawLine(c, a);
-                    }
-                }
-            }
-
-            Handles.EndGUI();
-        }
-
-        /// <summary>
-        /// Projects one mesh-local vertex through the same rotation/anchor the preview
-        /// renderer applied to the After pane, then to GUI pixel coordinates. The preview
-        /// camera is orthographic, looks down +Z, and strafes with Pan, so the camera pan
-        /// is subtracted before the NDC divide and world x/y map linearly into the pane.
-        /// </summary>
-        private static Vector2 ProjectPreviewVertex(Vector3 vertex, Quaternion rotation, Vector3 position, Vector2 pan, float halfWidthWorld, float orthoSize, Rect previewRect)
-        {
-            Vector3 world = rotation * vertex + position;
-            float ndcX = (world.x - pan.x) / halfWidthWorld;
-            float ndcY = (world.y - pan.y) / orthoSize;
-            return new Vector2(
-                previewRect.x + (ndcX + 1f) * 0.5f * previewRect.width,
-                previewRect.y + (1f - ndcY) * 0.5f * previewRect.height);
         }
 
         private void HandlePreviewCameraInput(Rect previewRect)

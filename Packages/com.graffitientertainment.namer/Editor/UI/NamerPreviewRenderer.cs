@@ -137,10 +137,15 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <see cref="PreviewRenderResult.Before"/>/<see cref="PreviewRenderResult.After"/>
         /// are the two persistent pane RTs (each cycle's utility RT is blitted into its pane
         /// RT before the next cycle begins); <see cref="PreviewRenderResult.IsValid"/> is
-        /// <c>false</c> when either mesh is missing. Framing/rotation/zoom semantics are
+        /// <c>false</c> when either mesh is missing. When <paramref name="wireMaterial"/>
+        /// and a valid <paramref name="wireSubmesh"/> are given, the after pane also draws
+        /// that line-topology submesh as an unlit second pass in the same cycle, so the
+        /// wireframe is clipped per pixel by the GPU viewport and follows pan/zoom/orbit
+        /// for free (the before pane is unaffected). Framing/rotation/zoom semantics are
         /// unchanged.
         /// </summary>
-        public PreviewRenderResult Render(Mesh beforeMesh, Mesh afterMesh, Material before, Material after, Rect rect)
+        public PreviewRenderResult Render(Mesh beforeMesh, Mesh afterMesh, Material before, Material after, Rect rect,
+                                          Material wireMaterial = null, int wireSubmesh = -1)
         {
             if (beforeMesh == null || afterMesh == null || _preview == null)
             {
@@ -167,14 +172,22 @@ namespace GraffitiEntertainment.Namer.Editor
             Vector3 rotatedBoundsCenter = meshRotation * beforeMesh.bounds.center;
             Vector2 drawOffsets = GetPaneDrawOffsets(aspect, rect.height);
 
-            Texture beforeRT = RenderPane(beforeMesh, before, rect, orthoSize, meshRotation, rotatedBoundsCenter, drawOffsets.x, ref _beforePaneTexture);
-            Texture afterRT = RenderPane(afterMesh, after, rect, orthoSize, meshRotation, rotatedBoundsCenter, drawOffsets.y, ref _afterPaneTexture);
+            Texture beforeRT = RenderPane(beforeMesh, before, rect, orthoSize, meshRotation, rotatedBoundsCenter, drawOffsets.x, null, -1, ref _beforePaneTexture);
+            Texture afterRT = RenderPane(afterMesh, after, rect, orthoSize, meshRotation, rotatedBoundsCenter, drawOffsets.y, wireMaterial, wireSubmesh, ref _afterPaneTexture);
             return new PreviewRenderResult(beforeRT, afterRT);
         }
 
+        /// <summary>
+        /// Renders one pane's mesh into its own persistent RT via a single
+        /// BeginPreview→DrawMesh→Render(true)→EndPreview cycle. When
+        /// <paramref name="wireMaterial"/> is given with a valid
+        /// <paramref name="wireSubmesh"/>, the mesh is drawn a second time with that
+        /// material on the line-topology submesh in the same cycle (wireframe second
+        /// pass — After pane only).
+        /// </summary>
         private Texture RenderPane(Mesh mesh, Material material, Rect rect, float orthoSize,
                                    Quaternion meshRotation, Vector3 rotatedBoundsCenter, float drawOffsetX,
-                                   ref RenderTexture paneTexture)
+                                   Material wireMaterial, int wireSubmesh, ref RenderTexture paneTexture)
         {
             _preview.BeginPreview(rect, GUIStyle.none);
             ApplyCamera();
@@ -183,6 +196,13 @@ namespace GraffitiEntertainment.Namer.Editor
             _preview.lights[1].transform.rotation = Quaternion.Euler(340f, 218f, 177f);
             Vector3 position = new Vector3(drawOffsetX, 0f, 0f) - rotatedBoundsCenter;
             _preview.DrawMesh(mesh, position, meshRotation, material, 0);
+            if (wireMaterial != null && wireSubmesh >= 0)
+            {
+                // Wireframe second pass: same mesh, same transform, line-topology
+                // submesh — GPU viewport clipping cuts edges per pixel at the pane
+                // edge, and pan/zoom/orbit follow the camera transform for free.
+                _preview.DrawMesh(mesh, position, meshRotation, wireMaterial, wireSubmesh);
+            }
             _preview.Render(true);   // allowScriptableRenderPipeline=true is REQUIRED for URP materials
             Texture utilityRt = _preview.EndPreview();   // the utility's CACHED RT — reused by the next BeginPreview
             return BlitToPane(ref paneTexture, utilityRt);  // copy NOW, before the next cycle overwrites it

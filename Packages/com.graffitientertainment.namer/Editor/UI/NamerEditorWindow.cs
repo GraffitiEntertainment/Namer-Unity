@@ -1029,9 +1029,20 @@ namespace GraffitiEntertainment.Namer.Editor
             EditorGUILayout.BeginHorizontal();
             for (int i = 0; i < ChannelPaneLabels.Length; i++)
             {
-                Rect paneRect = GUILayoutUtility.GetRect(
-                    ChannelPaneSize, ChannelPaneSize,
-                    GUILayout.Width(ChannelPaneSize), GUILayout.Height(ChannelPaneSize));
+                if (i == 5)
+                {
+                    // No pane for the Vertex Color column; reserve its slot so the
+                    // Normal pane still lands under the Normal toggle.
+                    GUILayoutUtility.GetRect(new GUIContent(ShaderInputToggleLabels[5]),
+                        EditorStyles.toggle, GUILayout.Height(ChannelPaneSize));
+                }
+
+                int toggleIndex = i < 5 ? i : 6;
+                Rect slot = GUILayoutUtility.GetRect(
+                    new GUIContent(ShaderInputToggleLabels[toggleIndex]),
+                    EditorStyles.toggle, GUILayout.Height(ChannelPaneSize));
+                Rect paneRect = new Rect(slot.x, slot.y,
+                    Mathf.Min(ChannelPaneSize, slot.width), ChannelPaneSize);
 
                 if (afterMaterial == null || afterMaterial.GetTexture(SurfaceMapId) == null)
                 {
@@ -1099,13 +1110,16 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// The click-to-open large channel view (D-12). A chromeless
-        /// <see cref="EditorWindow.ShowPopup"/> window that closes when it loses focus
-        /// (click away). Creates, owns, and disposes its own material
-        /// so the popup never leaks editor resources.
+        /// The click-to-open large channel view (D-12). Shown via
+        /// <see cref="EditorWindow.ShowAsDropDown"/> anchored below the clicked pane, so
+        /// the framework handles click-away dismissal and only one popup is ever open
+        /// (a new show closes the previous). Creates, owns, and disposes its own
+        /// material so the popup never leaks editor resources.
         /// </summary>
         private sealed class ChannelViewPopup : EditorWindow
         {
+            private static ChannelViewPopup _activePopup;
+
             private Texture _surface;
             private Texture _baseResidual;
             private float _occlusionStrength;
@@ -1113,8 +1127,10 @@ namespace GraffitiEntertainment.Namer.Editor
             private Material _material;
 
             /// <summary>
-            /// Creates and shows the popup below the clicked pane (GUI-to-screen space),
-            /// capturing the After material's channel inputs at click time.
+            /// Creates and shows the popup anchored below the clicked pane (GUI space,
+            /// via ShowAsDropDown), capturing the After material's channel inputs at
+            /// click time. Any already-open popup is closed first, so popups replace
+            /// each other instead of accumulating.
             /// </summary>
             public static void Show(Rect paneRect, Texture surface, Texture baseResidual,
                 float occlusionStrength, int channel)
@@ -1126,6 +1142,12 @@ namespace GraffitiEntertainment.Namer.Editor
                         "Shader 'GraffitiEntertainment.Namer/NamerChannelView' was not found. Ensure the channel-view shader compiled and imported.");
                 }
 
+                if (_activePopup != null)
+                {
+                    _activePopup.Close();
+                    _activePopup = null;
+                }
+
                 ChannelViewPopup popup = CreateInstance<ChannelViewPopup>();
                 popup._surface = surface;
                 popup._baseResidual = baseResidual;
@@ -1133,9 +1155,8 @@ namespace GraffitiEntertainment.Namer.Editor
                 popup._channel = channel;
                 popup._material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
 
-                Rect screenAnchor = GUIUtility.GUIToScreenRect(paneRect);
-                popup.position = new Rect(screenAnchor.x, screenAnchor.yMax, ChannelPopupSize, ChannelPopupSize);
-                popup.ShowPopup();
+                popup.ShowAsDropDown(paneRect, new Vector2(ChannelPopupSize, ChannelPopupSize));
+                _activePopup = popup;
             }
 
             private void OnGUI()
@@ -1153,18 +1174,17 @@ namespace GraffitiEntertainment.Namer.Editor
                 }
             }
 
-            /// <summary>Click-away close: the popup loses focus when the user clicks elsewhere.</summary>
-            private void OnLostFocus()
-            {
-                Close();
-            }
-
             private void OnDisable()
             {
                 if (_material != null)
                 {
                     DestroyImmediate(_material);
                     _material = null;
+                }
+
+                if (_activePopup == this)
+                {
+                    _activePopup = null;
                 }
             }
         }
@@ -1259,7 +1279,8 @@ namespace GraffitiEntertainment.Namer.Editor
                 current.Use();
                 Repaint();
             }
-            else if (current.type == EventType.ScrollWheel)
+            else if (current.type == EventType.ScrollWheel
+                && (current.shift || current.control || current.alt))
             {
                 _preview.Zoom(current.delta.y);
                 current.Use();

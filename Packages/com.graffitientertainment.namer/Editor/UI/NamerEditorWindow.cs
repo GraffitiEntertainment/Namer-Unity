@@ -1228,6 +1228,7 @@ namespace GraffitiEntertainment.Namer.Editor
             Vector3 boundsCenter = _previewMesh != null ? _previewMesh.bounds.center : Vector3.zero;
             Vector3 afterPosition = new Vector3(drawOffsets.y, 0f, 0f) - (meshRotation * boundsCenter);
             float halfWidthWorld = orthoSize * aspect;
+            Vector2 pan = _preview.PanOffset;
 
             Vector3[] vertices = mesh.vertices;
             Handles.BeginGUI();
@@ -1237,12 +1238,27 @@ namespace GraffitiEntertainment.Namer.Editor
                 int[] triangles = mesh.GetTriangles(subMesh);
                 for (int i = 0; i + 2 < triangles.Length; i += 3)
                 {
-                    Vector2 a = ProjectPreviewVertex(vertices[triangles[i]], meshRotation, afterPosition, halfWidthWorld, orthoSize, previewRect);
-                    Vector2 b = ProjectPreviewVertex(vertices[triangles[i + 1]], meshRotation, afterPosition, halfWidthWorld, orthoSize, previewRect);
-                    Vector2 c = ProjectPreviewVertex(vertices[triangles[i + 2]], meshRotation, afterPosition, halfWidthWorld, orthoSize, previewRect);
-                    Handles.DrawLine(a, b);
-                    Handles.DrawLine(b, c);
-                    Handles.DrawLine(c, a);
+                    Vector2 a = ProjectPreviewVertex(vertices[triangles[i]], meshRotation, afterPosition, pan, halfWidthWorld, orthoSize, previewRect);
+                    Vector2 b = ProjectPreviewVertex(vertices[triangles[i + 1]], meshRotation, afterPosition, pan, halfWidthWorld, orthoSize, previewRect);
+                    Vector2 c = ProjectPreviewVertex(vertices[triangles[i + 2]], meshRotation, afterPosition, pan, halfWidthWorld, orthoSize, previewRect);
+
+                    // Per-edge clip to the preview rect: only segments with both endpoints
+                    // inside are drawn, so the overlay never spills outside the rect
+                    // (border-crossing segments vanish; interior edges still draw).
+                    if (previewRect.Contains(a) && previewRect.Contains(b))
+                    {
+                        Handles.DrawLine(a, b);
+                    }
+
+                    if (previewRect.Contains(b) && previewRect.Contains(c))
+                    {
+                        Handles.DrawLine(b, c);
+                    }
+
+                    if (previewRect.Contains(c) && previewRect.Contains(a))
+                    {
+                        Handles.DrawLine(c, a);
+                    }
                 }
             }
 
@@ -1252,14 +1268,14 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>
         /// Projects one mesh-local vertex through the same rotation/anchor the preview
         /// renderer applied to the After pane, then to GUI pixel coordinates. The preview
-        /// camera is orthographic, fixed, and looks down +Z, so world x/y map linearly into
-        /// the pane.
+        /// camera is orthographic, looks down +Z, and strafes with Pan, so the camera pan
+        /// is subtracted before the NDC divide and world x/y map linearly into the pane.
         /// </summary>
-        private static Vector2 ProjectPreviewVertex(Vector3 vertex, Quaternion rotation, Vector3 position, float halfWidthWorld, float orthoSize, Rect previewRect)
+        private static Vector2 ProjectPreviewVertex(Vector3 vertex, Quaternion rotation, Vector3 position, Vector2 pan, float halfWidthWorld, float orthoSize, Rect previewRect)
         {
             Vector3 world = rotation * vertex + position;
-            float ndcX = world.x / halfWidthWorld;
-            float ndcY = world.y / orthoSize;
+            float ndcX = (world.x - pan.x) / halfWidthWorld;
+            float ndcY = (world.y - pan.y) / orthoSize;
             return new Vector2(
                 previewRect.x + (ndcX + 1f) * 0.5f * previewRect.width,
                 previewRect.y + (1f - ndcY) * 0.5f * previewRect.height);
@@ -1275,7 +1291,20 @@ namespace GraffitiEntertainment.Namer.Editor
 
             if (current.type == EventType.MouseDrag)
             {
-                _preview.Orbit(current.delta.x, current.delta.y);
+                if (current.control)
+                {
+                    // Ctrl+drag strafes the shared camera; pixel delta converted to world
+                    // units at the current orthographic size (GUI y is down).
+                    float aspect = previewRect.width / Mathf.Max(previewRect.height, 1f);
+                    float orthoSize = _preview.OrthographicSizeForAspect(aspect, previewRect.height);
+                    float worldPerPixel = 2f * orthoSize / Mathf.Max(previewRect.height, 1f);
+                    _preview.Pan(-current.delta.x * worldPerPixel, current.delta.y * worldPerPixel);
+                }
+                else
+                {
+                    _preview.Orbit(current.delta.x, current.delta.y);
+                }
+
                 current.Use();
                 Repaint();
             }

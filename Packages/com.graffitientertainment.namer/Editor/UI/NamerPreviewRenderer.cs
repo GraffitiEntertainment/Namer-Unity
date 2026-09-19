@@ -47,7 +47,9 @@ namespace GraffitiEntertainment.Namer.Editor
     /// extreme combined rotations is clipped invisible by the two-cycle per-pane render
     /// (Task 2) (GAP-5).
     /// Orbit rotates each instance IN PLACE about its own bounds center (the standard
-    /// Unity object-preview expectation — drag spins the object, camera stays put).
+    /// Unity object-preview expectation — drag spins the object, camera stays put);
+    /// ctrl+drag strafes the shared camera in its view plane (Pan) — the one
+    /// camera-transform motion, alongside zoom-as-orthographic-size.
     ///
     /// URP materials render magenta/fallback-error through the built-in preview path, so
     /// every render calls <see cref="PreviewRenderUtility.Render(bool, bool)"/> with
@@ -72,6 +74,8 @@ namespace GraffitiEntertainment.Namer.Editor
         private float _yaw;
         private float _pitch;
         private float _zoomScale = 1f;
+        private float _panX;
+        private float _panY;
 
         // The neutral-rotation AABB half-extents of the framed mesh. The degenerate defaults
         // (1f) only matter before the first Frame; Render always re-fits when the mesh changes.
@@ -211,7 +215,7 @@ namespace GraffitiEntertainment.Namer.Editor
         /// Re-fits the framing to <paramref name="mesh"/>'s neutral-rotation AABB
         /// half-extents so each pane's own object hugs the divider with an
         /// <see cref="InnerMarginPx"/> screen-space inner margin (D-09: framing re-fits on
-        /// selection change). Resets zoom, yaw, and pitch.
+        /// selection change). Resets zoom, yaw, pitch, and pan.
         /// </summary>
         public void Frame(Mesh mesh)
         {
@@ -233,6 +237,8 @@ namespace GraffitiEntertainment.Namer.Editor
             _zoomScale = 1f;
             _yaw = 0f;
             _pitch = 0f;
+            _panX = 0f;
+            _panY = 0f;
 
             ApplyCamera();
         }
@@ -256,6 +262,20 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             _zoomScale = Mathf.Clamp(_zoomScale * (1f - scrollDelta * ZoomSensitivity), MinZoomScale, MaxZoomScale);
         }
+
+        /// <summary>
+        /// Strafes the preview view by the given world-space offset (ctrl+drag). Moves the
+        /// shared orthographic camera in its view plane; mesh draw positions and the
+        /// divider anchor are unchanged.
+        /// </summary>
+        public void Pan(float worldX, float worldY)
+        {
+            _panX += worldX;
+            _panY += worldY;
+        }
+
+        /// <summary>The accumulated world-space pan of the preview camera.</summary>
+        public Vector2 PanOffset => new Vector2(_panX, _panY);
 
         /// <summary>
         /// The orthographic half-height that frames the framed object's neutral AABB in ONE
@@ -346,10 +366,11 @@ namespace GraffitiEntertainment.Namer.Editor
                 return;
             }
 
-            // Camera fixed on its viewing axis, looking at the before/after midpoint
-            // (world origin); orbit rotation is applied to the mesh instances in Render
-            // and zoom scales the orthographic size (never the camera transform).
-            _preview.camera.transform.position = new Vector3(0f, 0f, -OrthoCameraDistance);
+            // Camera stays on its viewing axis (looking at the before/after midpoint,
+            // world origin) but strafes in its view plane with Pan; orbit rotation is
+            // applied to the mesh instances in Render and zoom scales the orthographic
+            // size (the camera transform moves only under Pan).
+            _preview.camera.transform.position = new Vector3(_panX, _panY, -OrthoCameraDistance);
             _preview.camera.transform.rotation = Quaternion.identity;
         }
     }

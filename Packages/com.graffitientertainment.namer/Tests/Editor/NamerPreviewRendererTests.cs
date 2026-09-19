@@ -12,7 +12,8 @@ namespace GraffitiEntertainment.Namer.Tests
     /// <summary>
     /// Pins the 04.2-09 preview-framing rework of <see cref="NamerPreviewRenderer"/>: one
     /// orthographic camera for both panes, one shared yaw+pitch rotation (pitch clamped to
-    /// [-89, 89]), zoom as orthographic size (camera transform never moves), and a
+    /// [-89, 89]), zoom as orthographic size, ctrl+drag pan as a camera view-plane strafe,
+    /// and a
     /// divider-anchored tight neutral-AABB fit (each pane's object hugs the divider with an
     /// <see cref="NamerPreviewRenderer.InnerMarginPx"/> inner margin). The render-path test is
     /// graphics-capability-gated (D-15); the framing/zoom/orbit tests are pure logic.
@@ -83,6 +84,18 @@ namespace GraffitiEntertainment.Namer.Tests
 
             // Orbit(float, float) is the sole rotation API — a Rotate(float) overload is
             // pinned at compile time by its absence (no such member exists on the type).
+        }
+
+        [Test]
+        public void Pan_AccumulatesOffset_ResetsOnFrame()
+        {
+            _renderer.Pan(1f, 2f);
+            _renderer.Pan(-0.5f, 1f);
+            Assert.AreEqual(0.5f, _renderer.PanOffset.x, 1e-4f, "pan x accumulates");
+            Assert.AreEqual(3f, _renderer.PanOffset.y, 1e-4f, "pan y accumulates");
+
+            _renderer.Frame(CreateBoundsMesh(1f, 2f, 0.5f));
+            Assert.AreEqual(Vector2.zero, _renderer.PanOffset, "Frame resets pan");
         }
 
         [Test]

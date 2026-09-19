@@ -96,7 +96,6 @@ namespace GraffitiEntertainment.Namer.Editor
         private NamerComputeResult _liveResult;
         private RenderTexture _previewBaseRt;
         private Material _channelViewMaterial;
-        private RenderTexture _channelPaneRt;
 
         private UnityEngine.Object _selection;
         private NamerSourceModel _model;
@@ -227,13 +226,6 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 DestroyImmediate(_namerMaterial);
                 _namerMaterial = null;
-            }
-
-            if (_channelPaneRt != null)
-            {
-                _channelPaneRt.Release();
-                DestroyImmediate(_channelPaneRt);
-                _channelPaneRt = null;
             }
 
             if (_channelViewMaterial != null)
@@ -1022,7 +1014,7 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>
         /// D-12 channel pane row: six small panes directly under the shaded-view toggle
-        /// row, each blitted through the <c>NamerChannelView</c> material so the pane shows
+        /// row, each drawn through the <c>NamerChannelView</c> material so the pane shows
         /// exactly what the After material's packed textures decode to via the shared
         /// NAMER decode (no drift from the runtime material). Neutral no-op boxes when
         /// the After material has no generated textures yet. Clicking a pane opens a
@@ -1043,7 +1035,7 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 if (afterMaterial == null || afterMaterial.GetTexture(SurfaceMapId) == null)
                 {
-                    // No generated textures yet: neutral no-op box, no blit/tooltip/click.
+                    // No generated textures yet: neutral no-op box, no draw/tooltip/click.
                     GUI.Box(paneRect, GUIContent.none);
                     continue;
                 }
@@ -1053,9 +1045,10 @@ namespace GraffitiEntertainment.Namer.Editor
                 _channelViewMaterial.SetTexture(BaseResidualMapId, afterMaterial.GetTexture(BaseResidualMapId));
                 _channelViewMaterial.SetFloat(OcclusionStrengthId, afterMaterial.GetFloat(OcclusionStrengthId));
                 _channelViewMaterial.SetFloat(ChannelId, i);
-                EnsureChannelPaneRt();
-                Graphics.Blit(Texture2D.whiteTexture, _channelPaneRt, _channelViewMaterial, 0);
-                GUI.DrawTexture(paneRect, _channelPaneRt);
+                if (Event.current.type == EventType.Repaint)
+                {
+                    Graphics.DrawTexture(paneRect, Texture2D.whiteTexture, _channelViewMaterial);
+                }
 
                 GUI.Label(paneRect, new GUIContent(string.Empty,
                     ChannelPaneLabels[i] + " — source: " + (i == 0 ? "_BaseResidualMap" : "_SurfaceMap")));
@@ -1072,7 +1065,7 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Lazily creates the hidden <c>NamerChannelView</c> blit material used by the
+        /// Lazily creates the hidden <c>NamerChannelView</c> material used by the
         /// channel panes. The popup creates and owns its own instance.
         /// </summary>
         private void EnsureChannelViewMaterial()
@@ -1087,16 +1080,6 @@ namespace GraffitiEntertainment.Namer.Editor
                 }
 
                 _channelViewMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
-            }
-        }
-
-        /// <summary>Ensures the small shared pane render target exists (reused per pane draw).</summary>
-        private void EnsureChannelPaneRt()
-        {
-            if (_channelPaneRt == null)
-            {
-                _channelPaneRt = new RenderTexture(
-                    (int)ChannelPaneSize, (int)ChannelPaneSize, 0, GraphicsFormat.R8G8B8A8_UNorm);
             }
         }
 
@@ -1118,7 +1101,7 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>
         /// The click-to-open large channel view (D-12). A chromeless
         /// <see cref="EditorWindow.ShowPopup"/> window that closes when it loses focus
-        /// (click away). Creates, owns, and disposes its own material and render target
+        /// (click away). Creates, owns, and disposes its own material
         /// so the popup never leaks editor resources.
         /// </summary>
         private sealed class ChannelViewPopup : EditorWindow
@@ -1128,7 +1111,6 @@ namespace GraffitiEntertainment.Namer.Editor
             private float _occlusionStrength;
             private int _channel;
             private Material _material;
-            private RenderTexture _rt;
 
             /// <summary>
             /// Creates and shows the popup below the clicked pane (GUI-to-screen space),
@@ -1165,19 +1147,10 @@ namespace GraffitiEntertainment.Namer.Editor
                 _material.SetFloat(OcclusionStrengthId, _occlusionStrength);
                 _material.SetFloat(ChannelId, _channel);
 
-                if (_rt == null || _rt.width != (int)rect.width || _rt.height != (int)rect.height)
+                if (Event.current.type == EventType.Repaint)
                 {
-                    if (_rt != null)
-                    {
-                        _rt.Release();
-                        DestroyImmediate(_rt);
-                    }
-
-                    _rt = new RenderTexture((int)rect.width, (int)rect.height, 0, GraphicsFormat.R8G8B8A8_UNorm);
+                    Graphics.DrawTexture(rect, Texture2D.whiteTexture, _material);
                 }
-
-                Graphics.Blit(Texture2D.whiteTexture, _rt, _material, 0);
-                GUI.DrawTexture(rect, _rt, ScaleMode.ScaleToFit);
             }
 
             /// <summary>Click-away close: the popup loses focus when the user clicks elsewhere.</summary>
@@ -1188,13 +1161,6 @@ namespace GraffitiEntertainment.Namer.Editor
 
             private void OnDisable()
             {
-                if (_rt != null)
-                {
-                    _rt.Release();
-                    DestroyImmediate(_rt);
-                    _rt = null;
-                }
-
                 if (_material != null)
                 {
                     DestroyImmediate(_material);

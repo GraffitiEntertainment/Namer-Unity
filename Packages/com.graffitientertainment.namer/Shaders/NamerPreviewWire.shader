@@ -7,8 +7,12 @@ Shader "GraffitiEntertainment.Namer/NamerPreviewWire"
 
     SubShader
     {
-        // Geometry+100 draws after the opaque preview mesh so the X-ray look is
-        // preserved; ZTest Always + ZWrite Off below keep back-facing edges visible.
+        // Geometry+100 draws after the opaque preview mesh so on-surface edges land
+        // on top of the shaded surface. ZTest LEqual + ZWrite Off below depth-occlude
+        // the wire against that solid pass: edges geometrically behind the visible
+        // surface (back faces, and fronts hidden behind other geometry) are dropped.
+        // Lines have no winding, so GPU face culling cannot do this — depth
+        // occlusion by the solid pass is the mechanism.
         Tags
         {
             "RenderType" = "Opaque"
@@ -26,7 +30,7 @@ Shader "GraffitiEntertainment.Namer/NamerPreviewWire"
             }
 
             ZWrite Off
-            ZTest Always
+            ZTest LEqual
 
             HLSLPROGRAM
             #pragma target 2.0
@@ -52,10 +56,21 @@ Shader "GraffitiEntertainment.Namer/NamerPreviewWire"
 
             // Minimal unlit color pass: the wire submesh is line topology sharing the
             // preview mesh's vertex buffer, so only the position is needed.
+            static const float kWireDepthBias = 1e-5;
+
             Varyings WireVert(Attributes input)
             {
                 Varyings output;
                 output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
+                // Edges that lie exactly ON the opaque surface have depth equal to the
+                // solid pass's; float rounding in the two interpolation paths can push a
+                // line fragment a few ulps farther and drop it (dashed edges). Pull the
+                // wire a hair toward the camera — direction flips with reversed-Z.
+                #if UNITY_REVERSED_Z
+                output.positionCS.z += kWireDepthBias;
+                #else
+                output.positionCS.z -= kWireDepthBias;
+                #endif
                 return output;
             }
 

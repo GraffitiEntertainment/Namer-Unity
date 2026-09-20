@@ -575,7 +575,12 @@ namespace GraffitiEntertainment.Namer.Editor
                 {
                     sRGB = false,
                 };
-                _previewBaseRt = new RenderTexture(descriptor);
+                _previewBaseRt = new RenderTexture(descriptor)
+                {
+                    // Same sweep protection as the pool: without DontSave the editor's
+                    // unused-asset sweeps destroy this RT between repaints.
+                    hideFlags = HideFlags.HideAndDontSave,
+                };
                 _previewBaseRt.Create();
             }
 

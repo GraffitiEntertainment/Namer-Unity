@@ -46,6 +46,11 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture created = new RenderTexture(descriptor)
             {
                 name = "NamerComputeRT",
+                // Without DontSave the editor's unused-asset sweeps (fired by
+                // selection changes and reimports) destroy pooled targets, which
+                // then compare Unity-null on later leases — handing corpses to
+                // SetTexture (MissingReferenceException / ArgumentNullException).
+                hideFlags = HideFlags.HideAndDontSave,
             };
             created.Create();
             _live.Add(created);

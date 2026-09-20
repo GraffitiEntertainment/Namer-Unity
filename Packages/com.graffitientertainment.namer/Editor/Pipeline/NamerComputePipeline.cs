@@ -35,6 +35,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private const string ComputeShaderPath = "Packages/com.graffitientertainment.namer/Compute/NAMERPack.compute";
         private const string RawCopyShaderPath = "Packages/com.graffitientertainment.namer/Editor/Pipeline/NamerRawCopy.shader";
         internal const string ReencodeSrgbKeyword = "_REENCODE_SRGB";
+        internal const string UnpackNormalKeyword = "_UNPACK_NORMAL";
         internal const int DefaultBaseResolution = 256;
 
         private static readonly Color NeutralNormalFill = new Color(0.5f, 0.5f, 1.0f, 1.0f);
@@ -132,7 +133,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 surfaceOut = _pool.Lease(unorm8);
 
                 Upload(inspection.BaseMap, baseColorIn, WhiteFill());
-                Upload(inspection.NormalMap, normalTexel, NeutralNormalTexture());
+                Upload(inspection.NormalMap, normalTexel, NeutralNormalTexture(), unpackNormal: true);
 
                 if (inspection.OcclusionMap != null)
                 {
@@ -405,6 +406,11 @@ namespace GraffitiEntertainment.Namer.Editor
 
         internal static void Upload(Texture source, RenderTexture target, Texture2D fallback)
         {
+            Upload(source, target, fallback, unpackNormal: false);
+        }
+
+        internal static void Upload(Texture source, RenderTexture target, Texture2D fallback, bool unpackNormal)
+        {
             Texture upload = source != null ? source : fallback;
 
             // Raw upload through the NamerRawCopy material: a plain Graphics.Blit
@@ -425,6 +431,21 @@ namespace GraffitiEntertainment.Namer.Editor
             else
             {
                 rawCopy.DisableKeyword(ReencodeSrgbKeyword);
+            }
+
+            // Normal-map uploads go through the _UNPACK_NORMAL variant: a source
+            // imported as TextureImporterType.NormalMap does not keep plain RGB on
+            // the GPU (desktop DXT5 swizzles to (1, y, 1, x), BC5 stores (x, y, 0, 1)),
+            // and the octahedral encode needs the authored [0,1] DirectX texel, not
+            // the swizzled bytes. Normal-map textures are always linear, so the
+            // sRGB-reencode and unpack variants never combine in practice.
+            if (unpackNormal)
+            {
+                rawCopy.EnableKeyword(UnpackNormalKeyword);
+            }
+            else
+            {
+                rawCopy.DisableKeyword(UnpackNormalKeyword);
             }
 
             Graphics.Blit(upload, target, rawCopy);

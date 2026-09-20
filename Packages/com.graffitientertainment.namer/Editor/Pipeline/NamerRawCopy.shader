@@ -34,6 +34,7 @@ Shader "Hidden/Namer/NamerRawCopy"
             #pragma vertex vert
             #pragma fragment frag
             #pragma multi_compile _ _REENCODE_SRGB
+            #pragma multi_compile _ _UNPACK_NORMAL
             #include "UnityCG.cginc"
 
             sampler2D _MainTex;
@@ -71,6 +72,26 @@ Shader "Hidden/Namer/NamerRawCopy"
                 float4 c = tex2D(_MainTex, i.uv);
                 #ifdef _REENCODE_SRGB
                 c.rgb = NamerLinearToSRGB(c.rgb);
+                #endif
+                #ifdef _UNPACK_NORMAL
+                // A source imported as TextureImporterType.NormalMap does not keep
+                // plain RGB on the GPU: desktop DXT5 swizzles to (1, y, 1, x), BC5
+                // stores (x, y, 0, 1), only an uncompressed import keeps (x, y, z, 1).
+                // x = r * a recovers the authored normal X in every layout — the same
+                // trick URP's UnpackNormalMapRGorAG uses — and Z is reconstructed on
+                // the unit shell. Green is normalized into the DirectX-style texel the
+                // NAMER format expects: URP's UnpackNormal* applies no flip (Unity's
+                // canonical stored convention is Y+), while the NAMER decode un-flips
+                // (n.y = 1 - 2g) — writing 1 - g here makes the decode return Unity's
+                // canonical n.y so the after pane matches the URP before pane instead
+                // of mirroring the tangent Y. Normal-map textures are always linear,
+                // so this variant never combines with _REENCODE_SRGB in practice.
+                float nx = c.r * c.a;
+                float ny = c.g;
+                float zx = 2.0 * nx - 1.0;
+                float zy = 2.0 * ny - 1.0;
+                float nz = sqrt(saturate(1.0 - zx * zx - zy * zy));
+                c = float4(nx, 1.0 - ny, nz * 0.5 + 0.5, 1.0);
                 #endif
                 return c;
             }

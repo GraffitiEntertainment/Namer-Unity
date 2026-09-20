@@ -232,6 +232,45 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         [Test]
+        public void Bake_SmallUVTriangle_IsCoveredNotDegenerate()
+        {
+            // Regression pin for debug session residual-missing-triangles (2026-09-19).
+            // TryReconstruct's degeneracy gate compared denom = (2*Area_UV)^2 against a
+            // 1e-8 epsilon — quadratic in UV edge length, so at the 512 bake cap any
+            // triangle under ~13 texel^2 was discarded as "degenerate" and its texels
+            // fell to the -1 empty sentinel. This fixture is a 4-texel^2 right triangle
+            // (4x2 texel legs): below the pre-fix gate, far above true zero-area. Its
+            // texel centers must reconstruct (AO in [0,1], not the sentinel) while a
+            // far-away texel stays empty.
+            const int res = 512;
+            Mesh tri = CreateSmallUVTriangle();
+            try
+            {
+                NamerAOBakeResult result = NamerAOBaker.Bake(
+                    tri, tri, res, NamerAOBaker.kCageOffset, NamerAOBaker.kMaxDistanceFactor, NamerAOBaker.kRayCount);
+                try
+                {
+                    int inside = 257 * res + 257;
+                    Assert.GreaterOrEqual(result.Ao[inside], 0.999f,
+                        "a texel center inside a 4-texel^2 triangle must reconstruct to the flat-plane AO (~1.0), not the -1 empty sentinel (pre-fix: discarded as degenerate)");
+                    Assert.LessOrEqual(result.Ao[inside], 1f, "AO is a ratio and must stay within [0,1]");
+
+                    int farAway = 10 * res + 10;
+                    Assert.AreEqual(-1f, result.Ao[farAway],
+                        "a texel outside every triangle must stay the -1 empty sentinel (zero-coverage semantics unchanged)");
+                }
+                finally
+                {
+                    result.Ao.Dispose();
+                }
+            }
+            finally
+            {
+                Destroy(tri);
+            }
+        }
+
+        [Test]
         public void RequestBake_Cancelled_DoesNotCachePartialBake()
         {
             Mesh floor = CreateFlatQuad();
@@ -376,6 +415,31 @@ namespace GraffitiEntertainment.Namer.Tests
                 new Vector2(0f, 1f),
             };
             mesh.triangles = new[] { 0, 2, 1, 0, 3, 2 };
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private static Mesh CreateSmallUVTriangle()
+        {
+            // Right triangle whose UV footprint is 4x2 texels at the 512 cap: v0 sits on
+            // the center of texel (256, 256), legs run +4 and +2 texels. The center of
+            // texel (257, 257) is strictly inside (barycentric 0.25/0.5/0.25).
+            const float texel = 1f / 512f;
+            Mesh mesh = new Mesh { name = "NamerAOBakeTestSmallUVTriangle" };
+            mesh.vertices = new[]
+            {
+                new Vector3(0f, 0f, 0f),
+                new Vector3(1f, 0f, 0f),
+                new Vector3(0f, 0f, 0.5f),
+            };
+            mesh.normals = new[] { Vector3.up, Vector3.up, Vector3.up };
+            mesh.uv = new[]
+            {
+                new Vector2(256.5f * texel, 256.5f * texel),
+                new Vector2(260.5f * texel, 256.5f * texel),
+                new Vector2(256.5f * texel, 258.5f * texel),
+            };
+            mesh.triangles = new[] { 0, 1, 2 };
             mesh.RecalculateBounds();
             return mesh;
         }

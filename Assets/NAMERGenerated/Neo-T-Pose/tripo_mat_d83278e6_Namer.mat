@@ -25,7 +25,11 @@ Material:
     serializedVersion: 3
     m_TexEnvs:
     - _BaseResidualMap:
-        m_Texture: {fileID: 2800000, guid: 7974d9917ffde4c959736aba826732c0, type: 3}
+        m_Texture: {fileID: 2800000, guid: 940d91fcbfe2f4422bff6301278f8cb6, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _RoughnessOffsetMap:
+        m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _SurfaceMap:
@@ -38,6 +42,14 @@ Material:
     - _AlphaToMask: 0
     - _Cull: 2
     - _Cutoff: 0.5
+    - _DbgEnableAO: 1
+    - _DbgEnableEmissive: 1
+    - _DbgEnableMetallic: 1
+    - _DbgEnableNormal: 1
+    - _DbgEnableResidual: 1
+    - _DbgEnableRoughness: 1
+    - _DbgEnableVertexColor: 1
+    - _DbgRoughnessNeutral: 0.5
     - _DstBlend: 0
     - _DstBlendAlpha: 0
     - _EMISSION: 0

@@ -306,6 +306,119 @@ namespace GraffitiEntertainment.Namer.Tests
             yield return null;
         }
 
+        /// <summary>
+        /// Pins the wireframe occlusion contract: the After-pane triangle wire must be
+        /// depth-tested against the opaque preview mesh (ZTest LEqual against the solid
+        /// pass's depth), so edges geometrically behind the visible surface — back faces
+        /// and X-ray bleed-through — are dropped. Lines have no winding, so GPU face
+        /// culling cannot do this; occlusion by the solid pass's depth buffer is the
+        /// mechanism. The wire submesh carries two segments straddling the solid quad in
+        /// depth (z=+0.25 top band, z=-0.25 bottom band): whichever sign of Z points at
+        /// the camera, exactly one segment is in front of the surface and one behind, so
+        /// exactly one band may contain wire pixels.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Render_Wireframe_DepthOccluded_DropsEdgesBehindSolidSurface()
+        {
+            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
+            {
+                Assert.Ignore("[NAMER] no graphics device — preview render requires a real device (D-15).");
+                yield break;
+            }
+
+            Shader litShader = Shader.Find("Universal Render Pipeline/Lit");
+            Shader wireShader = Shader.Find("GraffitiEntertainment.Namer/NamerPreviewWire");
+            if (litShader == null || wireShader == null)
+            {
+                Assert.Ignore("[NAMER] URP Lit / NamerPreviewWire shader not found — wire occlusion requires the URP package and a compiled wire shader.");
+                yield break;
+            }
+
+            // Solid quad at z=0 spanning the pane plus a line submesh with one segment
+            // at z=+0.25 in the top band and one at z=-0.25 in the bottom band. The
+            // quad renders double-sided (_Cull=0) so it writes depth whichever way the
+            // preview camera looks, making the straddle direction-proof.
+            Mesh mesh = new Mesh { name = "NamerPreviewWireOcclusionMesh", hideFlags = HideFlags.HideAndDontSave };
+            _cleanup.Add(mesh);
+            mesh.vertices = new[]
+            {
+                new Vector3(-1f, -1f, 0f), new Vector3(1f, -1f, 0f),
+                new Vector3(1f, 1f, 0f), new Vector3(-1f, 1f, 0f),
+                new Vector3(-0.9f, 0.5f, 0.25f), new Vector3(0.9f, 0.5f, 0.25f),
+                new Vector3(-0.9f, -0.5f, -0.25f), new Vector3(0.9f, -0.5f, -0.25f),
+            };
+            mesh.subMeshCount = 2;
+            mesh.SetIndices(new[] { 0, 1, 2, 0, 2, 3 }, MeshTopology.Triangles, 0);
+            // RecalculateNormals/Bounds must run while only the triangle submesh
+            // exists — they log "Failed getting triangles" on line topology.
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            mesh.SetIndices(new[] { 4, 5, 6, 7 }, MeshTopology.Lines, 1);
+
+            Material solid = CreateUrpLitMaterial(litShader);
+            solid.SetFloat("_Cull", 0f);
+            Material wire = new Material(wireShader)
+            {
+                name = "NamerPreviewWireOcclusionWire",
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+            _cleanup.Add(wire);
+
+            PreviewRenderResult result = _renderer.Render(mesh, mesh, solid, solid, new Rect(0, 0, 512, 256), mesh, wire, 1);
+            Assert.IsNotNull(result.After, "the after pane must render");
+
+            Color32[] pixels = ReadPanePixels(result.After);
+            int width = result.After.width;
+            int height = result.After.height;
+            int topCyan = CountCyan(pixels, width, height, height / 2, height);
+            int bottomCyan = CountCyan(pixels, width, height, 0, height / 2);
+
+            Assert.Greater(topCyan + bottomCyan, 0,
+                "the wire segment in front of the solid surface must draw");
+            Assert.AreEqual(0, Mathf.Min(topCyan, bottomCyan),
+                "the wire segment behind the solid surface must be depth-occluded (exactly one of the two straddling segments may draw)");
+
+            yield return null;
+        }
+
+        private Color32[] ReadPanePixels(Texture pane)
+        {
+            RenderTexture rt = (RenderTexture)pane;
+            RenderTexture prev = RenderTexture.active;
+            RenderTexture.active = rt;
+            Texture2D read = new Texture2D(rt.width, rt.height, TextureFormat.RGBA32, false, true)
+            {
+                name = "NamerPreviewWireOcclusionReadback",
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+            read.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
+            read.Apply();
+            RenderTexture.active = prev;
+
+            Color32[] pixels = read.GetPixels32();
+            Object.DestroyImmediate(read);
+            return pixels;
+        }
+
+        /// <summary>Counts near-cyan wire pixels in one vertical band of the after (right) pane.</summary>
+        private static int CountCyan(Color32[] pixels, int width, int height, int yMin, int yMax)
+        {
+            int count = 0;
+            for (int y = yMin; y < yMax; y++)
+            {
+                for (int x = width / 2; x < width; x++)
+                {
+                    Color32 p = pixels[y * width + x];
+                    if (p.g > 200 && p.b > 200 && p.r < 100)
+                    {
+                        count++;
+                    }
+                }
+            }
+
+            return count;
+        }
+
         private Mesh CreateBoundsMesh(float halfX, float halfY, float halfZ)
         {
             Mesh mesh = new Mesh

@@ -317,8 +317,8 @@ namespace GraffitiEntertainment.Namer.Tests
                             float zb = (nz + 1.0f) * 0.5f;
 
                             int i = y * WorkingSize + x;
-                            rgbPixels[i] = new Color(xb, yb, zb, 1.0f);      // raw DirectX RGB upload
-                            agPixels[i] = new Color(1.0f, yb, 0.13f, xb);    // DXT5nm/AG swizzle upload
+                            rgbPixels[i] = new Color(xb, yb, zb, 1.0f);      // plain RGB, canonical green
+                            agPixels[i] = new Color(1.0f, yb, 0.13f, xb);    // DXT5nm/AG swizzle, canonical green
                         }
                     }
 
@@ -353,11 +353,18 @@ namespace GraffitiEntertainment.Namer.Tests
                         // The oracle reads the quantized bytes back from the authored
                         // texture (RGBA32 storage rounded once at SetPixels) and
                         // reconstructs Z from the signed XY exactly like the kernel.
+                        // The authored green is Unity's canonical Y+ ((n+1)/2 — what
+                        // a NormalMap import serves and URP's UnpackNormal consumes),
+                        // while the encode consumes a DirectX texel (its decode does
+                        // n.y = 1 - 2g), so the oracle applies the same 1-g
+                        // normalization the upload blit performs. Feeding the green
+                        // through unflipped would pin the Y-mirrored normals that
+                        // showed up as inverted triangles in the after pane.
                         Color rgbT = rgbNormal.GetPixel(x, y);
                         float sx = rgbT.r * 2.0f - 1.0f;
                         float sy = rgbT.g * 2.0f - 1.0f;
                         float z = Mathf.Sqrt(1.0f - Mathf.Clamp01(sx * sx + sy * sy)) * 0.5f + 0.5f;
-                        float2 expected = NamerFormat.OctahedralEncode(new float3(rgbT.r, rgbT.g, z));
+                        float2 expected = NamerFormat.OctahedralEncode(new float3(rgbT.r, 1.0f - rgbT.g, z));
 
                         Assert.AreEqual((double)expected.x, surface[i].r / 255.0, 1.0 / 255.0,
                             layout + " oct R must match the Core oracle at (" + x + "," + y + ")");

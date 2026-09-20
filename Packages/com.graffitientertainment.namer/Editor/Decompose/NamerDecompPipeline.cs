@@ -124,6 +124,8 @@ namespace GraffitiEntertainment.Namer.Editor
         private readonly int _kernelRasterize;
         private readonly int _kernelProject;
         private readonly int _kernelResidual;
+        private readonly int _kernelDespike;
+        private readonly int _kernelDilate;
         private readonly int _kernelErrorHeatmap;
         private readonly int _kernelReduce;
 
@@ -138,6 +140,8 @@ namespace GraffitiEntertainment.Namer.Editor
             _kernelRasterize = _compute.FindKernel("CSRasterizeVertexColors");
             _kernelProject = _compute.FindKernel("CSProjectBase");
             _kernelResidual = _compute.FindKernel("CSResidual");
+            _kernelDespike = _compute.FindKernel("CSDespike");
+            _kernelDilate = _compute.FindKernel("CSDilateResidual");
             _kernelErrorHeatmap = _compute.FindKernel("CSErrorHeatmap");
             _kernelReduce = _compute.FindKernel("CSReduce");
         }
@@ -312,6 +316,36 @@ namespace GraffitiEntertainment.Namer.Editor
                 _compute.SetTexture(_kernelResidual, "_BaseLinear", baseLinear);
                 _compute.SetTexture(_kernelResidual, "_ResidualOut", fullResidual);
                 Dispatch(_kernelResidual, w, h);
+
+                // 4b. Despike (debug session residual-missing-triangles, edge-line
+                //     artifact): collapse quotient spikes and 1-texel spike runs
+                //     (vcInterp quantized to 0 on a black edge, divided by VcFloor)
+                //     before anything samples or downsizes the residual — the runtime
+                //     material samples bilinearly and would smear each spike into a
+                //     bright edge line.
+                RenderTexture despiked = _pool.Lease(floatDesc);
+                _compute.SetTexture(_kernelDespike, "_ResidualSrc", fullResidual);
+                _compute.SetTexture(_kernelDespike, "_ResidualOut", despiked);
+                _compute.SetTexture(_kernelDespike, "_VcInterp", vcInterp);
+                _compute.SetFloat("_SpikeFactor", NamerConstants.ResidualSpikeFactor);
+                Dispatch(_kernelDespike, w, h);
+                Release(fullResidual);
+                fullResidual = despiked;
+
+                // 4c. Dilate (same debug session, seam-step artifact): uncovered atlas
+                //     texels carry the identity 1.0; bilinear sampling at UV island
+                //     borders mixes the correct residual with that identity (0.21 vs
+                //     1.0 -> after = vc * ~1.0, a 1px orange line). Push the covered
+                //     residual outward into uncovered texels (atlas padding) before
+                //     anything downsizes the residual.
+                RenderTexture dilated = _pool.Lease(floatDesc);
+                _compute.SetTexture(_kernelDilate, "_ResidualSrc", fullResidual);
+                _compute.SetTexture(_kernelDilate, "_ResidualOut", dilated);
+                _compute.SetTexture(_kernelDilate, "_VcInterp", vcInterp);
+                _compute.SetInt("_DilateRadius", NamerConstants.ResidualDilateRadius);
+                Dispatch(_kernelDilate, w, h);
+                Release(fullResidual);
+                fullResidual = dilated;
 
                 // 5. Adaptive downward-halving search (D-16) with the manual ladder override
                 //    (D-17).

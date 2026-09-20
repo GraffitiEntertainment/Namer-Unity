@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
+status: "Phase 04.2 shipped — PR #1"
 stopped_at: Completed 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid-10-PLAN.md
-last_updated: "2026-09-17T23:46:43.568Z"
-last_activity: 2026-09-17
+last_updated: "2026-09-20T21:31:11.986Z"
+last_activity: 2026-09-20
 progress:
   total_phases: 8
   completed_phases: 7
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 
 Phase: 04.2 (gouraud-projection-one-texture-with-roughness-transfer-resid) — EXECUTING
 Plan: 5 of 5
-Status: Phase complete — ready for verification
-Last activity: 2026-09-19 - Completed quick task 260919-fp3: fix black NAMER Processor window (channel-pane OnGUI Blit replaced by Repaint-guarded Graphics.DrawTexture)
+Status: Phase 04.2 shipped — PR #1
+Last activity: 2026-09-20
 
 Progress: [██████████] 100%
 

@@ -118,7 +118,13 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture projectedOut = null;
             bool usesExtractedAo = false;
             bool usesBakedAo = false;
-            bool shouldExtract = inspection.MetallicGlossMap == null && inspection.RoughnessExtractStrength > 0f;
+            // SmoothnessTextureChannel == 1 authors per-pixel smoothness in the base-map
+            // alpha (URP Lit / Standard): that is authored data just like a
+            // _MetallicGlossMap, so extraction must stay off or the dip would overwrite it
+            // (Codex PR #1 review).
+            bool shouldExtract = inspection.MetallicGlossMap == null
+                && inspection.SmoothnessTextureChannel != 1
+                && inspection.RoughnessExtractStrength > 0f;
             bool removedDetail = inspection.DipSource == NamerDipSource.RemovedDetail;
             bool roughnessDipApplied = false;
 

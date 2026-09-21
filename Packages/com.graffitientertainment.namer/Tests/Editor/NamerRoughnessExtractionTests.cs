@@ -318,6 +318,80 @@ namespace GraffitiEntertainment.Namer.Tests
             yield return null;
         }
 
+        [UnityTest]
+        public IEnumerator AlbedoAlphaSmoothness_IsByteIdentical_NoExtraction()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU albedo-alpha gate test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            NamerComputePipeline pipeline = new NamerComputePipeline();
+            try
+            {
+                Texture2D baseMap = new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, false, true);
+                try
+                {
+                    // SmoothnessTextureChannel == 1 authors per-pixel smoothness in the base-map
+                    // alpha (URP Lit / Standard) — solid 0.5 so the channel carries real data.
+                    FillSolid(baseMap, new Color(0.6f, 0.4f, 0.2f, 0.5f));
+
+                    // Codex PR #1 review: albedo-alpha smoothness is authored data like a
+                    // _MetallicGlossMap, so extraction never runs regardless of
+                    // RoughnessExtractStrength and both packed surfaces must be byte-identical.
+                    NamerMaterialInspection inspection = BuildInspection(
+                        baseMap, baseIsSrgb: false, metallicGlossMap: null,
+                        smoothness: 1f, roughness: 0.5f,
+                        roughnessExtractStrength: 0f, dipSource: NamerDipSource.RemovedDetail);
+                    inspection.SmoothnessTextureChannel = 1;
+
+                    Color32[] surfaceOff;
+                    NamerComputeResult resultOff = pipeline.Process(inspection);
+                    try
+                    {
+                        surfaceOff = ReadBackColor32(resultOff.PackedSurface, WorkingSize * WorkingSize);
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(resultOff);
+                    }
+
+                    inspection.RoughnessExtractStrength = 1f;
+                    Color32[] surfaceOn;
+                    NamerComputeResult resultOn = pipeline.Process(inspection);
+                    try
+                    {
+                        surfaceOn = ReadBackColor32(resultOn.PackedSurface, WorkingSize * WorkingSize);
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(resultOn);
+                    }
+
+                    for (int i = 0; i < surfaceOff.Length; i++)
+                    {
+                        Assert.AreEqual(surfaceOff[i].r, surfaceOn[i].r, $"texel {i} red byte must be identical (albedo-alpha smoothness locks the legacy path)");
+                        Assert.AreEqual(surfaceOff[i].g, surfaceOn[i].g, $"texel {i} green byte must be identical (albedo-alpha smoothness locks the legacy path)");
+                        Assert.AreEqual(surfaceOff[i].b, surfaceOn[i].b, $"texel {i} blue byte must be identical (albedo-alpha smoothness locks the legacy path)");
+                        Assert.AreEqual(surfaceOff[i].a, surfaceOn[i].a, $"texel {i} alpha byte must be identical (albedo-alpha smoothness locks the legacy path)");
+                    }
+
+                    Assert.AreEqual(0, pipeline.LiveRenderTargetCount, "pool must return to baseline after albedo-alpha path (no leak)");
+                }
+                finally
+                {
+                    Destroy(baseMap);
+                }
+            }
+            finally
+            {
+                pipeline.Dispose();
+            }
+
+            yield return null;
+        }
+
         // --------------------------------------------------------------------
 
         private static NamerMaterialInspection BuildInspection(

@@ -1,9 +1,12 @@
 using System.Collections;
 using System.Collections.Generic;
+using GraffitiEntertainment.Namer.Core;
 using GraffitiEntertainment.Namer.Editor;
 using NUnit.Framework;
 using Unity.Collections;
+using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.TestTools;
 
@@ -392,6 +395,64 @@ namespace GraffitiEntertainment.Namer.Tests
             yield return null;
         }
 
+        [UnityTest]
+        public IEnumerator AlbedoAlphaSmoothness_PacksPerTexelRoughness()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU albedo-alpha pack test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            NamerComputePipeline pipeline = new NamerComputePipeline();
+            try
+            {
+                Texture2D baseMap = new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, false, true);
+                try
+                {
+                    // Left/right halves carry different authored alpha smoothness; channel == 1
+                    // must pack roughness = 1 - alpha * smoothness per texel instead of the
+                    // uniform scalar (Codex PR #1 review). RGB stays constant so only the
+                    // alpha can move the packed roughness bits.
+                    FillAlphaSplit(baseMap,
+                        new Color(0.6f, 0.4f, 0.2f, 0.25f), new Color(0.6f, 0.4f, 0.2f, 0.9f));
+
+                    NamerMaterialInspection inspection = BuildInspection(
+                        baseMap, baseIsSrgb: false, metallicGlossMap: null,
+                        smoothness: 1f, roughness: 0.5f,
+                        roughnessExtractStrength: 0f, dipSource: NamerDipSource.RemovedDetail);
+                    inspection.SmoothnessTextureChannel = 1;
+
+                    NamerComputeResult result = pipeline.Process(inspection);
+                    try
+                    {
+                        Color32[] surface = ReadBackColor32(result.PackedSurface, WorkingSize * WorkingSize);
+
+                        // Expected roughness = 1 - alpha (smoothness scalar 1): 0.75 left,
+                        // 0.1 right, each within one 6-bit quantization step.
+                        AssertPackedRoughness(surface, WorkingSize / 4, 0.75f, "left half");
+                        AssertPackedRoughness(surface, 3 * WorkingSize / 4, 0.1f, "right half");
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(result);
+                    }
+
+                    Assert.AreEqual(0, pipeline.LiveRenderTargetCount, "pool must return to baseline after the albedo-alpha pack (no leak)");
+                }
+                finally
+                {
+                    Destroy(baseMap);
+                }
+            }
+            finally
+            {
+                pipeline.Dispose();
+            }
+
+            yield return null;
+        }
+
         // --------------------------------------------------------------------
 
         private static NamerMaterialInspection BuildInspection(
@@ -447,6 +508,31 @@ namespace GraffitiEntertainment.Namer.Tests
 
             texture.SetPixels(pixels);
             texture.Apply(false, false);
+        }
+
+        private static void FillAlphaSplit(Texture2D texture, Color left, Color right)
+        {
+            Color[] pixels = new Color[texture.width * texture.height];
+            for (int y = 0; y < texture.height; y++)
+            {
+                for (int x = 0; x < texture.width; x++)
+                {
+                    pixels[y * texture.width + x] = x < texture.width / 2 ? left : right;
+                }
+            }
+
+            texture.SetPixels(pixels);
+            texture.Apply(false, false);
+        }
+
+        private static void AssertPackedRoughness(Color32[] surface, int index, float expected, string label)
+        {
+            Color32 texel = surface[index];
+            NamerFormat.UnpackSurface(new float4(
+                texel.r / 255f, texel.g / 255f, texel.b / 255f, texel.a / 255f),
+                out _, out _, out _, out _, out float roughness);
+            Assert.AreEqual(expected, roughness, 1f / 64f + 1e-3f,
+                $"{label} texel {index} must decode to authored-alpha roughness {expected} within one 6-bit quantization step");
         }
 
         private static void Destroy(params Object[] objects)

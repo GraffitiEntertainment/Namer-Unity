@@ -73,7 +73,18 @@ void CSNormalize(uint3 id : SV_DispatchThreadID)
     else
     {
         metallic = _Metallic;
-        roughness = _Roughness;
+        // Albedo-alpha authored smoothness (URP _SmoothnessTextureChannel == 1): the base
+        // alpha is the per-pixel smoothness source even without a metallic/gloss map, with
+        // the scalar as its multiplier — same contract as the gloss-map branch above
+        // (Codex PR #1 review). Otherwise the scalar roughness stands.
+        if (_SmoothnessTextureChannel == 1.0)
+        {
+            roughness = 1.0 - (baseColorIn.a * _SmoothnessScalar);
+        }
+        else
+        {
+            roughness = _Roughness;
+        }
     }
 
     _PackInputs[id.xy] = float4(metallic, roughness, _Emissive, 1.0);

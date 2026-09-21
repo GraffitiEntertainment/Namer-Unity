@@ -22,6 +22,13 @@ namespace GraffitiEntertainment.Namer.Editor
         public Vector3[] Normals;
         public Vector4[] Tangents;
         public Vector2[] Uvs;
+
+        /// <summary>Static lightmap UVs (uv2 / TEXCOORD1); <c>null</c> when the source mesh has none.</summary>
+        public Vector2[] Uv2;
+
+        /// <summary>Dynamic lightmap UVs (uv3 / TEXCOORD2); <c>null</c> when the source mesh has none.</summary>
+        public Vector2[] Uv3;
+
         /// <summary>One index array per sub-mesh; indices address <see cref="Positions"/>.</summary>
         public int[][] SubMeshTriangles;
         /// <summary><c>null</c> when the source mesh is not skinned.</summary>
@@ -90,6 +97,16 @@ namespace GraffitiEntertainment.Namer.Editor
                 uvs = new Vector2[positions.Length];
             }
 
+            // Lightmap UV channels carried verbatim (uv2 -> TEXCOORD1 static, uv3 ->
+            // TEXCOORD2 dynamic). The same source vertex always produces the same weld
+            // key, so no key change is needed. NAMER.shader samples these under
+            // LIGHTMAP_ON / DYNAMICLIGHTMAP_ON; dropping them corrupted baked lighting
+            // on lightmapped renderers whose mesh got swapped (Codex PR #1 review).
+            Vector2[] lightmapUvs = sourceMesh.uv2;
+            Vector2[] dynamicLightmapUvs = sourceMesh.uv3;
+            bool hasLightmapUvs = lightmapUvs != null && lightmapUvs.Length == positions.Length;
+            bool hasDynamicLightmapUvs = dynamicLightmapUvs != null && dynamicLightmapUvs.Length == positions.Length;
+
             BoneWeight[] boneWeights = sourceMesh.boneWeights;
             Matrix4x4[] bindposes = sourceMesh.bindposes;
             bool skinned = boneWeights != null && boneWeights.Length > 0;
@@ -105,6 +122,8 @@ namespace GraffitiEntertainment.Namer.Editor
             var outNormals = new List<Vector3>();
             var outTangents = new List<Vector4>();
             var outUvs = new List<Vector2>();
+            List<Vector2> outLightmapUvs = hasLightmapUvs ? new List<Vector2>() : null;
+            List<Vector2> outDynamicLightmapUvs = hasDynamicLightmapUvs ? new List<Vector2>() : null;
             var outBoneWeights = skinned ? new List<BoneWeight>() : null;
 
             var subMeshes = new int[subMeshCount][];
@@ -124,6 +143,16 @@ namespace GraffitiEntertainment.Namer.Editor
                         outNormals.Add(normals[srcVertex]);
                         outTangents.Add(tangents[srcVertex]);
                         outUvs.Add(uvs[srcVertex]);
+                        if (hasLightmapUvs)
+                        {
+                            outLightmapUvs.Add(lightmapUvs[srcVertex]);
+                        }
+
+                        if (hasDynamicLightmapUvs)
+                        {
+                            outDynamicLightmapUvs.Add(dynamicLightmapUvs[srcVertex]);
+                        }
+
                         if (skinned)
                         {
                             outBoneWeights.Add(boneWeights[srcVertex]);
@@ -142,6 +171,8 @@ namespace GraffitiEntertainment.Namer.Editor
                 Normals = outNormals.ToArray(),
                 Tangents = outTangents.ToArray(),
                 Uvs = outUvs.ToArray(),
+                Uv2 = hasLightmapUvs ? outLightmapUvs.ToArray() : null,
+                Uv3 = hasDynamicLightmapUvs ? outDynamicLightmapUvs.ToArray() : null,
                 SubMeshTriangles = subMeshes,
                 BoneWeights = skinned ? outBoneWeights.ToArray() : null,
                 Bindposes = skinned ? bindposes : null,

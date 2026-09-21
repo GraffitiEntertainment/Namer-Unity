@@ -133,6 +133,68 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         [Test]
+        public void Split_PreservesLightmapUvChannels()
+        {
+            Mesh mesh = CreateWeldedQuad();
+            try
+            {
+                Vector2[] staticUvs =
+                {
+                    new Vector2(0.1f, 0.2f), new Vector2(0.3f, 0.2f),
+                    new Vector2(0.3f, 0.4f), new Vector2(0.1f, 0.4f),
+                };
+                Vector2[] dynamicUvs =
+                {
+                    new Vector2(0.5f, 0.6f), new Vector2(0.7f, 0.6f),
+                    new Vector2(0.7f, 0.8f), new Vector2(0.5f, 0.8f),
+                };
+                mesh.uv2 = staticUvs;
+                mesh.uv3 = dynamicUvs;
+
+                NamerSplitResult result = MeshVertexSplitter.Split(mesh);
+
+                Assert.IsNotNull(result.Uv2, "a source with uv2 must yield static lightmap UVs");
+                Assert.IsNotNull(result.Uv3, "a source with uv3 must yield dynamic lightmap UVs");
+                Assert.AreEqual(result.VertexCount, result.Uv2.Length, "one static lightmap UV per output vertex");
+                Assert.AreEqual(result.VertexCount, result.Uv3.Length, "one dynamic lightmap UV per output vertex");
+
+                // Output vertices are emitted in first-weld-encounter order, not source
+                // order — map each back through its (unique) position.
+                Vector3[] sourcePositions = mesh.vertices;
+                for (int i = 0; i < result.VertexCount; i++)
+                {
+                    int source = System.Array.IndexOf(sourcePositions, result.Positions[i]);
+                    Assert.GreaterOrEqual(source, 0, "output vertex must map back to a source position");
+                    Assert.AreEqual(staticUvs[source], result.Uv2[i],
+                        "static lightmap UV for output vertex " + i + " must be carried verbatim");
+                    Assert.AreEqual(dynamicUvs[source], result.Uv3[i],
+                        "dynamic lightmap UV for output vertex " + i + " must be carried verbatim");
+                }
+            }
+            finally
+            {
+                Destroy(mesh);
+            }
+        }
+
+        [Test]
+        public void Split_WithoutLightmapUvs_LeavesChannelsNull()
+        {
+            Mesh mesh = CreateWeldedQuad();
+            try
+            {
+                NamerSplitResult result = MeshVertexSplitter.Split(mesh);
+
+                Assert.IsNull(result.Uv2, "a source without uv2 must leave Uv2 null");
+                Assert.IsNull(result.Uv3, "a source without uv3 must leave Uv3 null");
+            }
+            finally
+            {
+                Destroy(mesh);
+            }
+        }
+
+        [Test]
         public void Fit_ConstantColor_RecoversColorWithinTolerance()
         {
             Mesh quad = CreateWeldedQuad();

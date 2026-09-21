@@ -592,6 +592,19 @@ namespace GraffitiEntertainment.Namer.Editor
             target.SetNormals(split.Normals);
             target.SetTangents(split.Tangents);
             target.SetUVs(0, split.Uvs);
+
+            // Lightmap channels must survive the swap or a lightmapped renderer keeps its
+            // lightmap index but samples with missing UVs (Codex PR #1 review).
+            if (split.Uv2 != null)
+            {
+                target.SetUVs(1, split.Uv2);
+            }
+
+            if (split.Uv3 != null)
+            {
+                target.SetUVs(2, split.Uv3);
+            }
+
             target.colors32 = colors;
 
             // bindposes must be assigned before boneWeights on a skinned mesh or a

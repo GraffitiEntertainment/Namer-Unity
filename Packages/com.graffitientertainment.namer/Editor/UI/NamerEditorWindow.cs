@@ -756,7 +756,8 @@ namespace GraffitiEntertainment.Namer.Editor
 
             if (split.BoneWeights != null)
             {
-                mesh.boneWeights = split.BoneWeights;
+                // Variable-count API (mirrors ApplySplitStreams): preserves >4 influences.
+                mesh.SetBoneWeights(split.BonesPerVertex, split.BoneWeights);
             }
 
             mesh.subMeshCount = split.SubMeshTriangles.Length;

@@ -616,7 +616,9 @@ namespace GraffitiEntertainment.Namer.Editor
 
             if (split.BoneWeights != null)
             {
-                target.boneWeights = split.BoneWeights;
+                // Variable-count API: preserves meshes authored with more than four
+                // influences per vertex (Codex PR #1 review).
+                target.SetBoneWeights(split.BonesPerVertex, split.BoneWeights);
             }
 
             target.subMeshCount = split.SubMeshTriangles.Length;

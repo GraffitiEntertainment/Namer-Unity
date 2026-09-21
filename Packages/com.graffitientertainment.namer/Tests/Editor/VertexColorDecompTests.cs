@@ -120,11 +120,80 @@ namespace GraffitiEntertainment.Namer.Tests
                 NamerSplitResult result = MeshVertexSplitter.Split(mesh);
 
                 Assert.IsNotNull(result.BoneWeights, "a skinned source must yield bone weights");
+                Assert.IsNotNull(result.BonesPerVertex, "a skinned source must yield per-vertex influence counts");
                 Assert.IsNotNull(result.Bindposes, "a skinned source must yield bind poses");
-                Assert.AreEqual(result.VertexCount, result.BoneWeights.Length,
-                    "every output vertex derived from a skinned source must carry a bone weight");
+                Assert.AreEqual(result.VertexCount, result.BonesPerVertex.Length,
+                    "every output vertex derived from a skinned source must carry an influence count");
+                int totalInfluences = 0;
+                foreach (byte count in result.BonesPerVertex)
+                {
+                    totalInfluences += count;
+                }
+                Assert.AreEqual(result.BoneWeights.Length, totalInfluences,
+                    "the influence stream length must equal the summed per-vertex counts");
                 Assert.AreEqual(mesh.bindposes.Length, result.Bindposes.Length,
                     "bind poses (per-bone) must be preserved verbatim");
+            }
+            finally
+            {
+                Destroy(mesh);
+            }
+        }
+
+        [Test]
+        public void Split_PreservesMoreThanFourInfluences()
+        {
+            Mesh mesh = CreateWeldedQuad();
+            try
+            {
+                // Five influences on source vertex 0 — beyond the legacy BoneWeight struct,
+                // which the old boneWeights accessor silently truncated to four.
+                byte[] bonesPerVertex = { 5, 1, 1, 1 };
+                var weights = new BoneWeight1[8];
+                for (int b = 0; b < 5; b++)
+                {
+                    weights[b] = new BoneWeight1 { boneIndex = b, weight = 0.2f };
+                }
+                weights[5] = new BoneWeight1 { boneIndex = 0, weight = 1f };
+                weights[6] = new BoneWeight1 { boneIndex = 0, weight = 1f };
+                weights[7] = new BoneWeight1 { boneIndex = 0, weight = 1f };
+                mesh.bindposes = new[]
+                {
+                    Matrix4x4.identity, Matrix4x4.identity, Matrix4x4.identity,
+                    Matrix4x4.identity, Matrix4x4.identity,
+                };
+                mesh.SetBoneWeights(bonesPerVertex, weights);
+
+                NamerSplitResult result = MeshVertexSplitter.Split(mesh);
+
+                Assert.AreEqual(8, result.BoneWeights.Length,
+                    "all eight source influences must survive the split");
+
+                int outIndex = -1;
+                for (int i = 0; i < result.VertexCount; i++)
+                {
+                    if (result.Positions[i] == new Vector3(0f, 0f, 0f))
+                    {
+                        outIndex = i;
+                        break;
+                    }
+                }
+                Assert.GreaterOrEqual(outIndex, 0, "source vertex 0 must appear in the split output");
+                Assert.AreEqual(5, result.BonesPerVertex[outIndex],
+                    "the five-influence vertex must keep all five influences");
+
+                int runStart = 0;
+                for (int i = 0; i < outIndex; i++)
+                {
+                    runStart += result.BonesPerVertex[i];
+                }
+                for (int b = 0; b < 5; b++)
+                {
+                    Assert.AreEqual(b, result.BoneWeights[runStart + b].boneIndex,
+                        "influence " + b + " bone index must be preserved");
+                    Assert.AreEqual(0.2f, result.BoneWeights[runStart + b].weight, 1e-5f,
+                        "influence " + b + " weight must be preserved");
+                }
             }
             finally
             {

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Unity.Collections;
 using UnityEngine;
 
 namespace GraffitiEntertainment.Namer.Editor
@@ -31,8 +32,14 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>One index array per sub-mesh; indices address <see cref="Positions"/>.</summary>
         public int[][] SubMeshTriangles;
-        /// <summary><c>null</c> when the source mesh is not skinned.</summary>
-        public BoneWeight[] BoneWeights;
+        /// <summary>Per-output-vertex influence counts; <c>null</c> when the source mesh is not skinned.</summary>
+        public byte[] BonesPerVertex;
+
+        /// <summary>Variable-count influence stream — <see cref="BoneWeight1"/> runs indexed by
+        /// <see cref="BonesPerVertex"/> — so meshes with more than four influences per vertex
+        /// survive the split (the legacy <c>boneWeights</c> accessor truncates to four).
+        /// <c>null</c> when the source mesh is not skinned.</summary>
+        public BoneWeight1[] BoneWeights;
         /// <summary><c>null</c> when the source mesh is not skinned.</summary>
         public Matrix4x4[] Bindposes;
 
@@ -107,9 +114,29 @@ namespace GraffitiEntertainment.Namer.Editor
             bool hasLightmapUvs = lightmapUvs != null && lightmapUvs.Length == positions.Length;
             bool hasDynamicLightmapUvs = dynamicLightmapUvs != null && dynamicLightmapUvs.Length == positions.Length;
 
-            BoneWeight[] boneWeights = sourceMesh.boneWeights;
+            // Variable-count influence stream: the legacy boneWeights accessor truncates to
+            // four influences per vertex, silently deforming meshes authored with more
+            // (Codex PR #1 review). The native reads are copied to managed arrays and
+            // disposed immediately — the result stays free of native lifetime coupling.
+            byte[] srcBonesPerVertex;
+            BoneWeight1[] srcBoneWeights;
+            using (NativeArray<byte> nativeBonesPerVertex = sourceMesh.GetBonesPerVertex(Allocator.Temp))
+            using (NativeArray<BoneWeight1> nativeBoneWeights = sourceMesh.GetAllBoneWeights(Allocator.Temp))
+            {
+                srcBonesPerVertex = nativeBonesPerVertex.ToArray();
+                srcBoneWeights = nativeBoneWeights.ToArray();
+            }
+
             Matrix4x4[] bindposes = sourceMesh.bindposes;
-            bool skinned = boneWeights != null && boneWeights.Length > 0;
+            bool skinned = srcBonesPerVertex.Length == positions.Length && srcBoneWeights.Length > 0;
+
+            // Influence runs are indexed by cumulative per-vertex offsets; the weld key is
+            // unchanged because a source vertex's full influence run is constant.
+            int[] influenceOffsets = new int[positions.Length + 1];
+            for (int v = 0; v < positions.Length; v++)
+            {
+                influenceOffsets[v + 1] = influenceOffsets[v] + (v < srcBonesPerVertex.Length ? srcBonesPerVertex[v] : 0);
+            }
 
             int subMeshCount = sourceMesh.subMeshCount;
 
@@ -124,7 +151,8 @@ namespace GraffitiEntertainment.Namer.Editor
             var outUvs = new List<Vector2>();
             List<Vector2> outLightmapUvs = hasLightmapUvs ? new List<Vector2>() : null;
             List<Vector2> outDynamicLightmapUvs = hasDynamicLightmapUvs ? new List<Vector2>() : null;
-            var outBoneWeights = skinned ? new List<BoneWeight>() : null;
+            var outBoneWeights = skinned ? new List<BoneWeight1>() : null;
+            var outBonesPerVertex = skinned ? new List<byte>() : null;
 
             var subMeshes = new int[subMeshCount][];
             for (int sub = 0; sub < subMeshCount; sub++)
@@ -155,7 +183,11 @@ namespace GraffitiEntertainment.Namer.Editor
 
                         if (skinned)
                         {
-                            outBoneWeights.Add(boneWeights[srcVertex]);
+                            outBonesPerVertex.Add(srcBonesPerVertex[srcVertex]);
+                            for (int b = influenceOffsets[srcVertex]; b < influenceOffsets[srcVertex + 1]; b++)
+                            {
+                                outBoneWeights.Add(srcBoneWeights[b]);
+                            }
                         }
                     }
 
@@ -174,6 +206,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 Uv2 = hasLightmapUvs ? outLightmapUvs.ToArray() : null,
                 Uv3 = hasDynamicLightmapUvs ? outDynamicLightmapUvs.ToArray() : null,
                 SubMeshTriangles = subMeshes,
+                BonesPerVertex = skinned ? outBonesPerVertex.ToArray() : null,
                 BoneWeights = skinned ? outBoneWeights.ToArray() : null,
                 Bindposes = skinned ? bindposes : null,
             };

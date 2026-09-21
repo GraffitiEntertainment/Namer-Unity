@@ -105,6 +105,51 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         [UnityTest]
+        public IEnumerator Residual_TiledUvLayout_FlagsCannotDecompose()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU tiled-UV test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            const int w = 64;
+            const int h = 64;
+
+            // Island crossing the [0,1] tile boundary: the in-bounds portion would
+            // rasterize (coverage > 0, so the zero-coverage fallback cannot catch it) and
+            // the uncovered portion would reconstruct as source color — silently wrong.
+            // The out-of-range pre-check must flag the honest CannotDecompose fallback.
+            NamerSplitResult split = CreateSplitQuad(0.5f, 1.5f);
+            Color32[] colors = ConstantColors(split.VertexCount, 128);
+            RenderTexture baseRt = CreateBase(w, h, new Color(0.25f, 0.25f, 0.25f, 1f));
+
+            using (NamerDecompPipeline pipeline = new NamerDecompPipeline())
+            {
+                try
+                {
+                    NamerDecompOutput output = pipeline.GenerateResidual(split, colors, baseRt, w, h, 0.02f, 0);
+                    try
+                    {
+                        Assert.IsNull(output.Residual, "a tiled layout must not emit a residual");
+                        Assert.IsTrue(output.Stats.CannotDecompose,
+                            "UVs outside [0,1] must trip the honest CannotDecompose fallback");
+                    }
+                    finally
+                    {
+                        output.Dispose();
+                    }
+                }
+                finally
+                {
+                    Release(baseRt);
+                }
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
         public IEnumerator Residual_UncoveredTexels_AreIdentity()
         {
             if (!ComputeAvailable)

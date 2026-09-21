@@ -196,6 +196,32 @@ namespace GraffitiEntertainment.Namer.Editor
 
             float[] verts = ToFloat3(split.Positions);
             float[] uvs = ToFloat2(split.Uvs);
+
+            // Partially tiled layouts: an island crossing the [0,1] tile boundary rasterizes
+            // only its in-bounds portion — coverage is nonzero, so the zero-coverage fallback
+            // below never fires, and the uncovered portion reconstructs as source color
+            // (silently wrong). Out-of-range UVs are rejected up front with the same honest
+            // CannotDecompose fallback instead (Codex PR #1 review). The epsilon tolerates
+            // float rounding exactly at the border.
+            const float kUvBoundsEpsilon = 1e-4f;
+            for (int i = 0; i + 1 < uvs.Length; i += 2)
+            {
+                if (uvs[i] < -kUvBoundsEpsilon || uvs[i] > 1f + kUvBoundsEpsilon
+                    || uvs[i + 1] < -kUvBoundsEpsilon || uvs[i + 1] > 1f + kUvBoundsEpsilon)
+                {
+                    return new NamerDecompOutput(null, new NamerDecompErrorStats
+                    {
+                        Coverage = 0f,
+                        AvgError = 0f,
+                        MaxError = 0f,
+                        FitOnlyMaxError = 0f,
+                        ResidualRequired = false,
+                        ChosenResolution = 0,
+                        CannotDecompose = true,
+                    }, this);
+                }
+            }
+
             int[] tris = FlattenTriangles(split.SubMeshTriangles);
             float[] colors = ToFloat4(quantizedColors);
             int triCount = tris.Length / 3;

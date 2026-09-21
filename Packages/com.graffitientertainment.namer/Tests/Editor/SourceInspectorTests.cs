@@ -225,6 +225,52 @@ namespace GraffitiEntertainment.Namer.Tests
             }
         }
 
+        // -- D-04: source + its generated material on one hierarchy ----------
+
+        [Test]
+        public void Dedupe_SourceAndItsGeneratedMaterialCountOnce()
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+            Assert.IsNotNull(shader, "URP Lit shader not found");
+
+            EnsureTempFolder();
+
+            // A persisted source so the generated material's NamerSource tag has a
+            // guid|localFileId to resolve back to (CreateGeneratedMaterial pattern).
+            Material source = new Material(shader) { name = "DedupeSource" };
+            AssetDatabase.CreateAsset(source, TempFolder + "/DedupeSource.mat");
+            Material generated = new Material(shader) { name = "DedupeGenerated" };
+            Assert.IsTrue(
+                AssetDatabase.TryGetGUIDAndLocalFileIdentifier(source, out string guid, out long localId),
+                "source material must resolve a guid + localFileId");
+            generated.SetOverrideTag(NamerEditorConstants.SourceTag, guid + "|" + localId);
+            AssetDatabase.CreateAsset(generated, TempFolder + "/DedupeGenerated.mat");
+            AssetDatabase.SetLabels(generated, new[] { NamerEditorConstants.GeneratedLabel });
+
+            GameObject parent = new GameObject("DedupeMixedParent");
+            GameObject childSource = new GameObject("ChildSource");
+            GameObject childGenerated = new GameObject("ChildGenerated");
+            childSource.transform.SetParent(parent.transform);
+            childGenerated.transform.SetParent(parent.transform);
+            try
+            {
+                // Reprocess state after a partial bind: one renderer still wears the
+                // original while another already wears the generated NAMER material.
+                childSource.AddComponent<MeshRenderer>().sharedMaterial = source;
+                childGenerated.AddComponent<MeshRenderer>().sharedMaterial = generated;
+
+                NamerSourceModel model = SourceInspector.Inspect(parent);
+                Assert.AreEqual(1, model.Materials.Count,
+                    "source + its generated material are ONE inspection unit — double-counting trips the CR-01 decomposition skip on reprocess");
+                Assert.AreEqual(source.GetInstanceID(), model.Materials[0].Material.GetInstanceID());
+            }
+            finally
+            {
+                Destroy(parent);
+                AssetDatabase.DeleteAsset(TempFolder);
+            }
+        }
+
         // -- D-06: unknown shader --------------------------------------------
 
         [Test]
@@ -386,6 +432,63 @@ namespace GraffitiEntertainment.Namer.Tests
             {
                 AssetDatabase.DeleteAsset(TempFolder);
                 Destroy(source);
+            }
+        }
+
+        // -- Gap 3a: scene-asset selection degrades gracefully -----------------
+
+        [Test]
+        public void SceneAsset_Selection_DegradesGracefullyWithoutThrowing()
+        {
+            EnsureTempFolder();
+            UnityEngine.SceneManagement.Scene scene = default;
+            try
+            {
+                SceneAsset sceneAsset;
+                try
+                {
+                    // Hermetic probe scene (headless). Additive creation throws when the active
+                    // scene is untitled and unsaved (live editor) — fall back to any existing
+                    // project scene below; inspecting it is read-only (the guard rejects the
+                    // .unity path before any scene content is read).
+                    scene = UnityEditor.SceneManagement.EditorSceneManager.NewScene(
+                        UnityEditor.SceneManagement.NewSceneSetup.EmptyScene,
+                        UnityEditor.SceneManagement.NewSceneMode.Additive);
+                    UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene, TempFolder + "/SceneAssetProbe.unity");
+                    AssetDatabase.ImportAsset(TempFolder + "/SceneAssetProbe.unity");
+                    sceneAsset = AssetDatabase.LoadAssetAtPath<SceneAsset>(TempFolder + "/SceneAssetProbe.unity");
+                }
+                catch (System.InvalidOperationException)
+                {
+                    string[] existing = AssetDatabase.FindAssets("t:SceneAsset");
+                    if (existing.Length == 0)
+                    {
+                        Assert.Ignore(
+                            "cannot create a probe scene (untitled unsaved active scene) and no project scene exists");
+                    }
+
+                    sceneAsset = AssetDatabase.LoadAssetAtPath<SceneAsset>(
+                        AssetDatabase.GUIDToAssetPath(existing[0]));
+                }
+
+                Assert.IsNotNull(sceneAsset, "scene asset should load");
+
+                NamerSourceModel model = SourceInspector.Inspect(sceneAsset);
+
+                Assert.IsNotNull(model, "inspection must return a non-null model");
+                Assert.AreEqual(0, model.Materials.Count, "a scene asset must contribute no materials");
+                Assert.IsTrue(
+                    model.Warnings.Exists(w => w.IndexOf("scene asset", System.StringComparison.OrdinalIgnoreCase) >= 0),
+                    "scene asset selection must record a warning");
+            }
+            finally
+            {
+                if (scene.IsValid())
+                {
+                    UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, true);
+                }
+
+                AssetDatabase.DeleteAsset(TempFolder);
             }
         }
 

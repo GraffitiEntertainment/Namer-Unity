@@ -20,6 +20,13 @@ namespace GraffitiEntertainment.Namer.Editor
     /// unconverted regardless of the project color space. Source sRGB/isReadable flags
     /// are never mutated.
     ///
+    /// 04.2 (plan 03): <see cref="Process"/> accepts a <see cref="NamerProjectionContext"/>
+    /// instead of the retired 04.1 fit-driven evaluate/shouldCancel/maxErrorThreshold
+    /// triplet. When a projection is supplied, the Gouraud projection write-back runs after
+    /// the normalize stage, the removed-detail transfer feeds the roughness dip, and the
+    /// projected base becomes <see cref="NamerComputeResult.NormalizedBaseColor"/> while the
+    /// source base is preserved as <see cref="NamerComputeResult.SourceBaseColor"/>.
+    ///
     /// The <c>_BaseColor</c> tint is intentionally NOT baked into the normalized base —
     /// it stays as material metadata on the runtime NAMER shader.
     /// </summary>
@@ -28,7 +35,8 @@ namespace GraffitiEntertainment.Namer.Editor
         private const string ComputeShaderPath = "Packages/com.graffitientertainment.namer/Compute/NAMERPack.compute";
         private const string RawCopyShaderPath = "Packages/com.graffitientertainment.namer/Editor/Pipeline/NamerRawCopy.shader";
         internal const string ReencodeSrgbKeyword = "_REENCODE_SRGB";
-        private const int DefaultResolution = 256;
+        internal const string UnpackNormalKeyword = "_UNPACK_NORMAL";
+        internal const int DefaultBaseResolution = 256;
 
         private static readonly Color NeutralNormalFill = new Color(0.5f, 0.5f, 1.0f, 1.0f);
         private static readonly Color NeutralMetallicGlossFill = new Color(0.0f, 0.0f, 0.0f, 1.0f);
@@ -39,6 +47,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private readonly int _kernelOctahedralEncode;
         private readonly int _kernelSurfacePack;
         private NamerAOPipeline _aoPipeline;
+        private NamerRoughnessPipeline _roughnessPipeline;
 
         private static Texture2D _whiteFill;
         private static Texture2D _neutralNormalTexture;
@@ -67,21 +76,28 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>
         /// Runs the three staged kernels and returns in-memory normalized base-color and
-        /// packed surface render targets. The result's two targets are leased from the
+        /// packed surface render targets. The result's targets are leased from the
         /// pool: read them back (via <see cref="RequestReadback"/>), then return them
         /// with <see cref="ReleaseResult"/> — a batch of N materials must not accumulate
         /// live outputs. Targets still unreleased when this pipeline is disposed are
         /// destroyed with it, so release every result before disposing.
+        ///
+        /// 04.2 flow: when <paramref name="projection"/> is supplied, the pipeline leases a
+        /// projected base target after the normalize stage and invokes
+        /// <see cref="NamerProjectionContext.Run"/>, which writes the Gouraud projection and
+        /// produces the residual. Extraction then branches: the removed-detail transfer
+        /// (DipSource == RemovedDetail) or the Sobel fallback (DipSource == SobelEdge or no
+        /// projection); an authored metallic/gloss map leaves the scalar path untouched.
         /// </summary>
-        public NamerComputeResult Process(NamerMaterialInspection inspection)
+        public NamerComputeResult Process(NamerMaterialInspection inspection, NamerProjectionContext projection = null)
         {
             if (inspection == null)
             {
                 throw new ArgumentNullException(nameof(inspection));
             }
 
-            int w = inspection.BaseMap != null ? inspection.BaseMap.width : DefaultResolution;
-            int h = inspection.BaseMap != null ? inspection.BaseMap.height : DefaultResolution;
+            int w = inspection.BaseMap != null ? inspection.BaseMap.width : DefaultBaseResolution;
+            int h = inspection.BaseMap != null ? inspection.BaseMap.height : DefaultBaseResolution;
 
             RenderTextureDescriptor intermediate = NewDescriptor(w, h, GraphicsFormat.R16G16B16A16_SFloat);
             // Inputs and the packed surface are 8-bit raw staging: copy-compatible with
@@ -98,8 +114,18 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture packInputs = null;
             RenderTexture surfaceOut = null;
 
-            bool usesExtractedAo = false;
+            RenderTexture roughnessTex = null;
+            RenderTexture projectedOut = null;
             bool usesBakedAo = false;
+            // SmoothnessTextureChannel == 1 authors per-pixel smoothness in the base-map
+            // alpha (URP Lit / Standard): that is authored data just like a
+            // _MetallicGlossMap, so extraction must stay off or the dip would overwrite it
+            // (Codex PR #1 review).
+            bool shouldExtract = inspection.MetallicGlossMap == null
+                && inspection.SmoothnessTextureChannel != 1
+                && inspection.RoughnessExtractStrength > 0f;
+            bool removedDetail = inspection.DipSource == NamerDipSource.RemovedDetail;
+            bool roughnessDipApplied = false;
 
             try
             {
@@ -112,46 +138,119 @@ namespace GraffitiEntertainment.Namer.Editor
                 surfaceOut = _pool.Lease(unorm8);
 
                 Upload(inspection.BaseMap, baseColorIn, WhiteFill());
-                Upload(inspection.NormalMap, normalTexel, NeutralNormalTexture());
+                Upload(inspection.NormalMap, normalTexel, NeutralNormalTexture(), unpackNormal: true);
 
                 if (inspection.OcclusionMap != null)
                 {
+                    // D-07 gate, clause 0 (2026-09-21 contract): an authored map is
+                    // source data and always transfers, regardless of the AO stage
+                    // checkbox (the checkbox gates synthesis only).
                     aoIn = _pool.Lease(unorm8);
                     Upload(inspection.OcclusionMap, aoIn, WhiteFill());
-                    usesExtractedAo = false;
-                    usesBakedAo = false;
                 }
-                else if (EnsureAoPipeline().HasCachedBake(inspection.BakeSourceMesh, inspection.OccluderMesh, w, h))
+                else if (inspection.AoStageEnabled)
                 {
-                    // D-07 three-way gate: a cached geometry bake supersedes image-space extraction.
+                    // D-07 gate, clauses 2-3: AO stage on and no authored map -> the
+                    // GEOMETRY BAKE is the synthetic source (the albedo-conflated
+                    // luminance extraction is retired from the automatic path).
+                    // BakeAndUpload reuses the cache or bakes fresh on demand; it
+                    // returns null when no bake mesh is primed (decomposition off),
+                    // leaving aoIn null for the white fill below.
                     aoIn = EnsureAoPipeline().BakeAndUpload(inspection, w, h);
-                    usesBakedAo = true;
+                    usesBakedAo = aoIn != null;
                 }
-                else
+
+                if (aoIn == null)
                 {
-                    // D-07 three-way gate: no authored map and no cached bake -> extract AO.
-                    aoIn = EnsureAoPipeline().Extract(inspection, baseColorIn, w, h);
-                    usesExtractedAo = true;
+                    // D-07 gate: AO stage off (or no bake source) -> surface B packs
+                    // white (1.0) through the existing WhiteFill upload path, and the
+                    // un-multiply divides by 1 whatever the strength — the stage gate
+                    // subsumes the old strength=0-only behavior.
+                    aoIn = _pool.Lease(unorm8);
+                    Upload(null, aoIn, WhiteFill());
                 }
 
                 Upload(inspection.MetallicGlossMap, metallicGlossIn, NeutralMetallicGlossTexture());
 
-                BindAndDispatch(inspection, baseColorIn, normalTexel, aoIn, metallicGlossIn,
-                    baseColorOut, octahedral, packInputs, surfaceOut, w, h, usesExtractedAo || usesBakedAo);
+                // (a) Normalize + octahedral encode -> _BaseColorOut / _PackInputs / _Octahedral.
+                BindAndDispatchNormalizeEncode(inspection, baseColorIn, normalTexel, aoIn, metallicGlossIn,
+                    baseColorOut, octahedral, packInputs, w, h, usesBakedAo);
 
+                // (b) 04.2 projection write-back + roughness dip, between the normalized base
+                //     and the surface pack (D-01 authored-map-wins gate).
+                if (projection != null)
+                {
+                    projectedOut = _pool.Lease(intermediate);
+                    projection.Run(baseColorOut, projectedOut);
+                }
+
+                if (projection != null && removedDetail && shouldExtract)
+                {
+                    // Removed-detail transfer: the removed-luma minuend is the SOURCE base
+                    // (baseColorOut), the projected base is the subtrahend, and the transfer
+                    // map already carries the dip (adopt as-is at pack time).
+                    roughnessTex = EnsureRoughnessPipeline().ExtractTransferRoughness(
+                        inspection.Roughness, baseColorOut, projectedOut, w, h, inspection.RoughnessExtractStrength);
+                    roughnessDipApplied = true;
+                }
+                else if (shouldExtract)
+                {
+                    // Sobel fallback: decomposition off (or CR-01-guarded) or DipSource ==
+                    // SobelEdge — CSSurfacePack applies the slider-scaled dip.
+                    roughnessTex = EnsureRoughnessPipeline().ExtractSobel(baseColorOut, w, h);
+                    roughnessDipApplied = false;
+                }
+                // else: authored roughness map present (or strength == 0) -> scalar path.
+
+                // (c) Surface pack, overriding the scalar roughness with the extracted texture.
+                // The transfer path packs at FULL adoption (dipApplied): the map is already
+                // dip-encoded by CSRoughnessTransferRemap. The Sobel path re-blends by the
+                // taste slider at pack time.
+                BindAndDispatchSurfacePack(octahedral, packInputs, surfaceOut,
+                    roughnessTex != null ? (Texture)roughnessTex : WhiteFill(),
+                    roughnessTex != null,
+                    roughnessDipApplied ? 1f : inspection.RoughnessExtractStrength,
+                    roughnessDipApplied, w, h);
+
+                // 04.2: NormalizedBaseColor is the projected base when projection ran (so the
+                // written Base PNG IS the projection); the source base is preserved as
+                // SourceBaseColor for the residual-ON dividend and the window preview.
                 return new NamerComputeResult
                 {
-                    NormalizedBaseColor = baseColorOut,
+                    NormalizedBaseColor = projectedOut != null ? projectedOut : baseColorOut,
+                    SourceBaseColor = projectedOut != null ? baseColorOut : null,
                     PackedSurface = surfaceOut,
+                    ExtractedRoughness = roughnessTex,
                     Width = w,
                     Height = h,
                 };
+            }
+            catch
+            {
+                // WR-03: on a mid-pipeline throw the caller never receives the result, so
+                // ReleaseResult never runs — release the un-returned output leases here
+                // (inputs stay in finally). roughnessTex belongs to the ROUGHNESS pool;
+                // projectedOut and baseColorOut belong to the compute pool.
+                if (surfaceOut != null)
+                {
+                    Release(surfaceOut);
+                }
+                if (roughnessTex != null)
+                {
+                    _roughnessPipeline?.ReleaseRoughness(roughnessTex);
+                }
+                if (projectedOut != null)
+                {
+                    Release(projectedOut);
+                }
+                Release(baseColorOut);
+                throw;
             }
             finally
             {
                 Release(baseColorIn);
                 Release(normalTexel);
-                if (usesExtractedAo || usesBakedAo)
+                if (usesBakedAo)
                 {
                     _aoPipeline.ReleaseAo(aoIn);
                 }
@@ -166,7 +265,7 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Returns a <see cref="Process"/> result's two render targets to the pool for
+        /// Returns a <see cref="Process"/> result's render targets to the pool for
         /// reuse by later <see cref="Process"/> calls. Call after readback; afterwards
         /// the result is invalid (its targets are null) and must not be used again.
         /// </summary>
@@ -177,9 +276,21 @@ namespace GraffitiEntertainment.Namer.Editor
                 return;
             }
 
+            // NormalizedBaseColor and SourceBaseColor are both compute-pool-owned targets
+            // (the projected base and the source base respectively); SourceBaseColor is null
+            // in the non-projection path, and Release no-ops on null.
             _pool.Release(result.NormalizedBaseColor);
+            _pool.Release(result.SourceBaseColor);
+
+            if (result.ExtractedRoughness != null)
+            {
+                _roughnessPipeline.ReleaseRoughness(result.ExtractedRoughness);
+            }
+
             _pool.Release(result.PackedSurface);
             result.NormalizedBaseColor = null;
+            result.SourceBaseColor = null;
+            result.ExtractedRoughness = null;
             result.PackedSurface = null;
         }
 
@@ -194,6 +305,7 @@ namespace GraffitiEntertainment.Namer.Editor
         public void Dispose()
         {
             _aoPipeline?.Dispose();
+            _roughnessPipeline?.Dispose();
             _pool.Dispose();
         }
 
@@ -205,6 +317,16 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             return _aoPipeline;
+        }
+
+        private NamerRoughnessPipeline EnsureRoughnessPipeline()
+        {
+            if (_roughnessPipeline == null)
+            {
+                _roughnessPipeline = new NamerRoughnessPipeline();
+            }
+
+            return _roughnessPipeline;
         }
 
         /// <summary>
@@ -226,7 +348,7 @@ namespace GraffitiEntertainment.Namer.Editor
             return EnsureAoPipeline().RequestBake(inspection, w, h, onComplete, shouldCancel);
         }
 
-        private void BindAndDispatch(
+        private void BindAndDispatchNormalizeEncode(
             NamerMaterialInspection inspection,
             RenderTexture baseColorIn,
             RenderTexture normalTexel,
@@ -235,7 +357,6 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture baseColorOut,
             RenderTexture octahedral,
             RenderTexture packInputs,
-            RenderTexture surfaceOut,
             int w,
             int h,
             bool usesSyntheticAo)
@@ -262,12 +383,29 @@ namespace GraffitiEntertainment.Namer.Editor
             _compute.SetTexture(_kernelOctahedralEncode, "_AoIn", aoIn);
             _compute.SetTexture(_kernelOctahedralEncode, "_Octahedral", octahedral);
 
+            Dispatch(_kernelNormalize, w, h);
+            Dispatch(_kernelOctahedralEncode, w, h);
+        }
+
+        private void BindAndDispatchSurfacePack(
+            RenderTexture octahedral,
+            RenderTexture packInputs,
+            RenderTexture surfaceOut,
+            Texture roughnessTex,
+            bool hasExtractedRoughness,
+            float roughnessExtractStrength,
+            bool roughnessDipApplied,
+            int w,
+            int h)
+        {
             _compute.SetTexture(_kernelSurfacePack, "_Octahedral", octahedral);
             _compute.SetTexture(_kernelSurfacePack, "_PackInputs", packInputs);
             _compute.SetTexture(_kernelSurfacePack, "_SurfaceOut", surfaceOut);
+            _compute.SetFloat("_HasExtractedRoughness", hasExtractedRoughness ? 1f : 0f);
+            _compute.SetFloat("_RoughnessExtractStrength", roughnessExtractStrength);
+            _compute.SetFloat("_RoughnessDipApplied", roughnessDipApplied ? 1f : 0f);
+            _compute.SetTexture(_kernelSurfacePack, "_RoughnessTex", roughnessTex);
 
-            Dispatch(_kernelNormalize, w, h);
-            Dispatch(_kernelOctahedralEncode, w, h);
             Dispatch(_kernelSurfacePack, w, h);
         }
 
@@ -282,6 +420,11 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         internal static void Upload(Texture source, RenderTexture target, Texture2D fallback)
+        {
+            Upload(source, target, fallback, unpackNormal: false);
+        }
+
+        internal static void Upload(Texture source, RenderTexture target, Texture2D fallback, bool unpackNormal)
         {
             Texture upload = source != null ? source : fallback;
 
@@ -303,6 +446,21 @@ namespace GraffitiEntertainment.Namer.Editor
             else
             {
                 rawCopy.DisableKeyword(ReencodeSrgbKeyword);
+            }
+
+            // Normal-map uploads go through the _UNPACK_NORMAL variant: a source
+            // imported as TextureImporterType.NormalMap does not keep plain RGB on
+            // the GPU (desktop DXT5 swizzles to (1, y, 1, x), BC5 stores (x, y, 0, 1)),
+            // and the octahedral encode needs the authored [0,1] DirectX texel, not
+            // the swizzled bytes. Normal-map textures are always linear, so the
+            // sRGB-reencode and unpack variants never combine in practice.
+            if (unpackNormal)
+            {
+                rawCopy.EnableKeyword(UnpackNormalKeyword);
+            }
+            else
+            {
+                rawCopy.DisableKeyword(UnpackNormalKeyword);
             }
 
             Graphics.Blit(upload, target, rawCopy);
@@ -380,18 +538,71 @@ namespace GraffitiEntertainment.Namer.Editor
     }
 
     /// <summary>
-    /// In-memory result of <see cref="NamerComputePipeline.Process"/>. The two render
-    /// targets are leased from the pipeline's pool, not owned by the caller: read them
-    /// back, then return them with <see cref="NamerComputePipeline.ReleaseResult"/>.
-    /// After <see cref="NamerComputePipeline.ReleaseResult"/> the fields are null; if
-    /// the pipeline is disposed while a result is still unreleased, its targets are
-    /// destroyed with it and become unusable.
+    /// In-memory result of <see cref="NamerComputePipeline.Process"/>. The render targets
+    /// are leased from the pipeline's pool, not owned by the caller: read them back, then
+    /// return them with <see cref="NamerComputePipeline.ReleaseResult"/>. After
+    /// <see cref="NamerComputePipeline.ReleaseResult"/> the fields are null; if the pipeline
+    /// is disposed while a result is still unreleased, its targets are destroyed with it and
+    /// become unusable.
     /// </summary>
     public sealed class NamerComputeResult
     {
         public RenderTexture NormalizedBaseColor;
         public RenderTexture PackedSurface;
+
+        /// <summary>
+        /// The pre-projection SOURCE base (the normalize output), set only when the 04.2
+        /// projection ran (else null). Kept alive for the residual-ON dividend (the honest
+        /// source ÷ vcInterp removed-detail EXR) and the window's before-pane preview.
+        /// Released by <see cref="NamerComputePipeline.ReleaseResult"/> alongside
+        /// <see cref="NormalizedBaseColor"/>.
+        /// </summary>
+        public RenderTexture SourceBaseColor;
+
+        /// <summary>
+        /// The extracted roughness render target (roughness pipeline pool), set only when
+        /// extraction ran. Null in the identity/legacy path (and when extraction was skipped).
+        /// <see cref="NamerComputePipeline.ReleaseResult"/> owns releasing it. The D-07 debug
+        /// channel binds it for the Extracted Roughness view.
+        /// </summary>
+        public RenderTexture ExtractedRoughness;
+
         public int Width;
         public int Height;
+    }
+
+    /// <summary>
+    /// 04.2 projection context handed to <see cref="NamerComputePipeline.Process"/>. It owns
+    /// the seam-safe split, the quantized vertex colors, the residual output, and the
+    /// <see cref="Run"/> callback the pipeline invokes after the normalize stage. The callback
+    /// reads the source base back, runs the vertex-color fit, and generates the residual
+    /// against the SOURCE base while writing the Gouraud projection into
+    /// <paramref name="projectedOut"/>.
+    /// </summary>
+    public sealed class NamerProjectionContext
+    {
+        /// <summary>The seam-safe split the projection and residual are computed against.</summary>
+        public NamerSplitResult Split;
+
+        /// <summary>Quantized vertex colors from the projection fit (the mesh color stream).</summary>
+        public Color32[] Colors;
+
+        /// <summary>The residual output produced by <see cref="Run"/> (residual-ON only; null when dropped).</summary>
+        public NamerDecompOutput Decomp;
+
+        /// <summary>Residual error threshold passed to <c>GenerateResidual</c>.</summary>
+        public float ErrorThreshold;
+
+        /// <summary>Residual-resolution popup index passed to <c>GenerateResidual</c>.</summary>
+        public int ManualResolution;
+
+        /// <summary>Write Residual checkbox: forces AlwaysKeep vs NeverKeep.</summary>
+        public bool WriteResidual;
+
+        /// <summary>
+        /// Projection + residual callback. <c>sourceBase</c> is the normalized base (the
+        /// residual-ON dividend); <c>projectedOut</c> is the caller-owned write-back target.
+        /// </summary>
+        public Action<RenderTexture, RenderTexture> Run;
     }
 }

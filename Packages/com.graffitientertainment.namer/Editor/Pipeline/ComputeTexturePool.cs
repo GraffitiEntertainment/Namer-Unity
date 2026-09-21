@@ -46,6 +46,11 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture created = new RenderTexture(descriptor)
             {
                 name = "NamerComputeRT",
+                // Without DontSave the editor's unused-asset sweeps (fired by
+                // selection changes and reimports) destroy pooled targets, which
+                // then compare Unity-null on later leases — handing corpses to
+                // SetTexture (MissingReferenceException / ArgumentNullException).
+                hideFlags = HideFlags.HideAndDontSave,
             };
             created.Create();
             _live.Add(created);
@@ -115,6 +120,15 @@ namespace GraffitiEntertainment.Namer.Editor
             if (rt == null)
             {
                 return;
+            }
+
+            // Graphics.Blit leaves RenderTexture.active pointing at its destination, so a
+            // pooled target can still be the global active render target when the pool
+            // disposes it (e.g. the fit search's per-step probe decomp pipeline). Unbind it
+            // before release so the graphics device is never left on a destroyed target.
+            if (RenderTexture.active == rt)
+            {
+                RenderTexture.active = null;
             }
 
             rt.Release();

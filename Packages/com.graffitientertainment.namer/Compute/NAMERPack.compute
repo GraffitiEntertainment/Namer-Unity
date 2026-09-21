@@ -30,6 +30,7 @@ Texture2D<float4> _BaseColorIn;      // base map or white fill
 Texture2D<float4> _NormalTexel;      // Unity normal texel (raw RGB or DXT5nm/AG swizzle) or neutral (0.5,0.5,1.0)
 Texture2D<float4> _AoIn;             // AO map or white fill
 Texture2D<float4> _MetallicGlossIn;  // metallic/gloss map or neutral fill
+Texture2D<float4> _RoughnessTex;     // per-texel extracted roughness (R channel, linear) or white fill
 
 // Uniforms.
 float _SourceIsSrgb;
@@ -41,6 +42,9 @@ float _Roughness;
 float _Emissive;
 float _SmoothnessTextureChannel;
 float _HasMetallicGlossMap;
+float _HasExtractedRoughness;      // 1 = override the scalar roughness with _RoughnessTex at PACK time (D-01)
+float _RoughnessExtractStrength;   // 04.2 dip-depth taste slider (0 = keep the authored scalar)
+float _RoughnessDipApplied;        // 1 = _RoughnessTex already carries the dip-encoded roughness (04.2 removed-detail transfer, CSRoughnessTransferRemap) -> adopt as-is; 0 = direct mag/p90 (Sobel) -> apply the slider-scaled dip now
 uint2 _Size; // unsigned: compared against SV_DispatchThreadID (uint) in the kernel guards
 
 [numthreads(8,8,1)]
@@ -69,7 +73,18 @@ void CSNormalize(uint3 id : SV_DispatchThreadID)
     else
     {
         metallic = _Metallic;
-        roughness = _Roughness;
+        // Albedo-alpha authored smoothness (URP _SmoothnessTextureChannel == 1): the base
+        // alpha is the per-pixel smoothness source even without a metallic/gloss map, with
+        // the scalar as its multiplier — same contract as the gloss-map branch above
+        // (Codex PR #1 review). Otherwise the scalar roughness stands.
+        if (_SmoothnessTextureChannel == 1.0)
+        {
+            roughness = 1.0 - (baseColorIn.a * _SmoothnessScalar);
+        }
+        else
+        {
+            roughness = _Roughness;
+        }
     }
 
     _PackInputs[id.xy] = float4(metallic, roughness, _Emissive, 1.0);
@@ -109,6 +124,23 @@ void CSSurfacePack(uint3 id : SV_DispatchThreadID)
     float ao = _Octahedral[id.xy].b;
     float metallic = _PackInputs[id.xy].x;
     float roughness = _PackInputs[id.xy].y;
+    if (_HasExtractedRoughness > 0.5)
+    {
+        if (_RoughnessDipApplied > 0.5)
+        {
+            // 04.2 removed-detail transfer: _RoughnessTex is already dip-encoded by
+            // CSRoughnessTransferRemap (saturate(scalar - strength * removedLuma / p90))
+            // -> adopt as-is (full adoption; the dip-depth slider was baked into the map).
+            roughness = _RoughnessTex[id.xy].r;
+        }
+        else
+        {
+            // Sobel fallback dip source: _RoughnessTex is direct mag/p90 -> dip the scalar
+            // anchor by the slider x edge signal (D-08 anchored-inverted).
+            roughness = saturate(roughness - _RoughnessExtractStrength * _RoughnessTex[id.xy].r);
+        }
+    }
+
     float emissive = _PackInputs[id.xy].z;
     _SurfaceOut[id.xy] = NamerPackSurfaceFromOct(oct, ao, metallic, emissive, roughness);
 }

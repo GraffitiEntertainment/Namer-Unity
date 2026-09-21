@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: ready_to_plan
-stopped_at: Phase 03.1 complete (3/3) — ready to discuss Phase 4
-last_updated: 2026-08-31T18:58:17.371Z
-last_activity: 2026-08-29
+status: "Phase 04.2 shipped — PR #1"
+stopped_at: Completed 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid-10-PLAN.md
+last_updated: "2026-09-20T21:31:11.986Z"
+last_activity: 2026-09-20
 progress:
-  total_phases: 6
-  completed_phases: 4
-  total_plans: 12
-  completed_plans: 12
-  percent: 67
+  total_phases: 8
+  completed_phases: 7
+  total_plans: 34
+  completed_plans: 34
+  percent: 88
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-25)
 
 **Core value:** A user can select a textured FBX in Unity, run `Process with NAMER`, and get a correctly rendering, source-compatible NAMER material without ever modifying the imported source assets or leaving the Unity Editor.
-**Current focus:** Phase 4 — vertex color decomposition + residual
+**Current focus:** Phase 04.2 — gouraud-projection-one-texture-with-roughness-transfer-resid
 
 ## Current Position
 
-Phase: 4
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-08-31
+Phase: 04.2 (gouraud-projection-one-texture-with-roughness-transfer-resid) — EXECUTING
+Plan: 5 of 5
+Status: Phase 04.2 shipped — PR #1
+Last activity: 2026-09-21
 
 Progress: [██████████] 100%
 
@@ -36,7 +36,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 9
+- Total plans completed: 21
 - Average duration: - min
 - Total execution time: 0.0 hours
 
@@ -47,6 +47,8 @@ Progress: [██████████] 100%
 | 02 | 3 | - | - |
 | 3 | 3 | - | - |
 | 03.1 | 3 | - | - |
+| 04 | 5 | - | - |
+| 4.1 | 7 | - | - |
 
 **Recent Trend:**
 
@@ -66,12 +68,34 @@ Progress: [██████████] 100%
 | Phase 03.1-ao-extraction-un-multiply-baked-ao-from-the-base-texture-wit P01 | 22min | 3 tasks | 8 files |
 | Phase 03.1-ao-extraction-un-multiply-baked-ao-from-the-base-texture-wit P02 | 29min | 3 tasks | 12 files |
 | Phase 03.1-ao-extraction-un-multiply-baked-ao-from-the-base-texture-wit P03 | 20min | 3 tasks | 6 files |
+| Phase 04-vertex-color-decomposition-residual P04-01 | 33 | 2 tasks | 7 files |
+| Phase 04-vertex-color-decomposition-residual P04-02 | 32min | 3 tasks | 9 files |
+| Phase 04-vertex-color-decomposition-residual P04-03 | 14min | 3 tasks | 9 files |
+| Phase 04-vertex-color-decomposition-residual P04-04 | 2min | 2 tasks | 3 files |
+| Phase 04-vertex-color-decomposition-residual P04-05 | 12min | 2 tasks | 5 files |
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 04.1 P01 | 10min | 3 tasks | 7 files |
+| Phase 04.1 P02 | 31 | 3 tasks | 15 files |
+| Phase 04.1 P03 | 10min | 2 tasks | 7 files |
+| Phase 04.1 P04 | 4min | 3 tasks | 6 files |
+| Phase 04.1 P05 | 2min | 3 tasks | 2 files |
+| Phase 04.1 P07 | 12min | 3 tasks | 8 files |
+| Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P01 | 9min | 3 tasks | 4 files |
+| Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P02 | 9min | 3 tasks | 4 files |
+| Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P03 | 20min | 3 tasks | 14 files |
+| Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P04 | 17min | 3 tasks | 5 files |
+| Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P05 | 6min | 2 tasks | 4 files |
+| Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P10 | 4min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
 ### Roadmap Evolution
 
 - Phase 03.1 inserted after Phase 3: AO extraction: un-multiply baked AO from the base texture, with bake tweaks (cubemap light from high-res model, blur, etc.) (URGENT)
+- Phase 04.1 inserted after Phase 4: Baked-response roughness extraction + zero-residual one-texture mode — extract gloss baked into base as 6-bit roughness, refit vertex colors, D-13 auto-drop becomes primary path (see notes/roughness-extraction-one-texture-mode.md) (URGENT)
 
 ### Decisions
 
@@ -110,6 +134,54 @@ Recent decisions affecting current work:
 - [Phase 03.1]: RequestBake runs synchronously as an explicit one-time action off the debounce — EditorApplication.delayCall does not fire during headless EditMode tests
 - [Phase 03.1]: Unity.Burst + Unity.Mathematics added to the Editor asmdef — Collections 2.6.8 no longer pulls Unity.Mathematics transitively
 - [Phase 03.1 close-out]: W1 accepted — bake/occluder stay preview-scope (generated assets use extraction/authored AO); W2 accepted — synchronous first bake with cancellable progress bar; UAT 4/4 pass 2026-08-31
+- [Phase 04]: Phase 04-01: MeshVertexSplitter welds by a quantized (position, normal, tangent, uv) integer key (never floating-point equality), so near-equal shared-edge attributes weld while UV seams / hard normals / tangent breaks split.
+- [Phase 04]: Phase 04-01: VertexColorFitter's 'per-vertex 3x3 Gram' is a per-triangle 3x3 normal-equations solve accumulated per-vertex by incident-triangle count; the diagonal-only per-vertex approximation over-shoots constant colors, so the full 3-corner barycentric solve is load-bearing.
+- [Phase 04]: Phase 04-01: the vertex-color fit is UV-space only (positions/normals/tangents are not sampled), so only Uvs plus flattened sub-mesh triangles are converted to NativeArrays.
+- [Phase 04]: Phase 04-01: per-vertex reconstruction error is accumulated on the main thread from per-triangle job output, avoiding a cross-thread read-modify-write race on shared vertices.
+- [Phase 04]: Phase 04-02: The residual is the multiplicative quotient base / max(vcInterp, VcFloor) derived from the QUANTIZED Color32 colors, with a coverage mask and base-alpha preservation (Pitfall 1/2/5)
+- [Phase 04]: Phase 04-02: The reduce keeps every channel in [0,1] (mean/max/mean/min) — not raw sums — so it stays overflow-free at any resolution; Coverage and AvgError are derived as fraction ratios on the CPU
+- [Phase 04]: Phase 04-02: Coverage needs a within-threshold count that does not fit the 4-channel reduce, so it is a second reduce over a dedicated _CoverageStat texture
+- [Phase 04]: Phase 04-03: the decomposition source mesh is resolved inside NamerProcessor.Process (ResolveSourceMesh) because SourceInspector never populates NamerMaterialInspection.BakeSourceMesh in production — BakeSourceMesh was only assigned in tests; without it the decomposition stage would always fall back to the Phase-3 shape
+- [Phase 04]: Phase 04-03: the scene sharedMesh swap reads MeshFilter via renderer.GetComponent<MeshFilter>() (a Component sibling of Renderer), not a 'renderer is MeshFilter' pattern match — MeshFilter is not a Renderer subclass; the plan's literal example does not compile
+- [Phase 04]: Phase 04-03: the live preview keeps the pool-leased residual render target bound to the preview material (no readback) until the next recompute — Matches the Phase-3 'assign render targets directly to preview materials' convention
+- [Phase 04 gap-closure]: Decision-coverage gate override — D-11/D-14 reported uncovered by the gap plans (04-04/04-05); both are body-cited in 04-02-PLAN/04-03-PLAN and implemented in shipped code (viridis ramp in NAMERDecomp.hlsl, preview toggle in NamerEditorWindow). Accepted as a frontmatter-citation gap, not a scope drop; verify-phase should re-surface if evidence of a real drop emerges.
+- [Phase 04 gap-closure]: CR-01 guard (CountDistinctSourceMeshes + decomposeSourceMesh=null fallback) and CR-02 (WriteResidualExr FilterMode.Bilinear) verified pre-existing in the 04-04 WIP snapshot — the packed surface texture stays FilterMode.Point (GEN-04), only the residual EXR becomes Bilinear so the reduced-resolution asset matches the reported MaxError
+- [Phase 04 gap-closure]: CR-01 fallback is byte-equivalent to DecompositionEnabled==false: AssetGenerator.Generate keys base-vs-residual binding on decomp != null (not settings.DecompositionEnabled), so _BaseResidualMap binds the GENERATED base PNG (BaseTexturePath) — the CR-01 regression tests must compare against BaseTexturePath, not the source base map
+- [Phase 04]: CR-03 closed: CPU VertexColorFitter.SampleBase now Repeat-wraps UVs (floor(u / BaseWidth) + (x0+1) % BaseWidth) instead of clamping, and GenerateResidual guards the D-13 drop gate on kMinCoverageFraction = 1e-6f — zero-coverage (tiling) fits flag CannotDecompose and NamerProcessor falls back to the Phase-3 shape with a 'UV coverage near zero' warning
+- [Phase 04]: kMinCoverageFraction = 1e-6f (near-zero epsilon): zero-coverage (tiling) fits flag CannotDecompose and fall back to the Phase-3 shape; legitimately partial coverage (small mesh on a large atlas) proceeds as before — that was true pre-gap and stays true
+- [Phase 04.1]: Rec.601 luminance weights (not Rec.709) for Blender-parity Sobel (RESEARCH Pitfall 4)
+- [Phase 04.1]: Extraction overrides the scalar roughness at PACK time in CSSurfacePack, not by re-dispatching CSNormalize (which would double-apply the AO un-multiply)
+- [Phase 04.1]: RoughnessExtractStrength has no inline default (0 = off) preserving the legacy scalar path; shipped default-on 1f arrives via settings in plan 02
+- [Phase ?]: NamerProcessor composes the Func<float,float> evaluate callback (owner of splitter/fitter/decomp state); NamerRoughnessPipeline owns only the GPU per-step sharp-removal (RunSharpRemoval) and the 3A fit cache
+- [Phase ?]: The fit-driven strength search runs synchronously on cache miss inside NamerProcessor.Process, reusing a pre-Process split; the refit consumes NormalizedBaseColor (already the D-05 cleaned base)
+- [Phase ?]: RoughnessExtractStrength/RoughnessEstimator settings + NamerEditorConstants defaults pulled into plan 02 (NamerProcessor settings copy + fit tests need them)
+- [Phase ?]: NamerComputeResult.NormalizedBaseColorOwnedByRoughnessPool tracks the D-05 repoint so ReleaseResult returns the cleaned base to the roughness pool (compute pool Release would no-op and leak)
+- [Phase ?]: [Phase 04.1 P03]: The one-texture _BaseResidualMap unbinding needs no code change — already delivered by the existing D-13 drop (baseResidualPath = decomp != null ? residualWritePath : basePath yields null when residualWritePath == null); no baseResidualPath edit is made, so the non-decomposed Phase-3 path keeps binding the Base PNG.
+- [Phase ?]: [Phase 04.1 P03]: D-06 _RoughnessOffsetMap is additive with a neutral 'black' {} default (offset .r == 0 => byte-identical decode), applied in InitializeNamerSurfaceData AFTER NAMER_DECODE_SURFACE so the macro signature and Meta-pass call site are untouched; the offset is a direct user-assigned Texture2D (no AssetDatabase.LoadAssetAtPath).
+- [Phase 04.1]: Scene guard = graceful rejection, not scene support — .unity assets are outside PRD selection scope and LoadAllAssetsAtPath cannot read scene objects; scene-instance GameObject selection (empty asset path) is unchanged
+- [Phase 04.1]: Preview wiring = option 1 — RecomputePreview supplies the 3A evaluate callback (composed exactly like NamerProcessor) rather than relying on the fit cache, which is empty on first preview; EvaluateRefitMaxError widened private->internal instead of duplicating the domain helper
+- [Phase 04.1]: Vanish guard = bindposes-before-boneWeights reorder (skinned-safe) + degenerate-bounds guard so a broken generated mesh is never bound; no speculative guards beyond the diagnosed static defect
+- [Phase 04.1]: Minimizer fixture rescaled (not a local threshold) so the shipped ErrorThreshold=0.02 stays meaningful and plan 04.1-02 Task 5 item 1 holds exactly
+- [Phase 04.1]: Collapse fixtures use fixture-local CollapseErrorThreshold=0.04 + BakedResponse gloss amplitude 0.10 (test-only); production D-13 gate / NamerRoughnessFitter / MinBlurRadius untouched
+- [Phase 04.1]: Offset fixture persists the roughness-offset texture as an imported asset (mirroring CreateImportedBaseMap), matching D-06 product intent of a user-assigned project texture
+- [Phase 04.1]: Anchored-inverted roughness mapping (D-08/D-09/D-10, plan 04.1-07): the authored roughness scalar anchors the extracted map and the Sobel edge magnitude (p90-scaled) dips texels toward gloss — saturate(scalar − strength · mag/p90) at both consume sites (CSRoughnessRemap fit-driven; CSSurfacePack Sobel); CSRoughnessNormalize stays direct-polarity; fit-driven pack adoption stays full-strength (isFitDriven ? 1f); estimator tooltip drops the Blender-parity claim
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: Symmetric VcFloor max(base,F)/max(vc,F) adopted (04.2 RESEARCH Pattern 2) — kills the 1.70% below-floor dark-texel exception class at sub-LSB reconstruction cost
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: NamerResidualMode.Gate is the byte-identical default; AlwaysKeep/NeverKeep force keep/drop in both directions
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: projectedOut is caller-owned (R16G16B16A16_SFloat linear, w/h), written by the pipeline and never released here
+- [Phase 04.2]: Removed-luma transfer declares _RemovedLuma once as RWTexture2D (read-write, read via [] in the remap kernel) — HLSL cannot declare one resource name twice; mirrors the existing _RoughnessRaw/_BlurPing read-write pattern
+- [Phase 04.2]: RemovedLumaP90 mirrors RobustSobelScale but reads |.r| and omits the trueMax ceiling — removed-luma has no precomputed true max; the kernel saturate owns the 6-bit clip at both ends
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: NamerProjectionContext.Run is invoked between normalize and pack; NormalizedBaseColor is the projected base and SourceBaseColor preserves the source for the residual-ON dividend and preview
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: CreateProjectionContext is internal; the window calls it directly and the projection-era tests mirror its Run contract with a local helper
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: DipSource/WriteResidual are fresh keys (no stale-estimator migration); WriteResidual drives AlwaysKeep/NeverKeep, retiring Gate from production call sites
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: DrawDecompStats gains a Removed-detail max error row (FitOnlyMaxError) and the residual row reads 'not written (one-texture)' vs 'written @ Npx'
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: No computed overlap-depth statistic was added — honest tooltip copy carries the measured numbers (0.07 / 87.9 / ~55%), per CONTEXT 'at most an honest statement, not repair'
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: EditMode full-suite run deferred to the orchestrator's post-wave regression gate (no unity-mcp relay; live editor holds the project lock)
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: Orthographic preview camera (fieldOfView deleted) fixed at OrthoCameraDistance; camera transform never moves for framing or zoom
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: One shared yaw+pitch quaternion (pitch clamped to +/-89 degrees) drives both DrawMesh calls — pane sync is the invariant (amended 2026-09-16)
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: Zoom is orthographic size via a clamped zoom scale; initial size = both objects wide plus PreviewGap under the rotation-invariant bounding-sphere bound
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: Added a 6th public test-observability accessor (OrthographicSize) beyond the plan's 5 listed, so the render test can assert the camera's applied size
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: PaneAnchorWorld uses the neutral _framedHalfWidth captured at Frame (first positioning) instead of the per-Render rotated HorizontalHalfExtentWorld — orbit spins in place about a fixed center (GAP-5)
+- [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: Real per-pane clipping via two preview cycles + two persistent pane RTs (option a), each cycle blitting its utility RT into its own pane RT before the next BeginPreview and restoring RenderTexture.active=null after each blit
 
 ### Pending Todos
 
@@ -129,6 +201,15 @@ None yet.
 |---|-------------|------|--------|-----------|
 | 260829-isy | Bind generated NAMER materials to renderers; After panel and debug views prefer generated material/textures (flip to live on AO slider tweak) | 2026-08-29 | c4445d5 | [260829-isy-bind-generated-namer-materials-to-render](./quick/260829-isy-bind-generated-namer-materials-to-render/) |
 | 260829-n6x | Remove silent geometry-bake override from NAMER window so AO slider updates reshape the extracted AO live, matching Process output | 2026-08-29 | da45cf7 | [260829-n6x-remove-silent-geometry-bake-override-fro](./quick/260829-n6x-remove-silent-geometry-bake-override-fro/) |
+| 260918-fcx | NAMER debug dip-switches: step-checkbox row (VC+Residual/Roughness/AO hard gates), shaded-view input toggles via neutral-default shader gates, scrollbar fix | 2026-09-18 | cfe83b7 | [260918-fcx-namer-debug-dip-switches](./quick/260918-fcx-namer-debug-dip-switches/) |
+| 260918-k8k | NAMER Normal shaded-view gate (7th DIP-02 toggle) + six texture-channel panes with pop-out viewer under the toggle row; live EditMode suite 157/157 | 2026-09-18 | eba6901 | [260918-k8k-namer-normal-shaded-view-gate-texture-ch](./quick/260918-k8k-namer-normal-shaded-view-gate-texture-ch/) |
+| 260919-fp3 | Fix black NAMER Processor window: channel panes/popup now Repaint-guarded Graphics.DrawTexture instead of OnGUI Graphics.Blit (RenderTexture.active leak, CAMetalLayer 0x0 drawable); live EditMode suite 157/157 | 2026-09-19 | 70ba14a | [260919-fp3-namer-black-window-channel-pane-blit](./quick/260919-fp3-namer-black-window-channel-pane-blit/) |
+| 260919-ge4 | NAMER Processor window UX: channel popups replace each other and anchor below the clicked pane via ShowAsDropDown (framework click-away), preview zoom gated to shift/ctrl/alt+scroll (plain scroll scrolls the dialog), channel panes column-aligned with the shaded-view toggle row; live EditMode suite 157/157 | 2026-09-19 | 135782d | [260919-ge4-namer-window-ux-popup-zoom-align](./quick/260919-ge4-namer-window-ux-popup-zoom-align/) |
+| 260919-hxs | NAMER preview strafe: ctrl+drag pans the shared orthographic camera (pixel delta to world units at current ortho size, reset on Frame/re-selection) so zoomed left/right extremes are inspectable; triangle wireframe overlay follows the pan and clips per-edge to the preview rect; live EditMode suite 158/158 | 2026-09-19 | e0d95e4 | [260919-hxs-preview-strafe-and-wireframe-clip](./quick/260919-hxs-preview-strafe-and-wireframe-clip/) |
+| 260919-irk | Triangle wireframe as a second render pass: line-topology submesh on the preview split mesh drawn with an unlit URP wire material (NamerPreviewWire) in the After pane's preview cycle — GPU pixel clipping at the pane edge, camera-follow for free, one draw call replaces 3N Handles.DrawLine (ring-buffer exhaustion gone); IMGUI overlay + manual projection deleted; live EditMode suite 158/158 | 2026-09-19 | f21959a | [260919-irk-wireframe-second-pass](./quick/260919-irk-wireframe-second-pass/) |
+| 260919-k0e | Wireframe on ANY After mesh (irk gate was split-mesh-only): Render/RenderPane take an explicit wireMesh — split mesh keeps its line submesh, source/generated meshes get a cached standalone line-topology wire mesh (assets never mutated, disposed in OnDisable); Debug.LogException in RecomputePreview/RunProcess catches (full stack to console); five stage-gate rows ToggleLeft→Toggle (checkbox before label); live EditMode suite 158/158 | 2026-09-19 | c52579f | [260919-k0e-wireframe-any-after-mesh-logging-toggles](./quick/260919-k0e-wireframe-any-after-mesh-logging-toggles/) |
+| 260921-i1b | Stage & Shader Gates header (boldLabel + miniLabel help line) above the DIP-01 step-switch row in NamerEditorWindow — pipeline-stage vs. live shader-only gate semantics; two-line diff, grep-gated, checkpoint auto-approved (auto_advance) | 2026-09-21 | 33840f8 | [260921-i1b-add-header-above-step-switch-row-in-name](./quick/260921-i1b-add-header-above-step-switch-row-in-name/) |
+| 260921-l5s | docs/USER_GUIDE.md (TOC + 8 UI-region sections in draw order, verbatim labels, b75d925 AO semantics) + 11 section images under docs/images/ (user-supplied captures incl. bonus toggle-triangles) + README.md rewritten as project overview with NAMER-preview.png hero (reserved for README per user direction) | 2026-09-21 | 1d6d30d | [260921-l5s-docs-user-guide-section-images](./quick/260921-l5s-docs-user-guide-section-images/) |
 
 ## Deferred Items
 
@@ -140,6 +221,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-29T02:07:12.703Z
-Stopped at: Completed 03.1-ao-extraction-un-multiply-baked-ao-from-the-base-texture-wit-03-PLAN.md
+Last session: 2026-09-17T23:46:43.559Z
+Stopped at: Completed 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid-10-PLAN.md
 Resume file: None

@@ -9,15 +9,19 @@ using UnityEngine.Rendering;
 namespace GraffitiEntertainment.Namer.Editor
 {
     /// <summary>
-    /// GPU dispatch harness for the NAMER image-space AO extraction stage (Phase 03.1,
-    /// plan 01). Turns the already-uploaded linear/raw base-color render target into an
-    /// extracted ambient-occlusion texture (AO in the green channel, linear) by dispatching
-    /// the five staged kernels in <c>Compute/NAMERAO.compute</c> — never per-pixel C#.
+    /// GPU dispatch harness for the NAMER AO stages (Phase 03.1, plan 01): the geometry
+    /// bake upload path (bilinear upsample + jump-flood seam dilation + D-11 tweak
+    /// stages) and the image-space AO extraction kernels in
+    /// <c>Compute/NAMERAO.compute</c> — never per-pixel C#.
     ///
-    /// The extraction is the automatic D-07 path when a source material has no authored
-    /// <c>_OcclusionMap</c>: CSLuminance -> hierarchical block-average (overflow-free) ->
-    /// separable gaussian low-pass -> AO remap. The result is returned pool-leased and must
-    /// be released by the caller via <see cref="ReleaseAo"/>.
+    /// Since the 2026-09-21 contract the GEOMETRY BAKE is the automatic D-07 synthetic
+    /// source when the AO stage is on and a source material has no authored
+    /// <c>_OcclusionMap</c> (<see cref="BakeAndUpload"/>, called by
+    /// <c>NamerComputePipeline.Process</c>); the luminance extraction
+    /// (<see cref="Extract"/>) is retired from the automatic path — its global-mean
+    /// normalization conflated albedo with occlusion — but the method and kernels are
+    /// retained for direct callers. Bake results are returned pool-leased and must be
+    /// released by the caller via <see cref="ReleaseAo"/>.
     ///
     /// All render targets are declared with <see cref="GraphicsFormat"/> (intermediates
     /// <see cref="GraphicsFormat.R16G16B16A16_SFloat"/> linear; the AO output
@@ -75,6 +79,11 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <see cref="GraphicsFormat.R8G8B8A8_UNorm"/> linear render target with AO in the
         /// green channel. The caller owns only the returned target and must release it via
         /// <see cref="ReleaseAo"/>.
+        ///
+        /// RETIRED from the automatic path (2026-09-21 contract): the extraction normalizes
+        /// by one GLOBAL luminance mean, so AO tracks albedo brightness rather than geometry
+        /// (see .planning/debug/ao-luma-false-occlusion.md). The D-07 gate now bakes geometry
+        /// instead; this method survives for direct callers only.
         /// </summary>
         public RenderTexture Extract(NamerMaterialInspection inspection, RenderTexture baseColorIn, int w, int h)
         {
@@ -230,7 +239,8 @@ namespace GraffitiEntertainment.Namer.Editor
             if (baked.Cancelled)
             {
                 // A cancelled bake must never be cached: return null so the caller does not
-                // StoreBake and the D-07 gate falls back to image-space extraction next recompute.
+                // StoreBake and the D-07 gate packs the white fill for that run (a later
+                // recompute re-attempts the bake).
                 if (baked.Ao.IsCreated)
                 {
                     baked.Ao.Dispose();
@@ -347,7 +357,7 @@ namespace GraffitiEntertainment.Namer.Editor
             if (baked == null)
             {
                 // Cancelled (a missing bake source is already handled above): no cache,
-                // no completion callback, so the D-07 gate falls back to extraction.
+                // no completion callback, so the D-07 gate packs the white fill instead.
                 return false;
             }
 

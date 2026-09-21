@@ -150,6 +150,63 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         [UnityTest]
+        public IEnumerator Residual_TiledUvRejection_InitializesProjectedOutToSourceBase()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU tiled-UV projected-out test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            const int w = 64;
+            const int h = 64;
+
+            // Same tiled island as Residual_TiledUvLayout_FlagsCannotDecompose, but with the
+            // caller-owned write-back target supplied and prefilled with an impossible
+            // sentinel. The rejection returns BEFORE the CSProjectBase dispatch, so without an
+            // explicit copy the pooled target keeps whatever it held — NamerComputePipeline
+            // would then feed stale texels to the roughness transfer and the Base PNG
+            // (Codex PR #1 review).
+            NamerSplitResult split = CreateSplitQuad(0.5f, 1.5f);
+            Color32[] colors = ConstantColors(split.VertexCount, 128);
+            RenderTexture baseRt = CreateBase(w, h, new Color(0.25f, 0.25f, 0.25f, 1f));
+            RenderTexture projectedOut = UploadBase(w, h, (x, y) => new Color(4f, 0f, 4f, 4f));
+
+            using (NamerDecompPipeline pipeline = new NamerDecompPipeline())
+            {
+                try
+                {
+                    NamerDecompOutput output = pipeline.GenerateResidual(
+                        split, colors, baseRt, w, h, 0.02f, 0, projectedOut);
+                    try
+                    {
+                        Assert.IsTrue(output.Stats.CannotDecompose,
+                            "UVs outside [0,1] must trip the honest CannotDecompose fallback");
+
+                        Color[] projected = ReadBackFloat(projectedOut);
+                        for (int i = 0; i < projected.Length; i++)
+                        {
+                            Assert.AreEqual(0.25f, projected[i].r, 1e-3f, $"texel {i} red must be the source base, not pooled stale content");
+                            Assert.AreEqual(0.25f, projected[i].g, 1e-3f, $"texel {i} green must be the source base, not pooled stale content");
+                            Assert.AreEqual(0.25f, projected[i].b, 1e-3f, $"texel {i} blue must be the source base, not pooled stale content");
+                            Assert.AreEqual(1f, projected[i].a, 1e-3f, $"texel {i} alpha must be the source base, not pooled stale content");
+                        }
+                    }
+                    finally
+                    {
+                        output.Dispose();
+                    }
+                }
+                finally
+                {
+                    Release(baseRt, projectedOut);
+                }
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
         public IEnumerator Residual_UncoveredTexels_AreIdentity()
         {
             if (!ComputeAvailable)

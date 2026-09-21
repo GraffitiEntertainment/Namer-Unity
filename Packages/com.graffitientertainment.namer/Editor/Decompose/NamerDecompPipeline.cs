@@ -209,6 +209,18 @@ namespace GraffitiEntertainment.Namer.Editor
                 if (uvs[i] < -kUvBoundsEpsilon || uvs[i] > 1f + kUvBoundsEpsilon
                     || uvs[i + 1] < -kUvBoundsEpsilon || uvs[i + 1] > 1f + kUvBoundsEpsilon)
                 {
+                    // This return precedes the CSProjectBase dispatch, so the caller-owned
+                    // write-back target would still hold pooled stale texels — but
+                    // NamerComputePipeline.Process consumes it for the roughness transfer and
+                    // returns it as NormalizedBaseColor regardless of CannotDecompose. Copy the
+                    // source base in so the fallback path yields the honest un-projected base
+                    // (removed-luma becomes zero everywhere -> the authored scalar roughness)
+                    // instead of undefined pixels (Codex PR #1 review).
+                    if (projectedOut != null)
+                    {
+                        Graphics.Blit(baseLinear, projectedOut);
+                    }
+
                     return new NamerDecompOutput(null, new NamerDecompErrorStats
                     {
                         Coverage = 0f,

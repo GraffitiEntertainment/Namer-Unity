@@ -2,8 +2,6 @@
 
 The NAMER Processor converts ordinary Unity PBR materials into compact NAMER materials entirely inside the Unity Editor. Baked ambient occlusion is un-multiplied from the base color, removed detail can be re-expressed as roughness gloss, surface data (roughness, AO, metallic, emissive, and the packed normal) is compressed into a single surface texture, and the base color can optionally be decomposed into mesh vertex colors for a one-texture material. A live before/after preview lets you tune every parameter before committing to a Process run. Your source assets are never modified — all generated output is written to a separate folder.
 
-![The NAMER Processor window](images/NAMER-preview.png)
-
 ## Getting Started
 
 There are three entry points:
@@ -92,6 +90,8 @@ Click any pane to open a large (384 px) popup of that channel:
 The popup anchors below the clicked pane and closes when you click away (or when you open another channel — popups replace each other).
 
 ### Triangles
+
+![Triangles toggle](images/toggle-triangles.png)
 
 The `Triangles` toggle overlays a cyan wireframe on the After pane as a second render pass. It is a visual debug aid only — it never affects processing.
 

@@ -453,6 +453,63 @@ namespace GraffitiEntertainment.Namer.Tests
             yield return null;
         }
 
+        [UnityTest]
+        public IEnumerator RemovedLumaP90_IgnoresUncoveredAtlasTexels()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU p90 coverage test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            const int w = 64;
+            const int h = 64;
+
+            // Simulated sparse layout: projected equals source everywhere (the CSProjectBase
+            // pass-through an uncovered atlas texel sees) EXCEPT a 4/64-wide stripe carrying
+            // removed detail — 6.25% coverage, below the ~10% where an all-texel percentile
+            // collapses p90 to the floor and clamps the covered detail to full gloss
+            // (Codex PR #1 review).
+            RenderTexture source = UploadFloatBase(w, h, (x, y) => new Color(0.5f, 0.5f, 0.5f, 1f));
+            RenderTexture projected = UploadFloatBase(w, h, (x, y) =>
+                x >= 8 && x < 12 ? new Color(0.375f, 0.375f, 0.375f, 1f) : new Color(0.5f, 0.5f, 0.5f, 1f));
+
+            using (NamerRoughnessPipeline pipeline = new NamerRoughnessPipeline())
+            {
+                RenderTexture map = null;
+                try
+                {
+                    map = pipeline.ExtractTransferRoughness(0.5f, source, projected, w, h, 0.25f);
+                    Color32[] bytes = ReadBackColor32(map, w * h);
+                    for (int y = 0; y < h; y++)
+                    {
+                        for (int x = 0; x < w; x++)
+                        {
+                            bool stripe = x >= 8 && x < 12;
+
+                            // Detail-only p90 == the stripe's 0.125 removed luma:
+                            // stripe roughness = saturate(0.5 - 0.25 * 1) = 0.25 (byte ~64);
+                            // background keeps the authored 0.5 (byte ~128). The collapsed
+                            // floor would pin the stripe to 0 (max gloss) instead.
+                            Assert.AreEqual(stripe ? 64 : 128, bytes[y * w + x].r, 1,
+                                $"texel ({x},{y}) roughness byte must follow the detail-only percentile");
+                        }
+                    }
+                }
+                finally
+                {
+                    if (map != null)
+                    {
+                        pipeline.ReleaseRoughness(map);
+                    }
+
+                    Destroy(source, projected);
+                }
+            }
+
+            yield return null;
+        }
+
         // --------------------------------------------------------------------
 
         private static NamerMaterialInspection BuildInspection(
@@ -523,6 +580,38 @@ namespace GraffitiEntertainment.Namer.Tests
 
             texture.SetPixels(pixels);
             texture.Apply(false, false);
+        }
+
+        private static RenderTexture UploadFloatBase(int w, int h, System.Func<int, int, Color> pixel)
+        {
+            Texture2D upload = new Texture2D(w, h, TextureFormat.RGBAHalf, false, true)
+            {
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+            Color[] pixels = new Color[w * h];
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    pixels[y * w + x] = pixel(x, y);
+                }
+            }
+
+            upload.SetPixels(pixels);
+            upload.Apply(false, false);
+
+            RenderTexture rt = new RenderTexture(new RenderTextureDescriptor(
+                w, h, GraphicsFormat.R16G16B16A16_SFloat, 0)
+            {
+                enableRandomWrite = true,
+                sRGB = false,
+                useMipMap = false,
+                autoGenerateMips = false,
+            });
+            rt.Create();
+            Graphics.Blit(upload, rt);
+            Object.DestroyImmediate(upload);
+            return rt;
         }
 
         private static void AssertPackedRoughness(Color32[] surface, int index, float expected, string label)

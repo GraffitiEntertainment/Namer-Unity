@@ -268,15 +268,34 @@ namespace GraffitiEntertainment.Namer.Editor
                 {
                     int texelCount = data.Length / 4;
                     float[] magnitudes = new float[texelCount];
+                    int detailCount = 0;
                     for (int i = 0; i < texelCount; i++)
                     {
                         // RGBAFloat is 4 floats per texel, row-major; the signed removed-luma is in .r.
-                        magnitudes[i] = Mathf.Abs(data[i * 4]);
+                        // CSProjectBase passes the source through outside the UV islands, so
+                        // uncovered atlas texels are exactly zero — they are NOT removed detail.
+                        // A sparse layout would otherwise flood the p90 with zeros, collapse the
+                        // scale to the floor, and clamp nearly every covered texel to full
+                        // gloss/matte (Codex PR #1 review); the percentile runs over detail
+                        // texels only — "the top decile of detail" the doc above promises.
+                        float magnitude = Mathf.Abs(data[i * 4]);
+                        if (magnitude > 0f)
+                        {
+                            magnitudes[detailCount++] = magnitude;
+                        }
                     }
 
-                    Array.Sort(magnitudes);
+                    // Flat projection (or detail so sparse the subsample missed it): no
+                    // nonzero texels, so the scale is the floor — never zero, keeping the
+                    // T-04.2-05 divide-by-zero guarantee.
+                    if (detailCount == 0)
+                    {
+                        return LumaScaleFloor;
+                    }
+
+                    Array.Sort(magnitudes, 0, detailCount);
                     int percentileIndex = Mathf.Clamp(
-                        Mathf.FloorToInt(texelCount * LumaScalePercentile), 0, texelCount - 1);
+                        Mathf.FloorToInt(detailCount * LumaScalePercentile), 0, detailCount - 1);
                     return Mathf.Max(magnitudes[percentileIndex], LumaScaleFloor);
                 }
                 finally

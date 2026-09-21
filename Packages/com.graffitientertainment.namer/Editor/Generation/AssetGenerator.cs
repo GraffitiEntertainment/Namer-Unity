@@ -676,6 +676,10 @@ namespace GraffitiEntertainment.Namer.Editor
             material.SetColor("_BaseColor", inspection.BaseColor);
             material.SetColor("_EmissionColor", inspection.EmissionColor);
             material.SetFloat("_OcclusionStrength", inspection.OcclusionStrength);
+            // ao-unmultiply-roundtrip (contract C): persist the pack-time un-multiply
+            // strength so the runtime decode re-multiplies by exactly what the pack
+            // divided with (legacy materials keep the shader's neutral 0 default).
+            material.SetFloat("_AoUnmultiplyStrength", inspection.AoUnmultiplyStrength);
             material.SetFloat("_Cutoff", inspection.Cutoff);
 
             if (inspection.EmissionMap != null || IsNonBlack(inspection.EmissionColor))

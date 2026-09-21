@@ -66,6 +66,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
         private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
         private static readonly int OcclusionStrengthId = Shader.PropertyToID("_OcclusionStrength");
+        private static readonly int AoUnmultiplyStrengthId = Shader.PropertyToID("_AoUnmultiplyStrength");
         private static readonly int DbgEnableResidualId = Shader.PropertyToID("_DbgEnableResidual");
         private static readonly int DbgEnableRoughnessId = Shader.PropertyToID("_DbgEnableRoughness");
         private static readonly int DbgEnableAoId = Shader.PropertyToID("_DbgEnableAO");
@@ -447,6 +448,10 @@ namespace GraffitiEntertainment.Namer.Editor
                 _namerMaterial.SetColor(BaseColorId, inspection.BaseColor);
                 _namerMaterial.SetColor(EmissionColorId, inspection.EmissionColor);
                 _namerMaterial.SetFloat(OcclusionStrengthId, inspection.OcclusionStrength);
+                // ao-unmultiply-roundtrip (contract C): the After pane must re-multiply
+                // by the same pack-time strength _pipeline.Process just divided with
+                // (set at the top of RecomputePreview), matching the generated .mat.
+                _namerMaterial.SetFloat(AoUnmultiplyStrengthId, inspection.AoUnmultiplyStrength);
 
                 if (inspection.Emissive > 0f)
                 {

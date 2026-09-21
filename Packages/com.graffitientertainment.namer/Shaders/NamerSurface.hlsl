@@ -24,6 +24,7 @@ CBUFFER_START(UnityPerMaterial)
     half4  _BaseColor;
     half4  _EmissionColor;
     half   _OcclusionStrength;
+    half   _AoUnmultiplyStrength;
     half   _Cutoff;
     half   _Surface;
     half   _DbgEnableResidual;
@@ -105,6 +106,8 @@ void InitializeNamerSurfaceData(float2 uv, float4 vertexColor, out SurfaceData s
     // the flat normal (0,0,1) — a shader-only flat-normal bisect.
     normalTS = lerp(half3(0.0h, 0.0h, 1.0h), normalTS, _DbgEnableNormal);
     // DIP-02 AO gate: 1.0 keeps the decoded AO, 0 neutralizes to 1.0 (white/no AO).
+    // The gate is applied FIRST so both AO consumers below ride it: the ambient
+    // occlusion term (surfaceData.occlusion) and the albedo re-multiply.
     ao = lerp(1.0, ao, _DbgEnableAO);
 
     // D-06: additive roughness offset, neutral-when-unset ("black" {} default => .r == 0 =>
@@ -124,7 +127,16 @@ void InitializeNamerSurfaceData(float2 uv, float4 vertexColor, out SurfaceData s
     // white so albedo shows the sampled base/residual term alone.
     vertexColor.rgb = lerp(half3(1.0, 1.0, 1.0), vertexColor.rgb, _DbgEnableVertexColor);
 
-    surfaceData.albedo = baseResidual.rgb * _BaseColor.rgb * vertexColor.rgb;
+    // AO round-trip (ao-unmultiply-roundtrip, contract C): the pack stage divided the
+    // saved albedo by lerp(1, max(ao, floor), _AoUnmultiplyStrength) (NAMERPack.compute
+    // CSNormalize), so the decode re-multiplies the SAME GATED occlusion back into the
+    // albedo — inverting the divide under any lighting. Gate off (ao == 1) neutralizes
+    // this factor (lerp(1, 1, s) == 1), leaving the packed base unchanged. The property
+    // defaults to 0, so legacy materials generated before the strength was persisted
+    // decode byte-identically to the pre-fix shader.
+    half aoUnmultiply = lerp(1.0, ao, _AoUnmultiplyStrength);
+
+    surfaceData.albedo = baseResidual.rgb * _BaseColor.rgb * vertexColor.rgb * aoUnmultiply;
     surfaceData.albedo = AlphaModulate(surfaceData.albedo, alpha);
 
     surfaceData.metallic   = (metallic ? 1.0 : 0.0) * _DbgEnableMetallic;

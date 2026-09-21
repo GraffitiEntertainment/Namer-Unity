@@ -16,6 +16,14 @@ Shader "GraffitiEntertainment.Namer/NAMER"
         [HDR] _EmissionColor("Emission", Color) = (0,0,0)
         _OcclusionStrength("Occlusion Strength", Range(0.0, 1.0)) = 1.0
 
+        // Pack-time AO un-multiply strength persisted by the processor
+        // (ao-unmultiply-roundtrip, contract C): the decode re-multiplies the GATED
+        // occlusion into the albedo by exactly this strength, inverting
+        // NAMERPack.compute's pack-time divide under any lighting. Default 0.0 — the
+        // neutral of lerp(1, ao, s) — keeps legacy materials (generated before the
+        // value was persisted) decoding byte-identically to the pre-fix shader.
+        _AoUnmultiplyStrength("AO Un-multiply Strength", Range(0.0, 1.0)) = 0.0
+
         _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
 
         // DIP-02 debug dip-switch gates (hidden — written by the processor window via

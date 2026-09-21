@@ -268,6 +268,109 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         [Test]
+        public void Split_LightmapSeamDuplicateVertices_StayDistinct()
+        {
+            Mesh mesh = CreateWeldedQuad();
+            try
+            {
+                AppendSeamDuplicate(mesh);
+                Vector2[] staticUvs =
+                {
+                    new Vector2(0.1f, 0.2f), new Vector2(0.3f, 0.2f),
+                    new Vector2(0.3f, 0.4f), new Vector2(0.1f, 0.4f),
+                    new Vector2(0.9f, 0.9f),
+                };
+                mesh.uv2 = staticUvs;
+
+                NamerSplitResult result = MeshVertexSplitter.Split(mesh);
+
+                // The seam duplicate differs from vertex 0 only in uv2: a weld key without
+                // the lightmap channels merges them and silently drops one copy's lightmap
+                // data (Codex PR #1 review).
+                Assert.AreEqual(5, result.VertexCount,
+                    "seam duplicates differing only in lightmap UVs must stay distinct");
+                Assert.AreEqual(5, result.Uv2.Length, "one static lightmap UV per output vertex");
+
+                int seamUvCount = 0;
+                int originalUvCount = 0;
+                for (int i = 0; i < result.VertexCount; i++)
+                {
+                    if (result.Uv2[i] == new Vector2(0.9f, 0.9f))
+                    {
+                        seamUvCount++;
+                        Assert.AreEqual(new Vector3(0f, 0f, 0f), result.Positions[i],
+                            "the seam vertex must sit at the duplicated position");
+                    }
+                    else if (result.Uv2[i] == new Vector2(0.1f, 0.2f))
+                    {
+                        originalUvCount++;
+                    }
+                }
+
+                Assert.AreEqual(1, seamUvCount, "exactly one output vertex carries the seam lightmap UV");
+                Assert.AreEqual(1, originalUvCount, "exactly one output vertex carries the original lightmap UV");
+            }
+            finally
+            {
+                Destroy(mesh);
+            }
+        }
+
+        [Test]
+        public void Split_InfluenceSeamDuplicateVertices_StayDistinct()
+        {
+            Mesh mesh = CreateWeldedQuad();
+            try
+            {
+                AppendSeamDuplicate(mesh);
+
+                // Every vertex one influence: vertices 0-3 pull bone 0, the seam duplicate
+                // pulls bone 1 — identical position/normal/tangent/uv0, different skinning.
+                byte[] bonesPerVertex = { 1, 1, 1, 1, 1 };
+                var weights = new BoneWeight1[5];
+                for (int v = 0; v < 4; v++)
+                {
+                    weights[v] = new BoneWeight1 { boneIndex = 0, weight = 1f };
+                }
+                weights[4] = new BoneWeight1 { boneIndex = 1, weight = 1f };
+                mesh.bindposes = new[] { Matrix4x4.identity, Matrix4x4.identity };
+                using (NativeArray<byte> nativeBonesPerVertex = new NativeArray<byte>(bonesPerVertex, Allocator.Temp))
+                using (NativeArray<BoneWeight1> nativeWeights = new NativeArray<BoneWeight1>(weights, Allocator.Temp))
+                {
+                    mesh.SetBoneWeights(nativeBonesPerVertex, nativeWeights);
+                }
+
+                NamerSplitResult result = MeshVertexSplitter.Split(mesh);
+
+                // A weld key without the influence run merges the duplicate onto vertex 0 and
+                // deforms every triangle that referenced it with vertex 0's weights
+                // (Codex PR #1 review).
+                Assert.AreEqual(5, result.VertexCount,
+                    "seam duplicates differing only in bone influences must stay distinct");
+
+                int boneOneCount = 0;
+                int offset = 0;
+                for (int i = 0; i < result.VertexCount; i++)
+                {
+                    if (result.BoneWeights[offset].boneIndex == 1)
+                    {
+                        boneOneCount++;
+                        Assert.AreEqual(new Vector3(0f, 0f, 0f), result.Positions[i],
+                            "the bone-1 vertex must sit at the duplicated position");
+                    }
+                    offset += result.BonesPerVertex[i];
+                }
+
+                Assert.AreEqual(1, boneOneCount, "exactly one output vertex pulls bone 1");
+                Assert.AreEqual(5, offset, "all five single-influence runs must survive");
+            }
+            finally
+            {
+                Destroy(mesh);
+            }
+        }
+
+        [Test]
         public void Fit_ConstantColor_RecoversColorWithinTolerance()
         {
             Mesh quad = CreateWeldedQuad();
@@ -475,6 +578,40 @@ namespace GraffitiEntertainment.Namer.Tests
             {
                 Destroy(quad);
             }
+        }
+
+        /// <summary>
+        /// Appends a lightmap-unwrap-style seam duplicate: vertex 4 copies vertex 0's
+        /// position/normal/tangent/uv0 exactly, so only the preserved streams (lightmap UVs,
+        /// bone influences) can distinguish it from the original. A triangle references it so
+        /// the splitter processes the vertex.
+        /// </summary>
+        private static void AppendSeamDuplicate(Mesh mesh)
+        {
+            Vector3[] positions = mesh.vertices;
+            Vector3[] normals = mesh.normals;
+            Vector4[] tangents = mesh.tangents;
+            Vector2[] uvs = mesh.uv;
+            System.Array.Resize(ref positions, 5);
+            System.Array.Resize(ref normals, 5);
+            System.Array.Resize(ref tangents, 5);
+            System.Array.Resize(ref uvs, 5);
+            positions[4] = positions[0];
+            normals[4] = normals[0];
+            tangents[4] = tangents[0];
+            uvs[4] = uvs[0];
+
+            int[] triangles = mesh.GetTriangles(0);
+            System.Array.Resize(ref triangles, triangles.Length + 3);
+            triangles[triangles.Length - 3] = 4;
+            triangles[triangles.Length - 2] = 2;
+            triangles[triangles.Length - 1] = 1;
+
+            mesh.vertices = positions;
+            mesh.normals = normals;
+            mesh.tangents = tangents;
+            mesh.uv = uvs;
+            mesh.triangles = triangles;
         }
 
         private static Mesh CreateWeldedQuad()

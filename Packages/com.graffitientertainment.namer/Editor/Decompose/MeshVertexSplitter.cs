@@ -142,8 +142,11 @@ namespace GraffitiEntertainment.Namer.Editor
 
             // Weld by a quantized attribute key: one output vertex per unique tuple. The
             // dictionary maps a source corner's attribute tuple to its output index; because
-            // every source vertex carries a single (position, normal, tangent, uv), two corners
-            // that reference the same source vertex always produce the same key.
+            // every source vertex carries a single attribute tuple, two corners that reference
+            // the same source vertex always produce the same key. The key spans EVERY preserved
+            // stream (lightmap UVs, full influence run): lightmap-unwrap seams duplicate
+            // vertices that differ only in uv2/skinning, and merging those would drop the
+            // second copy's data (Codex PR #1 review).
             var weldMap = new Dictionary<WeldKey, int>();
             var outPositions = new List<Vector3>();
             var outNormals = new List<Vector3>();
@@ -162,7 +165,12 @@ namespace GraffitiEntertainment.Namer.Editor
                 for (int i = 0; i < srcTriangles.Length; i++)
                 {
                     int srcVertex = srcTriangles[i];
-                    var key = new WeldKey(positions[srcVertex], normals[srcVertex], tangents[srcVertex], uvs[srcVertex]);
+                    var key = new WeldKey(
+                        positions[srcVertex], normals[srcVertex], tangents[srcVertex], uvs[srcVertex],
+                        hasLightmapUvs ? lightmapUvs[srcVertex] : Vector2.zero,
+                        hasDynamicLightmapUvs ? dynamicLightmapUvs[srcVertex] : Vector2.zero,
+                        srcBoneWeights, influenceOffsets[srcVertex],
+                        influenceOffsets[srcVertex + 1] - influenceOffsets[srcVertex]);
                     if (!weldMap.TryGetValue(key, out int outVertex))
                     {
                         outVertex = outPositions.Count;
@@ -240,10 +248,12 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Stable integer weld key over <c>(position, normal, tangent, uv)</c>. Quantization
-        /// makes near-equal floats compare equal without any floating-point tolerance in
-        /// <see cref="Equals"/>, mirroring the deterministic-float philosophy of
-        /// <see cref="NamerAOBaker"/>.
+        /// Stable integer weld key over <c>(position, normal, tangent, uv, lightmap uvs,
+        /// influence run)</c>. Quantization makes near-equal floats compare equal without any
+        /// floating-point tolerance in <see cref="Equals"/>, mirroring the deterministic-float
+        /// philosophy of <see cref="NamerAOBaker"/>. Absent streams contribute constant
+        /// fields so meshes without them weld exactly as before; the influence run is compared
+        /// exactly (bitwise weight equality — importer duplicates carry identical bits).
         /// </summary>
         private readonly struct WeldKey : IEquatable<WeldKey>
         {
@@ -259,8 +269,24 @@ namespace GraffitiEntertainment.Namer.Editor
             private readonly int _tw;
             private readonly int _ux;
             private readonly int _uy;
+            private readonly int _lmx;
+            private readonly int _lmy;
+            private readonly int _dux;
+            private readonly int _duy;
+            private readonly BoneWeight1[] _weights;
+            private readonly int _runStart;
+            private readonly int _runCount;
 
-            public WeldKey(Vector3 position, Vector3 normal, Vector4 tangent, Vector2 uv)
+            public WeldKey(
+                Vector3 position,
+                Vector3 normal,
+                Vector4 tangent,
+                Vector2 uv,
+                Vector2 lightmapUv,
+                Vector2 dynamicLightmapUv,
+                BoneWeight1[] weights,
+                int runStart,
+                int runCount)
             {
                 _px = Quantize(position.x, kPositionQuantize);
                 _py = Quantize(position.y, kPositionQuantize);
@@ -274,22 +300,48 @@ namespace GraffitiEntertainment.Namer.Editor
                 _tw = Quantize(tangent.w, kTangentQuantize);
                 _ux = Quantize(uv.x, kUvQuantize);
                 _uy = Quantize(uv.y, kUvQuantize);
+                _lmx = Quantize(lightmapUv.x, kUvQuantize);
+                _lmy = Quantize(lightmapUv.y, kUvQuantize);
+                _dux = Quantize(dynamicLightmapUv.x, kUvQuantize);
+                _duy = Quantize(dynamicLightmapUv.y, kUvQuantize);
+                _weights = weights;
+                _runStart = runStart;
+                _runCount = runCount;
             }
 
             public bool Equals(WeldKey other)
             {
-                return _px == other._px
-                    && _py == other._py
-                    && _pz == other._pz
-                    && _nx == other._nx
-                    && _ny == other._ny
-                    && _nz == other._nz
-                    && _tx == other._tx
-                    && _ty == other._ty
-                    && _tz == other._tz
-                    && _tw == other._tw
-                    && _ux == other._ux
-                    && _uy == other._uy;
+                if (_px != other._px
+                    || _py != other._py
+                    || _pz != other._pz
+                    || _nx != other._nx
+                    || _ny != other._ny
+                    || _nz != other._nz
+                    || _tx != other._tx
+                    || _ty != other._ty
+                    || _tz != other._tz
+                    || _tw != other._tw
+                    || _ux != other._ux
+                    || _uy != other._uy
+                    || _lmx != other._lmx
+                    || _lmy != other._lmy
+                    || _dux != other._dux
+                    || _duy != other._duy
+                    || _runCount != other._runCount)
+                {
+                    return false;
+                }
+
+                for (int b = 0; b < _runCount; b++)
+                {
+                    if (_weights[_runStart + b].boneIndex != other._weights[other._runStart + b].boneIndex
+                        || _weights[_runStart + b].weight != other._weights[other._runStart + b].weight)
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
             }
 
             public override bool Equals(object obj)
@@ -313,6 +365,18 @@ namespace GraffitiEntertainment.Namer.Editor
                     hash = (hash * 397) ^ _tw;
                     hash = (hash * 397) ^ _ux;
                     hash = (hash * 397) ^ _uy;
+                    hash = (hash * 397) ^ _lmx;
+                    hash = (hash * 397) ^ _lmy;
+                    hash = (hash * 397) ^ _dux;
+                    hash = (hash * 397) ^ _duy;
+                    for (int b = 0; b < _runCount; b++)
+                    {
+                        // Fold the bone index with the weight's hash so distinct runs
+                        // (different bones or weights) land in different buckets.
+                        hash = (hash * 397) ^ (_weights[_runStart + b].boneIndex * 104729);
+                        hash = (hash * 397) ^ _weights[_runStart + b].weight.GetHashCode();
+                    }
+
                     return hash;
                 }
             }

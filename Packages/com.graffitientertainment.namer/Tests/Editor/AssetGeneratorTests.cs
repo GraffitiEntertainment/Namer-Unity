@@ -27,6 +27,7 @@ namespace GraffitiEntertainment.Namer.Tests
         private const string PrefixKey = "NamerProcessor.Prefix";
         private const string SuffixKey = "NamerProcessor.Suffix";
         private const string OverwriteKey = "NamerProcessor.OverwriteGenerated";
+        private const string RoughnessExtractStrengthKey = "NamerProcessor.RoughnessExtractStrength";
 
         private static bool ComputeAvailable =>
             SystemInfo.supportsComputeShaders && SystemInfo.supportsAsyncGPUReadback;
@@ -332,6 +333,13 @@ namespace GraffitiEntertainment.Namer.Tests
                     Destination = TempFolder + "/Out",
                     Prefix = "",
                     Suffix = "",
+                    // This test asserts the SCALAR packed-alpha round-trip (0x80 | 31 = 159).
+                    // Roughness extraction runs whenever RoughnessExtractStrength > 0 —
+                    // regardless of decomposition — and live user-session prefs (e.g. Sobel
+                    // estimator at strength 0.25) would pack extracted roughness into the
+                    // alpha bits instead. 0 = off pins the scalar premise; the prefs
+                    // snapshot below restores the user's value afterwards.
+                    RoughnessExtractStrength = 0f,
                 };
 
                 NamerProcessResult result = NamerProcessor.Process(source, settings);
@@ -392,8 +400,15 @@ namespace GraffitiEntertainment.Namer.Tests
                 // save path: a uniform-garbage PNG (an encode step whose result never reaches
                 // CPU data) fails the byte match, and a raw linear pass-through fails because
                 // 0.502 encodes to ~184, not the authored 128 (D-06).
+                // D-07 isolation (same as NamerOneTextureTests / NamerRoughnessFitTests): a
+                // null occlusion map sends the pipeline down synthetic-AO extraction, which
+                // honors the user's live AoContrast/AoUnmultiplyStrength EditorPrefs and
+                // un-multiplies even a perfectly flat base — breaking the byte-exact D-06
+                // oracle on any machine with tuned AO settings. An authored white occlusion
+                // keeps AO byte-identical white, so the encode is measured in isolation.
+                Texture2D occlusion = CreateImportedWhiteOcclusion(TempFolder + "/TestSourceMat_Occlusion.png");
                 Material source = CreateSourceMaterial(
-                    TempFolder, "TestSourceMat", new Color(0.5f, 0.5f, 0.5f, 1f), 0f, 0.5f);
+                    TempFolder, "TestSourceMat", new Color(0.5f, 0.5f, 0.5f, 1f), 0f, 0.5f, occlusion);
                 string baseMapPath = TempFolder + "/TestSourceMat_BaseMap.png";
                 int sourceByte = ReadPngPixel32(baseMapPath).r;
 
@@ -434,7 +449,8 @@ namespace GraffitiEntertainment.Namer.Tests
         // --------------------------------------------------------------------
 
         private static Material CreateSourceMaterial(
-            string folder, string name, Color baseColor, float metallic, float smoothness)
+            string folder, string name, Color baseColor, float metallic, float smoothness,
+            Texture2D occlusionMap = null)
         {
             Shader shader = Shader.Find("Universal Render Pipeline/Lit");
             Assert.IsNotNull(shader, "URP Lit shader not found");
@@ -443,6 +459,10 @@ namespace GraffitiEntertainment.Namer.Tests
 
             Material material = new Material(shader) { name = name };
             material.SetTexture("_BaseMap", baseMap);
+            if (occlusionMap != null)
+            {
+                material.SetTexture("_OcclusionMap", occlusionMap);
+            }
             material.SetFloat("_Metallic", metallic);
             material.SetFloat("_Smoothness", smoothness);
             material.SetFloat("_SmoothnessTextureChannel", 0f);
@@ -460,6 +480,22 @@ namespace GraffitiEntertainment.Namer.Tests
             AssetDatabase.ImportAsset(path);
             TextureImporter importer = (TextureImporter)AssetImporter.GetAtPath(path);
             importer.sRGBTexture = srgb;
+            importer.SaveAndReimport();
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+
+        // 1x1 white occlusion, imported linear: authored white keeps the packed AO white
+        // (byte-identical authored path, D-07) so user AO prefs cannot un-multiply the base.
+        private static Texture2D CreateImportedWhiteOcclusion(string path)
+        {
+            Texture2D source = new Texture2D(1, 1, TextureFormat.RGBA32, false, true);
+            source.SetPixel(0, 0, Color.white);
+            source.Apply(false, false);
+            File.WriteAllBytes(path, source.EncodeToPNG());
+            Destroy(source);
+            AssetDatabase.ImportAsset(path);
+            TextureImporter importer = (TextureImporter)AssetImporter.GetAtPath(path);
+            importer.sRGBTexture = false;
             importer.SaveAndReimport();
             return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
         }
@@ -516,10 +552,12 @@ namespace GraffitiEntertainment.Namer.Tests
             public string Prefix;
             public string Suffix;
             public bool OverwriteGenerated;
+            public float RoughnessExtractStrength;
             public bool HadDestination;
             public bool HadPrefix;
             public bool HadSuffix;
             public bool HadOverwriteGenerated;
+            public bool HadRoughnessExtractStrength;
         }
 
         private static PrefsSnapshot CapturePrefs()
@@ -530,10 +568,12 @@ namespace GraffitiEntertainment.Namer.Tests
                 Prefix = EditorPrefs.GetString(PrefixKey, string.Empty),
                 Suffix = EditorPrefs.GetString(SuffixKey, string.Empty),
                 OverwriteGenerated = EditorPrefs.GetBool(OverwriteKey, false),
+                RoughnessExtractStrength = EditorPrefs.GetFloat(RoughnessExtractStrengthKey, 1f),
                 HadDestination = EditorPrefs.HasKey(DestinationKey),
                 HadPrefix = EditorPrefs.HasKey(PrefixKey),
                 HadSuffix = EditorPrefs.HasKey(SuffixKey),
                 HadOverwriteGenerated = EditorPrefs.HasKey(OverwriteKey),
+                HadRoughnessExtractStrength = EditorPrefs.HasKey(RoughnessExtractStrengthKey),
             };
         }
 
@@ -573,6 +613,15 @@ namespace GraffitiEntertainment.Namer.Tests
             else
             {
                 EditorPrefs.DeleteKey(OverwriteKey);
+            }
+
+            if (snapshot.HadRoughnessExtractStrength)
+            {
+                EditorPrefs.SetFloat(RoughnessExtractStrengthKey, snapshot.RoughnessExtractStrength);
+            }
+            else
+            {
+                EditorPrefs.DeleteKey(RoughnessExtractStrengthKey);
             }
         }
     }

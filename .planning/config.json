@@ -7,7 +7,7 @@
   "firecrawl": false,
   "exa_search": false,
   "git": {
-    "branching_strategy": "none",
+    "branching_strategy": "phase",
     "phase_branch_template": "gsd/phase-{phase}-{slug}",
     "milestone_branch_template": "gsd/{milestone}-{slug}",
     "quick_branch_template": null
@@ -33,7 +33,8 @@
     "tdd_mode": false,
     "code_review_command": "claude -p --model glm-5.2",
     "ui_review": true,
-    "_auto_chain_active": false
+    "_auto_chain_active": false,
+    "use_worktrees": false
   },
   "ship": {
     "pr_body_sections": [

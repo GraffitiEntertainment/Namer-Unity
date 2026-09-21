@@ -37,7 +37,8 @@ namespace GraffitiEntertainment.Namer.Editor
             NamerComputeResult result,
             NamerMaterialInspection inspection,
             NamerProcessorSettings settings,
-            string destinationFolder)
+            string destinationFolder,
+            NamerDecompData decomp = null)
         {
             if (result == null)
             {
@@ -61,17 +62,36 @@ namespace GraffitiEntertainment.Namer.Editor
             string surfacePath = ComposePath(inspection, settings, destinationFolder, "_Surface.png");
             string materialPath = ComposePath(inspection, settings, destinationFolder, ".mat");
 
+            // D-06 full set: decomposition adds a residual EXR + seam-split mesh asset.
+            string residualPath = null;
+            string meshPath = null;
+            if (decomp != null)
+            {
+                residualPath = ComposePath(inspection, settings, destinationFolder, "_Residual.exr");
+                meshPath = ComposePath(inspection, settings, destinationFolder, ".asset");
+            }
+
             // T-03-01 defense in depth: re-validate the fully composed paths, not just
             // the destination folder, so no future change can escape the configured folder.
             ValidateComposedPath(basePath, destinationFolder);
             ValidateComposedPath(surfacePath, destinationFolder);
             ValidateComposedPath(materialPath, destinationFolder);
+            if (decomp != null)
+            {
+                ValidateComposedPath(residualPath, destinationFolder);
+                ValidateComposedPath(meshPath, destinationFolder);
+            }
 
             // T-03-02 / D-04: pre-flight every target before the first write so a refusal
             // on the base or material path cannot leave a partially-written asset set.
             EnsureWritableTarget(surfacePath, settings.OverwriteGenerated);
             EnsureWritableTarget(basePath, settings.OverwriteGenerated);
             EnsureWritableTarget(materialPath, settings.OverwriteGenerated);
+            if (decomp != null)
+            {
+                EnsureWritableTarget(residualPath, settings.OverwriteGenerated);
+                EnsureWritableTarget(meshPath, settings.OverwriteGenerated);
+            }
 
             int width = result.Width;
             int height = result.Height;
@@ -134,16 +154,72 @@ namespace GraffitiEntertainment.Namer.Editor
             baseTex.LoadRawTextureData(baseData);
             baseTex.Apply(false, false);
 
+            Texture2D residualTex = null;
+            string residualWritePath = null;
+
+            // WR-04 / T-03-02: read the residual back BEFORE the first disk write so a GPU
+            // readback failure throws while "no files were written" is still literally true
+            // and no partial asset set (surface + base + mesh without the residual) is left
+            // behind. The surface/base readbacks above already ran, so after this hoist every
+            // fallible readback completes before anything touches disk.
+            bool writeResidual = decomp != null
+                && decomp.Stats != null
+                && decomp.Stats.ResidualRequired
+                && decomp.Residual != null;
+
             try
             {
+                if (writeResidual)
+                {
+                    residualTex = ReadBackResidual(decomp.Residual);
+                }
+
                 WriteSurfaceTexture(surfaceTex, surfacePath, settings.OverwriteGenerated);
                 WriteBaseTexture(baseTex, basePath, settings.OverwriteGenerated);
-                WriteMaterial(inspection, surfacePath, basePath, materialPath, settings.OverwriteGenerated);
+
+                if (decomp != null)
+                {
+                    // D-06: the split mesh is ALWAYS written (even when the residual is
+                    // auto-dropped) so the output mesh carries the fitted vertex colors.
+                    WriteMeshAsset(
+                        decomp.Split,
+                        decomp.Colors,
+                        meshPath,
+                        settings.OverwriteGenerated);
+
+                    if (writeResidual)
+                    {
+                        WriteResidualExr(residualTex, residualPath, settings.OverwriteGenerated);
+                        residualWritePath = residualPath;
+                    }
+                }
+                else
+                {
+                    // D-06 stale-mesh fix: a decomposition-off reprocess re-binds the base
+                    // PNG at _BaseResidualMap, but the previously generated split mesh keeps
+                    // its fitted vertex colors (the mesh write is gated on decomp != null),
+                    // so albedo = base × stale vertex colors double applies. Clear the
+                    // existing mesh's colors to white IN PLACE so the scene reference stays
+                    // intact and decomposition-off renders base-only. No-op when no mesh was
+                    // generated yet.
+                    ClearStaleMeshVertexColors(
+                        ComposePath(inspection, settings, destinationFolder, ".asset"),
+                        settings.OverwriteGenerated);
+                }
+
+                // D-07: bind the residual EXR when decomposed, the base PNG otherwise;
+                // null leaves _BaseResidualMap at its white {} default (D-13 no-texture).
+                string baseResidualPath = decomp != null ? residualWritePath : basePath;
+                WriteMaterial(inspection, surfacePath, baseResidualPath, materialPath, settings.OverwriteGenerated);
             }
             finally
             {
                 UnityEngine.Object.DestroyImmediate(surfaceTex);
                 UnityEngine.Object.DestroyImmediate(baseTex);
+                if (residualTex != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(residualTex);
+                }
             }
 
             return new NamerGeneratedAsset
@@ -151,6 +227,8 @@ namespace GraffitiEntertainment.Namer.Editor
                 MaterialPath = materialPath,
                 BaseTexturePath = basePath,
                 SurfaceTexturePath = surfacePath,
+                MeshPath = decomp != null ? meshPath : null,
+                ResidualTexturePath = decomp != null ? residualWritePath : null,
             };
         }
 
@@ -163,7 +241,8 @@ namespace GraffitiEntertainment.Namer.Editor
         public static void PreflightTargets(
             NamerSourceModel model,
             NamerProcessorSettings settings,
-            string destinationFolder)
+            string destinationFolder,
+            bool decomposed = false)
         {
             ValidatePrefixAndSuffix(settings);
 
@@ -178,6 +257,19 @@ namespace GraffitiEntertainment.Namer.Editor
                 EnsureWritableTarget(
                     ComposePath(inspection, settings, destinationFolder, ".mat"),
                     settings.OverwriteGenerated);
+
+                if (decomposed)
+                {
+                    // T-03-02: the decomposition targets are pre-flighted too, so an
+                    // overwrite refusal on the residual EXR or mesh asset surfaces BEFORE
+                    // any GPU work (never a partially-written decomposition set).
+                    EnsureWritableTarget(
+                        ComposePath(inspection, settings, destinationFolder, "_Residual.exr"),
+                        settings.OverwriteGenerated);
+                    EnsureWritableTarget(
+                        ComposePath(inspection, settings, destinationFolder, ".asset"),
+                        settings.OverwriteGenerated);
+                }
             }
         }
 
@@ -351,6 +443,199 @@ namespace GraffitiEntertainment.Namer.Editor
             Stamp(AssetDatabase.LoadAssetAtPath<Texture2D>(path));
         }
 
+        private static void WriteResidualExr(Texture2D texture, string path, bool overwriteGenerated)
+        {
+            EnsureWritableTarget(path, overwriteGenerated);
+
+            byte[] exr = ImageConversion.EncodeToEXR(texture);
+            File.WriteAllBytes(path, exr);
+            AssetDatabase.ImportAsset(path);
+
+            TextureImporter importer = AssetImporter.GetAtPath(path) as TextureImporter;
+            if (importer == null)
+            {
+                throw new InvalidOperationException("No TextureImporter found for generated residual texture '" + path + "'.");
+            }
+
+            // D-02 / CR-02: the residual is a plain float map sampled with hardware
+            // bilinear at runtime (NamerDecompOutput contract), while FilterMode.Point is
+            // only correct for the bit-packed surface texture. Bilinear keeps the saved
+            // reduced-resolution asset consistent with the bilinear-resampled MaxError the
+            // adaptive search reports. Still linear, uncompressed, no mips, Repeat (D-02).
+            importer.textureType = TextureImporterType.Default;
+            importer.sRGBTexture = false;
+            importer.textureCompression = TextureImporterCompression.Uncompressed;
+            importer.filterMode = FilterMode.Bilinear;
+            importer.mipmapEnabled = false;
+            importer.wrapMode = TextureWrapMode.Repeat;
+            importer.SaveAndReimport();
+
+            Stamp(AssetDatabase.LoadAssetAtPath<Texture2D>(path));
+        }
+
+        private static void WriteMeshAsset(NamerSplitResult split, Color32[] colors, string path, bool overwriteGenerated)
+        {
+            EnsureWritableTarget(path, overwriteGenerated);
+            Mesh existing = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+            if (existing != null)
+            {
+                // Idempotent reprocess (04.1 UAT regression): CreateAsset over an existing
+                // path replaces — i.e. DESTROYS — the asset instance, so a live renderer
+                // wearing the previous generated split mesh reads sharedMesh == null and
+                // the model vanishes from the scene. Overwrite the EXISTING asset's data
+                // in place instead so scene references keep pointing at valid geometry
+                // (the mesh-side analogue of the material D-04 idempotency).
+                existing.Clear(false);
+                ApplySplitStreams(existing, split, colors);
+                EditorUtility.SetDirty(existing);
+                // WR-04 (04.1 review): persist ONLY this mesh. SaveAssets() flushes every
+                // dirty asset in the project — unrelated in-progress user edits included —
+                // contradicting WriteMaterial's discipline above (a NAMER run must never
+                // force-commit the user's unsaved work).
+                AssetDatabase.SaveAssetIfDirty(existing);
+            }
+            else
+            {
+                Mesh outMesh = new Mesh { name = Path.GetFileNameWithoutExtension(path) };
+                ApplySplitStreams(outMesh, split, colors);
+                AssetDatabase.CreateAsset(outMesh, path);
+            }
+
+            Stamp(AssetDatabase.LoadAssetAtPath<Mesh>(path));
+        }
+
+        /// <summary>
+        /// D-06 stale-mesh fix: clears the vertex colors of an existing generated split
+        /// mesh to white IN PLACE (same asset instance, same path) so a decomposition-off
+        /// reprocess — which re-binds the base PNG while the mesh write stays skipped —
+        /// renders base-only instead of base × previously fitted vertex colors. The in-place
+        /// overwrite keeps scene references pointing at valid geometry (the same discipline
+        /// as <see cref="WriteMeshAsset"/>'s existing overwrite path). No-op when no mesh
+        /// asset exists at the composed path yet.
+        /// </summary>
+        private static void ClearStaleMeshVertexColors(string path, bool overwriteGenerated)
+        {
+            Mesh existing = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+            if (existing == null)
+            {
+                return;
+            }
+
+            EnsureWritableTarget(path, overwriteGenerated);
+
+            int vertexCount = existing.vertexCount;
+            if (vertexCount <= 0)
+            {
+                return;
+            }
+
+            Color32[] white = new Color32[vertexCount];
+            for (int i = 0; i < vertexCount; i++)
+            {
+                white[i] = new Color32(255, 255, 255, 255);
+            }
+
+            existing.colors32 = white;
+            EditorUtility.SetDirty(existing);
+            AssetDatabase.SaveAssetIfDirty(existing);
+        }
+
+        /// <summary>
+        /// Reads the pool-leased residual render target back as RGBAHalf and returns a
+        /// readable RGBAHalf <see cref="Texture2D"/> so <c>ImageConversion.EncodeToEXR</c>
+        /// emits a 16-bit-half EXR (D-02 — the residual is never PNG).
+        /// </summary>
+        private static Texture2D ReadBackResidual(RenderTexture residual)
+        {
+            int w = residual.width;
+            int h = residual.height;
+
+            AsyncGPUReadbackRequest request =
+                NamerComputePipeline.RequestReadback(residual, 0, TextureFormat.RGBAHalf);
+            request.forcePlayerLoopUpdate = true;
+            request.WaitForCompletion();
+
+            if (request.hasError)
+            {
+                throw new InvalidOperationException(
+                    "GPU readback failed while reading the decomposition residual; no files were written.");
+            }
+
+            NativeArray<byte> data = request.GetData<byte>();
+            try
+            {
+                Texture2D texture = new Texture2D(w, h, TextureFormat.RGBAHalf, false, true);
+                texture.LoadRawTextureData(data);
+                texture.Apply(false, false);
+                return texture;
+            }
+            finally
+            {
+                data.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Assigns every split-mesh stream (positions/normals/tangents/UVs, fitted vertex
+        /// colors, bindposes-before-boneWeights, sub-mesh triangles, bounds) onto the given
+        /// mesh — used both for a fresh asset and for the in-place overwrite path of
+        /// <see cref="WriteMeshAsset"/>. The target must be empty (fresh or cleared).
+        /// </summary>
+        private static void ApplySplitStreams(Mesh target, NamerSplitResult split, Color32[] colors)
+        {
+            if (split.VertexCount > ushort.MaxValue)
+            {
+                target.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            }
+
+            target.SetVertices(split.Positions);
+            target.SetNormals(split.Normals);
+            target.SetTangents(split.Tangents);
+            target.SetUVs(0, split.Uvs);
+
+            // Lightmap channels must survive the swap or a lightmapped renderer keeps its
+            // lightmap index but samples with missing UVs (Codex PR #1 review).
+            if (split.Uv2 != null)
+            {
+                target.SetUVs(1, split.Uv2);
+            }
+
+            if (split.Uv3 != null)
+            {
+                target.SetUVs(2, split.Uv3);
+            }
+
+            target.colors32 = colors;
+
+            // bindposes must be assigned before boneWeights on a skinned mesh or a
+            // SkinnedMeshRenderer may not render the swapped sharedMesh (gap 3b).
+            if (split.Bindposes != null)
+            {
+                target.bindposes = split.Bindposes;
+            }
+
+            if (split.BoneWeights != null)
+            {
+                // Variable-count API: preserves meshes authored with more than four
+                // influences per vertex (Codex PR #1 review). SetBoneWeights takes
+                // NativeArrays only — wrap the managed arrays for the call; the mesh
+                // copies the data, so the temporaries die with the using scope.
+                using (NativeArray<byte> bonesPerVertex = new NativeArray<byte>(split.BonesPerVertex, Allocator.Temp))
+                using (NativeArray<BoneWeight1> boneWeights = new NativeArray<BoneWeight1>(split.BoneWeights, Allocator.Temp))
+                {
+                    target.SetBoneWeights(bonesPerVertex, boneWeights);
+                }
+            }
+
+            target.subMeshCount = split.SubMeshTriangles.Length;
+            for (int i = 0; i < split.SubMeshTriangles.Length; i++)
+            {
+                target.SetTriangles(split.SubMeshTriangles[i], i);
+            }
+
+            target.RecalculateBounds();
+        }
+
         // ---------------------------------------------------------------------
         // Material write (D-07 metadata contract)
         // ---------------------------------------------------------------------
@@ -358,7 +643,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private static void WriteMaterial(
             NamerMaterialInspection inspection,
             string surfacePath,
-            string basePath,
+            string baseResidualPath,
             string materialPath,
             bool overwriteGenerated)
         {
@@ -375,10 +660,26 @@ namespace GraffitiEntertainment.Namer.Editor
             material.name = Path.GetFileNameWithoutExtension(materialPath);
 
             material.SetTexture("_SurfaceMap", AssetDatabase.LoadAssetAtPath<Texture2D>(surfacePath));
-            material.SetTexture("_BaseResidualMap", AssetDatabase.LoadAssetAtPath<Texture2D>(basePath));
+            if (baseResidualPath != null)
+            {
+                material.SetTexture("_BaseResidualMap", AssetDatabase.LoadAssetAtPath<Texture2D>(baseResidualPath));
+            }
+
+            // D-06 optional roughness-offset input: bind the user-assigned texture directly
+            // (no LoadAssetAtPath — it is a user-assigned Texture2D, not a generated path).
+            // Null leaves the shader's "black" {} default (offset 0 => neutral decode).
+            if (inspection.RoughnessOffsetMap != null)
+            {
+                material.SetTexture("_RoughnessOffsetMap", inspection.RoughnessOffsetMap);
+            }
+
             material.SetColor("_BaseColor", inspection.BaseColor);
             material.SetColor("_EmissionColor", inspection.EmissionColor);
             material.SetFloat("_OcclusionStrength", inspection.OcclusionStrength);
+            // ao-unmultiply-roundtrip (contract C): persist the pack-time un-multiply
+            // strength so the runtime decode re-multiplies by exactly what the pack
+            // divided with (legacy materials keep the shader's neutral 0 default).
+            material.SetFloat("_AoUnmultiplyStrength", inspection.AoUnmultiplyStrength);
             material.SetFloat("_Cutoff", inspection.Cutoff);
 
             if (inspection.EmissionMap != null || IsNonBlack(inspection.EmissionColor))
@@ -508,11 +809,30 @@ namespace GraffitiEntertainment.Namer.Editor
 
     /// <summary>
     /// Written paths for one generated NAMER asset set (material + base + surface textures).
+    /// <see cref="MeshPath"/> and <see cref="ResidualTexturePath"/> are only populated when
+    /// decomposition is enabled; <see cref="ResidualTexturePath"/> stays empty when the
+    /// residual was auto-dropped (D-13).
     /// </summary>
     public sealed class NamerGeneratedAsset
     {
         public string MaterialPath;
         public string BaseTexturePath;
         public string SurfaceTexturePath;
+        public string MeshPath;
+        public string ResidualTexturePath;
+    }
+
+    /// <summary>
+    /// In-memory decomposition result handed from <see cref="NamerProcessor"/> to
+    /// <see cref="AssetGenerator.Generate"/>. <see cref="Residual"/> is a pool-leased
+    /// render target owned by the caller's <see cref="NamerDecompPipeline"/>; it is read
+    /// back synchronously inside Generate and must not be disposed until afterwards.
+    /// </summary>
+    public sealed class NamerDecompData
+    {
+        public NamerSplitResult Split;
+        public Color32[] Colors;
+        public RenderTexture Residual;
+        public NamerDecompErrorStats Stats;
     }
 }

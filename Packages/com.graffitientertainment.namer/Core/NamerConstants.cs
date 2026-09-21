@@ -34,5 +34,14 @@ namespace GraffitiEntertainment.Namer.Core
 
         /// <summary>Un-multiply divisor floor for extracted/baked AO (D-09); divisor-side only — the packed B stores the raw AO.</summary>
         public const float AoFloor = 0.1f;
+
+        /// <summary>Vertex-color interpolation floor for the residual quotient (D-01); prevents divide blow-up at near-zero vcInterp. Mirrored manually in HLSL (NAMERDecomp.hlsl).</summary>
+        public const float VcFloor = 1e-3f;
+
+        /// <summary>CSDespike limit (debug session residual-missing-triangles): a residual channel whose interpolated vc quantized to ZERO (vc &lt;= VcFloor, the total-loss zone between two black verts) and which sits above this factor times the SECOND-SMALLEST of its 4 clamp-to-edge neighbors is a quotient spike and is replaced by that value. The quantized-zero gate protects the legitimate low-vc band (vc &gt;= 1/255 — its quotient is meaningful; collapsing it toward identity would paint a dark line). Second-smallest, not the median of 4, because the median is blind to 1-texel spike runs (a collinear spiky neighbor pulls it to ~half the spike). 4 keeps similar-neighbor values untouched while collapsing zero-vc spikes (hundreds against a reference of a few).</summary>
+        public const float ResidualSpikeFactor = 4f;
+
+        /// <summary>CSResidual dilation radius in texels (debug session residual-missing-triangles, seam-step artifact): uncovered atlas texels within this Chebyshev radius of covered texels take the mean covered residual, so bilinear sampling at UV island borders never mixes a real residual with the identity 1.0 (measured 0.21-vs-1.0 step rendered as a 1px orange line). Standard atlas padding; single pass over the static coverage mask.</summary>
+        public const int ResidualDilateRadius = 2;
     }
 }

@@ -1,0 +1,190 @@
+// NAMERRoughness.compute
+// GPU image-space roughness dip-source kernels (Phase 04.2; Sobel chain from 04.1 plan 01).
+//
+// Three staged kernels turn the already-cleaned linear base color (_BaseColorOut from
+// CSNormalize) into a per-texel roughness texture for the Sobel dip source:
+// CSRoughnessSobel -> hierarchical max-reduce -> CSRoughnessNormalize.
+//
+// CSRoughnessSobel computes the Rec.601 luminance of the cleaned base (NAMERRoughness.hlsl,
+// deliberately NOT the Rec.709 NAMER_LUMA_* — RESEARCH Pitfall 4), then the 3x3 Sobel edge
+// magnitude sqrt(gx*gx + gy*gy), written to the GREEN channel of _RoughnessRaw (the
+// `.g = max` contract shared with CSReduce).
+//
+// CSRoughnessMaxReduce reuses the CSReduce `.g = max` hierarchical body (overflow-free 8x8
+// block max, no atomics) to reduce the Sobel magnitude to a tiny RT, so the GLOBAL max is
+// available as the ceiling of the robust p90 normalization scale (UAT round 4).
+//
+// CSRoughnessNormalize emits the final Sobel roughness directly in the roughness domain:
+// saturate(mag / max(globalMax, 1e-4)) — NO 1 - x inversion (RESEARCH Pitfall 1).
+//
+// All write targets are LINEAR. _RoughnessOut is R8G8B8A8_UNorm linear; intermediates are
+// R16G16B16A16_SFloat linear. Compute never writes sRGB.
+//
+// Phase 04.2 (plan 02) adds the removed-luminance roughness-transfer chain — CSRemovedLuma
+// (signed Rec.601 luma of source - projected) and CSRoughnessTransferRemap (the surviving
+// D-08 consume site with the dip source swapped from Sobel magnitude to p90-normalized
+// removed-luma). The Sobel chain (CSRoughnessSobel/CSRoughnessMaxReduce/CSRoughnessNormalize)
+// remains intact as the alternate dip source (plan 03 selects between them).
+//
+// Phase 04.2 (plan 03) RETIRED the 04.1 frequency-separation kernels (the separable blur
+// H/V, sharp-detail, and sharp-removal kernels) and the old fit-driven Sobel remap — the
+// strength ladder search, the fit cache, and the sharp-removal cleaned base no longer exist.
+
+#include "NAMERRoughness.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
+
+#pragma kernel CSRoughnessSobel
+#pragma kernel CSRoughnessMaxReduce
+#pragma kernel CSRoughnessNormalize
+#pragma kernel CSRemovedLuma
+#pragma kernel CSRoughnessTransferRemap
+
+// Kernel-written outputs (linear, random-access).
+RWTexture2D<float4> _RoughnessRaw; // R16G16B16A16_SFloat: g = Sobel edge magnitude
+RWTexture2D<float4> _RoughnessOut; // R8G8B8A8_UNorm linear: r = normalized roughness
+RWTexture2D<float4> _DstAvg;       // generic max-reduce write target
+RWTexture2D<float4> _RemovedLuma;  // R16G16B16A16_SFloat: signed Rec.601 luma of (source - projected), .r (04.2 transfer)
+
+// Blit-uploaded / kernel-read inputs.
+Texture2D<float4> _BaseColorOut;   // the already-linear cleaned base (CSNormalize output)
+Texture2D<float4> _SrcAvg;         // generic max-reduce read target
+Texture2D<float4> _ProjectedBase;  // Gouraud-projected base (linear float16) the removed luma is measured against (04.2)
+
+// Uniforms.
+uint2 _Size;           // unsigned: compared against SV_DispatchThreadID (uint) in the kernel guards
+uint2 _AvgSrcSize;
+uint2 _AvgDstSize;
+float _GlobalMax;      // Sobel normalization scale (robust p90 of the magnitude, UAT round 4) uploaded for the normalize pass
+float _ScalarRoughness; // authored scalar roughness that anchors the transfer dip (inspection.Roughness)
+float _Strength;       // dip-depth taste slider (0..1)
+float _LumaP90;        // p90 of |removed-luma| (readback-normalized, clamped to >= 1e-4) uploaded for the transfer remap (04.2)
+
+// Clamped luminance tap into the cleaned base (edge clamp mirrors the retired separable-blur
+// kernels' edge handling, T-04.1-01).
+float SampleLuma(uint3 id, int dx, int dy)
+{
+    int2 p = int2(clamp((int)id.x + dx, 0, (int)_Size.x - 1),
+                  clamp((int)id.y + dy, 0, (int)_Size.y - 1));
+    return NamerRoughnessLuminance(_BaseColorOut[p].rgb);
+}
+
+// 3x3 Sobel on the cleaned-base luminance; magnitude -> _RoughnessRaw.g (Blender parity).
+[numthreads(8,8,1)]
+void CSRoughnessSobel(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float l00 = SampleLuma(id, -1, -1);
+    float l01 = SampleLuma(id,  0, -1);
+    float l02 = SampleLuma(id,  1, -1);
+    float l10 = SampleLuma(id, -1,  0);
+    float l11 = SampleLuma(id,  0,  0);
+    float l12 = SampleLuma(id,  1,  0);
+    float l20 = SampleLuma(id, -1,  1);
+    float l21 = SampleLuma(id,  0,  1);
+    float l22 = SampleLuma(id,  1,  1);
+
+    // Gx (horizontal edges): [-1 0 1; -2 0 2; -1 0 1]
+    float gx = -l00 + l02 - 2.0 * l10 + 2.0 * l12 - l20 + l22;
+    // Gy (vertical edges):   [-1 -2 -1; 0 0 0; 1 2 1]
+    float gy = -l00 - 2.0 * l01 - l02 + l20 + 2.0 * l21 + l22;
+
+    _RoughnessRaw[id.xy] = float4(0.0, sqrt(gx * gx + gy * gy), 0.0, 1.0);
+}
+
+// Hierarchical 8x8 block-max reduce over the Sobel magnitude (.g). Copy of the CSReduce
+// `.g = max` body (NAMERDecomp.compute) — overflow-free, no atomics. Reduces the global
+// Sobel max to a tiny RT for Blender's np.max normalization (RESEARCH Pitfall 3).
+[numthreads(8,8,1)]
+void CSRoughnessMaxReduce(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _AvgDstSize.x || id.y >= _AvgDstSize.y)
+    {
+        return;
+    }
+
+    float maxG = 0.0;
+    for (uint y = 0; y < 8; ++y)
+    {
+        for (uint x = 0; x < 8; ++x)
+        {
+            uint2 src = id.xy * uint2(8u, 8u) + uint2(x, y);
+            if (src.x < _AvgSrcSize.x && src.y < _AvgSrcSize.y)
+            {
+                maxG = max(maxG, _SrcAvg[src].g);
+            }
+        }
+    }
+
+    _DstAvg[id.xy] = float4(0.0, maxG, 0.0, 1.0);
+}
+
+// Final normalization: roughness = saturate(mag / scale). Emits roughness directly in
+// the roughness domain (NO 1 - x inversion, RESEARCH Pitfall 1). Blender normalizes by
+// np.max(edge); the C# side instead uploads the robust p90 of the magnitude (clamped to
+// the true max) — a deliberate parity deviation, because np.max lets a few extreme edges
+// collapse smooth regions of heavy-tailed AI albedos to mirror gloss (UAT round 4).
+[numthreads(8,8,1)]
+void CSRoughnessNormalize(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    _RoughnessOut[id.xy] = float4(saturate(_RoughnessRaw[id.xy].g / max(_GlobalMax, 1e-4)), 0.0, 0.0, 1.0);
+}
+
+// ------------------------------------------------------------------
+// Removed-luminance roughness transfer (Phase 04.2, plan 02).
+//
+// CSRemovedLuma computes the signed Rec.601 luminance of (source - projected): the removed
+// detail the Gouraud projection cannot represent. Positive = bright baked detail (speckle),
+// negative = dark baked occlusion (locked 2026-09-16 polarity decision). Written to
+// _RemovedLuma.r unnormalized; the C# side reads back and p90-normalizes it.
+//
+// CSRoughnessTransferRemap is the surviving D-08 consume site with the dip source swapped
+// from Sobel magnitude to the normalized removed-luma signal: saturate(scalar - strength *
+// mag). mag is clamped to [-1, 1] so removed-detail outliers cannot consume the slider's
+// range (GAP-1); saturate clamps the 6-bit headroom at BOTH ends (gloss clip at bright,
+// matte clip at dark — CONTEXT locked headroom handling); strength is the pure-taste
+// dip-depth slider (no precompute, no search). The Sobel chain above remains intact as the
+// alternate dip source (plan 03 selects between them).
+// ------------------------------------------------------------------
+
+// Signed removed-detail luminance: luma(source - projected) -> _RemovedLuma.r.
+[numthreads(8,8,1)]
+void CSRemovedLuma(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float3 diff = _BaseColorOut[id.xy].rgb - _ProjectedBase[id.xy].rgb;
+    _RemovedLuma[id.xy] = float4(NamerRoughnessLuminance(diff), 0.0, 0.0, 1.0);
+}
+
+// Transfer remap: roughness = saturate(scalar - strength * removedLuma / p90).
+[numthreads(8,8,1)]
+void CSRoughnessTransferRemap(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float mag = _RemovedLuma[id.xy].r / max(_LumaP90, 1e-4);
+    // Soft-clip the normalized depth to the unit range (GAP-1): projection-error outliers
+    // (UV seams, triangle-boundary kinks) have |luma| far above p90 and would otherwise pin
+    // saturate(scalar - strength * mag) to roughness 0 at ANY slider value, consuming the
+    // slider's dynamic range. Clamping treats them like the strongest legitimate removed
+    // detail, so the roughness floor becomes saturate(scalar - strength) and the slider
+    // modulates them monotonically.
+    mag = clamp(mag, -1.0, 1.0);
+    float roughness = saturate(_ScalarRoughness - _Strength * mag);
+    _RoughnessOut[id.xy] = float4(roughness, 0.0, 0.0, 1.0);
+}

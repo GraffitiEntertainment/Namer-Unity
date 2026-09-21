@@ -255,7 +255,132 @@ namespace GraffitiEntertainment.Namer.Tests
             yield return null;
         }
 
+        // -- (d) reprocess with decomposition: the generated mesh must stay bound --
+
+        /// <summary>
+        /// Regression (04.1 UAT): re-processing a scene object whose renderer already wears
+        /// the generated split mesh must keep that mesh reference valid. The old
+        /// <c>WriteMeshAsset</c> called <see cref="AssetDatabase.CreateAsset"/> over the
+        /// existing mesh path, which replaces (destroys) the asset instance — the live
+        /// renderer's <c>sharedMesh</c> read null afterward and the model vanished from
+        /// the scene. The mesh asset must be overwritten IN PLACE so scene references
+        /// survive (mirrors the material-side D-04 idempotency).
+        /// </summary>
+        [UnityTest]
+        public IEnumerator DoubleProcessWithDecomposition_KeepsRendererMeshReferenceValid()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU reprocess-decomp test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            EnsureTempFolder();
+            PrefsSnapshot prefs = CapturePrefs();
+            GameObject gameObject = null;
+            try
+            {
+                Mesh sourceMesh = CreateQuadMeshAsset(TempFolder + "/SourceQuad.asset");
+                Material source = CreateSourceMaterial(
+                    TempFolder, "SourceMat", new Color(0.5f, 0.5f, 0.5f, 1f), 0f, 0.5f,
+                    CreateImportedWhiteOcclusion(TempFolder + "/SourceMat_Occlusion.png"));
+
+                gameObject = new GameObject("ReprocessDecompTarget");
+                MeshFilter filter = gameObject.AddComponent<MeshFilter>();
+                filter.sharedMesh = sourceMesh;
+                MeshRenderer renderer = gameObject.AddComponent<MeshRenderer>();
+                renderer.sharedMaterial = source;
+
+                var settings = new NamerProcessorSettings
+                {
+                    Destination = TempFolder + "/Out",
+                    Prefix = "",
+                    Suffix = "_Namer",
+                    OverwriteGenerated = true,
+                    DecompositionEnabled = true,
+                    ErrorThreshold = 0.06f,
+                    ResidualResolution = 0,
+                };
+
+                NamerProcessResult first = NamerProcessor.Process(gameObject, settings);
+                Assert.IsNull(first.Error, "first Process should succeed: " + first.Error);
+                Assert.AreEqual(1, first.GeneratedAssets.Count, "first run must generate one material set");
+                Assert.IsFalse(string.IsNullOrEmpty(first.GeneratedAssets[0].MeshPath),
+                    "decomposition ON writes the split mesh");
+
+                Mesh boundMesh = filter.sharedMesh;
+                Assert.IsNotNull(boundMesh, "first run must swap the renderer mesh to the generated split mesh");
+                Assert.AreNotEqual(sourceMesh, boundMesh, "the renderer must wear the generated mesh, not the source");
+
+                NamerProcessResult second = NamerProcessor.Process(gameObject, settings);
+                Assert.IsNull(second.Error, "second Process should succeed: " + second.Error);
+                Assert.AreEqual(1, second.GeneratedAssets.Count, "second run must generate one material set");
+
+                Assert.IsNotNull(filter.sharedMesh,
+                    "reprocess must not destroy the renderer's mesh reference — overwriting the generated mesh asset must happen in place, not via asset replacement");
+                Assert.Greater(filter.sharedMesh.vertexCount, 0,
+                    "the re-bound mesh must hold geometry");
+                Mesh regenerated = AssetDatabase.LoadAssetAtPath<Mesh>(second.GeneratedAssets[0].MeshPath);
+                Assert.IsNotNull(regenerated, "the regenerated mesh must load at its path");
+                Assert.AreEqual(regenerated.GetInstanceID(), filter.sharedMesh.GetInstanceID(),
+                    "the renderer must hold the regenerated mesh instance (same asset, updated in place)");
+            }
+            finally
+            {
+                if (gameObject != null)
+                {
+                    Object.DestroyImmediate(gameObject);
+                }
+
+                RestorePrefs(prefs);
+                AssetDatabase.DeleteAsset(TempFolder);
+            }
+
+            yield return null;
+        }
+
         // --------------------------------------------------------------------
+
+        private static Mesh CreateQuadMeshAsset(string path)
+        {
+            Mesh mesh = new Mesh { name = "SourceQuad" };
+            mesh.vertices = new[]
+            {
+                new Vector3(0f, 0f, 0f),
+                new Vector3(1f, 0f, 0f),
+                new Vector3(1f, 0f, 1f),
+                new Vector3(0f, 0f, 1f),
+            };
+            mesh.normals = new[] { Vector3.up, Vector3.up, Vector3.up, Vector3.up };
+            mesh.uv = new[]
+            {
+                new Vector2(0f, 0f),
+                new Vector2(1f, 0f),
+                new Vector2(1f, 1f),
+                new Vector2(0f, 1f),
+            };
+            mesh.triangles = new[] { 0, 2, 1, 0, 3, 2 };
+            mesh.RecalculateBounds();
+            AssetDatabase.CreateAsset(mesh, path);
+            return AssetDatabase.LoadAssetAtPath<Mesh>(path);
+        }
+
+        /// <summary>1x1 white linear occlusion — D-07 isolation: keeps the pipeline's AO
+        /// gate on the authored branch so user AO EditorPrefs cannot un-multiply the
+        /// fixture base and make the decomposition outcome machine-dependent.</summary>
+        private static Texture2D CreateImportedWhiteOcclusion(string path)
+        {
+            Texture2D occlusion = new Texture2D(1, 1, TextureFormat.RGBA32, false, true);
+            occlusion.SetPixel(0, 0, Color.white);
+            occlusion.Apply(false, false);
+            File.WriteAllBytes(path, occlusion.EncodeToPNG());
+            Destroy(occlusion);
+            AssetDatabase.ImportAsset(path);
+            TextureImporter importer = (TextureImporter)AssetImporter.GetAtPath(path);
+            importer.sRGBTexture = false;
+            importer.SaveAndReimport();
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
 
         private static Material FindSubAssetMaterial(string path, string materialName)
         {
@@ -283,7 +408,8 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         private static Material CreateSourceMaterial(
-            string folder, string name, Color baseColor, float metallic, float smoothness)
+            string folder, string name, Color baseColor, float metallic, float smoothness,
+            Texture2D occlusionMap = null)
         {
             Shader shader = Shader.Find("Universal Render Pipeline/Lit");
             Assert.IsNotNull(shader, "URP Lit shader not found");
@@ -292,6 +418,11 @@ namespace GraffitiEntertainment.Namer.Tests
 
             Material material = new Material(shader) { name = name };
             material.SetTexture("_BaseMap", baseMap);
+            if (occlusionMap != null)
+            {
+                material.SetTexture("_OcclusionMap", occlusionMap);
+            }
+
             material.SetFloat("_Metallic", metallic);
             material.SetFloat("_Smoothness", smoothness);
             material.SetFloat("_SmoothnessTextureChannel", 0f);

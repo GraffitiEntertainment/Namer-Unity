@@ -38,11 +38,11 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Vertex Color Decomposition
 
-- [ ] **VCOL-01**: Processor fits low-frequency base color into mesh vertex colors via per-triangle multi-sample barycentric least-squares (not simple averaging)
-- [ ] **VCOL-02**: Generated mesh splits vertices where UV seams, hard color boundaries, or discontinuities require different colors, preserving mesh attributes
-- [ ] **VCOL-03**: Processor computes a residual texture from the difference between fitted interpolation and source texture
-- [ ] **VCOL-04**: Processor reports reconstruction-error statistics (coverage, average/max error, estimated residual requirement) with optional debug visualization
-- [ ] **VCOL-05**: Residual texture resolution is reduced adaptively based on measured reconstruction error, with manual override
+- [x] **VCOL-01**: Processor fits low-frequency base color into mesh vertex colors via per-triangle multi-sample barycentric least-squares (not simple averaging)
+- [x] **VCOL-02**: Generated mesh splits vertices where UV seams, hard color boundaries, or discontinuities require different colors, preserving mesh attributes
+- [x] **VCOL-03**: Processor computes a residual texture from the difference between fitted interpolation and source texture
+- [x] **VCOL-04**: Processor reports reconstruction-error statistics (coverage, average/max error, estimated residual requirement) with optional debug visualization
+- [x] **VCOL-05**: Residual texture resolution is reduced adaptively based on measured reconstruction error, with manual override
 
 ### Stylization
 
@@ -72,7 +72,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Testing
 
 - [x] **TEST-01**: Automated tests cover octahedral encode/decode, metallic/emissive/roughness bit packing, and AO preservation
-- [ ] **TEST-02**: Automated tests cover vertex color fitting, residual reconstruction, and UV seam behavior
+- [x] **TEST-02**: Automated tests cover vertex color fitting, residual reconstruction, and UV seam behavior
 - [x] **TEST-03**: Automated tests cover generated asset paths and source-asset immutability
 - [x] **TEST-04**: GPU kernels are verified against the CPU reference implementation (Core assembly) via round-trip tests
 
@@ -130,11 +130,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | NORM-01 | Phase 2 | Complete |
 | NORM-02 | Phase 2 | Complete |
 | NORM-03 | Phase 2 | Complete |
-| VCOL-01 | Phase 4 | Pending |
-| VCOL-02 | Phase 4 | Pending |
-| VCOL-03 | Phase 4 | Pending |
-| VCOL-04 | Phase 4 | Pending |
-| VCOL-05 | Phase 4 | Pending |
+| VCOL-01 | Phase 4 | Complete |
+| VCOL-02 | Phase 4 | Complete |
+| VCOL-03 | Phase 4 | Complete |
+| VCOL-04 | Phase 4 | Complete |
+| VCOL-05 | Phase 4 | Complete |
 | STYL-01 | Phase 5 | Pending |
 | STYL-02 | Phase 5 | Pending |
 | STYL-03 | Phase 5 | Pending |
@@ -147,12 +147,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GEN-04 | Phase 3 | Complete |
 | UI-01 | Phase 3 | Complete |
 | UI-02 | Phase 3 | Complete |
-| UI-03 | Phase 3 (slice) / 4-5 | In Progress — AO control delivered in Phase 3 |
+| UI-03 | Phase 3 (slice) / 4-5 | In Progress — AO un-multiply control (Phase 3) + roughness-extraction estimator/strength controls (Phase 04.1) delivered; style strength/smoothing/palette/normal detail/roughness simplification remain Phase 5 scope |
 | UI-04 | Phase 3 (slice) / 5 | In Progress — original+NAMER preview delivered in Phase 3 |
 | UI-05 | Phase 3 (slice) / 4 | In Progress — 6 channels delivered in Phase 3 |
 | UI-06 | Phase 3 | Complete |
 | TEST-01 | Phase 1 | Complete |
-| TEST-02 | Phase 4 | Pending |
+| TEST-02 | Phase 4 | Complete |
 | TEST-03 | Phase 3 | Complete |
 | TEST-04 | Phase 2 | Complete |
 | PKG-01 | Phase 1 | Complete |

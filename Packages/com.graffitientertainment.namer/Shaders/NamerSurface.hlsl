@@ -24,14 +24,26 @@ CBUFFER_START(UnityPerMaterial)
     half4  _BaseColor;
     half4  _EmissionColor;
     half   _OcclusionStrength;
+    half   _AoUnmultiplyStrength;
     half   _Cutoff;
     half   _Surface;
+    half   _DbgEnableResidual;
+    half   _DbgEnableRoughness;
+    half   _DbgEnableAO;
+    half   _DbgEnableMetallic;
+    half   _DbgEnableEmissive;
+    half   _DbgEnableVertexColor;
+    half   _DbgEnableNormal;
+    half   _DbgRoughnessNeutral;
 CBUFFER_END
 
 // _SurfaceMap:  LINEAR (non-sRGB) R8G8B8A8_UNorm packed surface texture.
 // _BaseResidualMap: sRGB base/residual color (residual == base in Phase 1).
+// _RoughnessOffsetMap: D-06 optional roughness-offset input ("black" {} default => .r == 0
+// => neutral/byte-identical decode when unbound). Additive, sampled in InitializeNamerSurfaceData.
 TEXTURE2D(_SurfaceMap);        SAMPLER(sampler_SurfaceMap);
 TEXTURE2D(_BaseResidualMap);   SAMPLER(sampler_BaseResidualMap);
+TEXTURE2D(_RoughnessOffsetMap); SAMPLER(sampler_RoughnessOffsetMap);
 
 // ------------------------------------------------------------------
 // NAMER octahedral decode — mirrors NamerFormat.OctahedralDecode EXACTLY.
@@ -79,6 +91,9 @@ void InitializeNamerSurfaceData(float2 uv, float4 vertexColor, out SurfaceData s
 {
     float4 surface      = SAMPLE_TEXTURE2D(_SurfaceMap, sampler_SurfaceMap, uv);
     float4 baseResidual = SAMPLE_TEXTURE2D(_BaseResidualMap, sampler_BaseResidualMap, uv);
+    // DIP-02 residual gate: 1.0 keeps the sampled color (byte-identical), 0 neutralizes
+    // to white. Alpha is preserved for AlphaDiscard (.a) below.
+    baseResidual.rgb = lerp(half3(1.0, 1.0, 1.0), baseResidual.rgb, _DbgEnableResidual);
 
     bool metallic;
     bool emissive;
@@ -87,20 +102,50 @@ void InitializeNamerSurfaceData(float2 uv, float4 vertexColor, out SurfaceData s
     float ao;
     float3 normalTS;
     NAMER_DECODE_SURFACE(surface, metallic, emissive, roughness, smoothness, normalTS, ao);
+    // DIP-02 normal gate: 1.0 keeps the decoded tangent-space normal, 0 neutralizes to
+    // the flat normal (0,0,1) — a shader-only flat-normal bisect.
+    normalTS = lerp(half3(0.0h, 0.0h, 1.0h), normalTS, _DbgEnableNormal);
+    // DIP-02 AO gate: 1.0 keeps the decoded AO, 0 neutralizes to 1.0 (white/no AO).
+    // The gate is applied FIRST so both AO consumers below ride it: the ambient
+    // occlusion term (surfaceData.occlusion) and the albedo re-multiply.
+    ao = lerp(1.0, ao, _DbgEnableAO);
+
+    // D-06: additive roughness offset, neutral-when-unset ("black" {} default => .r == 0 =>
+    // roughness unchanged => byte-identical decode). Applied here (not inside
+    // NAMER_DECODE_SURFACE) so the shared macro's signature is unchanged and the Meta-pass
+    // call site (which only reads emissive) is untouched.
+    roughness = saturate(roughness + SAMPLE_TEXTURE2D(_RoughnessOffsetMap, sampler_RoughnessOffsetMap, uv).r);
+    // DIP-02 roughness gate: 1.0 keeps the decoded roughness, 0 neutralizes to
+    // _DbgRoughnessNeutral. The existing smoothness recompute on the next line follows.
+    roughness = lerp(_DbgRoughnessNeutral, roughness, _DbgEnableRoughness);
+    smoothness = 1.0 - roughness;
 
     half alpha = baseResidual.a * _BaseColor.a;
     alpha = AlphaDiscard(alpha, _Cutoff);
 
-    surfaceData.albedo = baseResidual.rgb * _BaseColor.rgb * vertexColor.rgb;
+    // DIP-02 vertex-color gate: 1.0 keeps the fitted vertex colors, 0 neutralizes to
+    // white so albedo shows the sampled base/residual term alone.
+    vertexColor.rgb = lerp(half3(1.0, 1.0, 1.0), vertexColor.rgb, _DbgEnableVertexColor);
+
+    // AO round-trip (ao-unmultiply-roundtrip, contract C): the pack stage divided the
+    // saved albedo by lerp(1, max(ao, floor), _AoUnmultiplyStrength) (NAMERPack.compute
+    // CSNormalize), so the decode re-multiplies the SAME GATED occlusion back into the
+    // albedo — inverting the divide under any lighting. Gate off (ao == 1) neutralizes
+    // this factor (lerp(1, 1, s) == 1), leaving the packed base unchanged. The property
+    // defaults to 0, so legacy materials generated before the strength was persisted
+    // decode byte-identically to the pre-fix shader.
+    half aoUnmultiply = lerp(1.0, ao, _AoUnmultiplyStrength);
+
+    surfaceData.albedo = baseResidual.rgb * _BaseColor.rgb * vertexColor.rgb * aoUnmultiply;
     surfaceData.albedo = AlphaModulate(surfaceData.albedo, alpha);
 
-    surfaceData.metallic   = metallic ? 1.0 : 0.0;
+    surfaceData.metallic   = (metallic ? 1.0 : 0.0) * _DbgEnableMetallic;
     surfaceData.specular   = half3(0.0, 0.0, 0.0);
     surfaceData.smoothness = smoothness;
     surfaceData.normalTS   = normalTS;
     surfaceData.occlusion  = ao;
 #ifdef _EMISSION
-    surfaceData.emission   = _EmissionColor.rgb * (emissive ? 1.0 : 0.0);
+    surfaceData.emission   = _EmissionColor.rgb * (emissive ? 1.0 : 0.0) * _DbgEnableEmissive;
 #else
     surfaceData.emission   = half3(0.0, 0.0, 0.0);
 #endif

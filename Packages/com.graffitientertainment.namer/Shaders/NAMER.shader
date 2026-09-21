@@ -6,12 +6,39 @@ Shader "GraffitiEntertainment.Namer/NAMER"
         // with it); _SurfaceMap is sampled with the same UVs and shows no ST UI.
         [NoScaleOffset] [MainTexture] _SurfaceMap("Surface (Packed)", 2D) = "white" {}
         [NoScaleOffset] _BaseResidualMap("Base/Residual", 2D) = "white" {}
+        // D-06 optional roughness-offset input: additive to decoded roughness, neutral when
+        // unset. The "black" {} default samples .r == 0, so an unbound slot decodes
+        // byte-identically (a "white" {} default would sample .r == 1 and saturate every
+        // unset material's roughness to 1.0 — non-neutral). Artist-assigned post-generation.
+        [NoScaleOffset] _RoughnessOffsetMap("Roughness Offset", 2D) = "black" {}
 
         [MainColor] _BaseColor("Color", Color) = (1,1,1,1)
         [HDR] _EmissionColor("Emission", Color) = (0,0,0)
         _OcclusionStrength("Occlusion Strength", Range(0.0, 1.0)) = 1.0
 
+        // Pack-time AO un-multiply strength persisted by the processor
+        // (ao-unmultiply-roundtrip, contract C): the decode re-multiplies the GATED
+        // occlusion into the albedo by exactly this strength, inverting
+        // NAMERPack.compute's pack-time divide under any lighting. Default 0.0 — the
+        // neutral of lerp(1, ao, s) — keeps legacy materials (generated before the
+        // value was persisted) decoding byte-identically to the pre-fix shader.
+        _AoUnmultiplyStrength("AO Un-multiply Strength", Range(0.0, 1.0)) = 0.0
+
         _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
+
+        // DIP-02 debug dip-switch gates (hidden — written by the processor window via
+        // Shader.PropertyToID; the "__"-prefixed display string keeps the default
+        // inspector clean). All neutral-default (1.0) so an untouched material decodes
+        // byte-identically to today; _DbgRoughnessNeutral is the mid-roughness value
+        // used when the roughness input is gated off.
+        [HideInInspector] _DbgEnableResidual("__dbgEnableResidual", Float) = 1.0
+        [HideInInspector] _DbgEnableRoughness("__dbgEnableRoughness", Float) = 1.0
+        [HideInInspector] _DbgEnableAO("__dbgEnableAO", Float) = 1.0
+        [HideInInspector] _DbgEnableMetallic("__dbgEnableMetallic", Float) = 1.0
+        [HideInInspector] _DbgEnableEmissive("__dbgEnableEmissive", Float) = 1.0
+        [HideInInspector] _DbgEnableVertexColor("__dbgEnableVertexColor", Float) = 1.0
+        [HideInInspector] _DbgEnableNormal("__dbgEnableNormal", Float) = 1.0
+        [HideInInspector] _DbgRoughnessNeutral("__dbgRoughnessNeutral", Float) = 0.5
 
         // Keyword-setting toggles: each checkbox writes its float AND sets the
         // matching shader keyword, so the keyword-gated code paths (AlphaDiscard,
@@ -528,13 +555,18 @@ Shader "GraffitiEntertainment.Namer/NAMER"
 
             #pragma shader_feature_local_fragment _EMISSION
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/MetaInput.hlsl"
+            // NamerSurface (Core.hlsl -> UnityInput.hlsl, which declares
+            // unity_LightmapST) must be included BEFORE MetaInput/MetaPass:
+            // the reverse order leaves unity_LightmapST undeclared in the
+            // Meta vertex program on metal.
             #include "NamerSurface.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/MetaInput.hlsl"
 
             struct MetaAttributes
             {
                 float4 positionOS   : POSITION;
                 float3 normalOS     : NORMAL;
+                float4 color        : COLOR;
                 float2 uv0          : TEXCOORD0;
                 float2 uv1          : TEXCOORD1;
                 float2 uv2          : TEXCOORD2;
@@ -545,6 +577,7 @@ Shader "GraffitiEntertainment.Namer/NAMER"
             {
                 float4 positionCS   : SV_POSITION;
                 float2 uv           : TEXCOORD0;
+                float4 vertexColor  : TEXCOORD1;
             };
 
             MetaVaryings NamerMetaVertex(MetaAttributes input)
@@ -552,6 +585,7 @@ Shader "GraffitiEntertainment.Namer/NAMER"
                 MetaVaryings output = (MetaVaryings)0;
                 output.positionCS = UnityMetaVertexPosition(input.positionOS.xyz, input.uv1, input.uv2);
                 output.uv = TRANSFORM_TEX(input.uv0, _BaseResidualMap);
+                output.vertexColor = input.color;
                 return output;
             }
 
@@ -569,7 +603,7 @@ Shader "GraffitiEntertainment.Namer/NAMER"
                 NAMER_DECODE_SURFACE(surface, metallic, emissive, roughness, smoothness, normalTS, ao);
 
                 UnityMetaInput metaInput;
-                metaInput.Albedo = baseResidual.rgb * _BaseColor.rgb;   // vertex color unavailable in Meta pass
+                metaInput.Albedo = baseResidual.rgb * _BaseColor.rgb * input.vertexColor.rgb;
 #ifdef _EMISSION
                 metaInput.Emission = _EmissionColor.rgb * (emissive ? 1.0 : 0.0);
 #else

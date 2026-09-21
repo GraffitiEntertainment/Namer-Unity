@@ -354,16 +354,22 @@ namespace GraffitiEntertainment.Namer.Editor
 
             private bool TryReconstruct(float2 uv, out float3 pos, out float3 normal)
             {
+                // Texel-space barycentric test: denom = (2*Area_texels)^2, so the area
+                // epsilon rejects only true zero-area triangles at any bake resolution.
+                // In [0,1] UV space denom shrinks quadratically with resolution and
+                // silently discarded real triangles (debug: residual-missing-triangles).
+                float2 p = uv * Resolution;
+                float2 texels = new float2(Resolution);
                 for (int t = 0; t < LowTriangles.Length; t++)
                 {
                     int3 tri = LowTriangles[t];
-                    float2 a = LowUvs[tri.x];
-                    float2 b = LowUvs[tri.y];
-                    float2 c = LowUvs[tri.z];
+                    float2 a = LowUvs[tri.x] * texels;
+                    float2 b = LowUvs[tri.y] * texels;
+                    float2 c = LowUvs[tri.z] * texels;
 
                     float2 v0 = b - a;
                     float2 v1 = c - a;
-                    float2 v2 = uv - a;
+                    float2 v2 = p - a;
                     float d00 = dot(v0, v0);
                     float d01 = dot(v0, v1);
                     float d11 = dot(v1, v1);

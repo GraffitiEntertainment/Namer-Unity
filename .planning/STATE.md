@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 Phase: 04.2 (gouraud-projection-one-texture-with-roughness-transfer-resid) — EXECUTING
 Plan: 5 of 5
 Status: Phase 04.2 shipped — PR #1
-Last activity: 2026-09-20
+Last activity: 2026-09-21
 
 Progress: [██████████] 100%
 
@@ -209,6 +209,7 @@ None yet.
 | 260919-irk | Triangle wireframe as a second render pass: line-topology submesh on the preview split mesh drawn with an unlit URP wire material (NamerPreviewWire) in the After pane's preview cycle — GPU pixel clipping at the pane edge, camera-follow for free, one draw call replaces 3N Handles.DrawLine (ring-buffer exhaustion gone); IMGUI overlay + manual projection deleted; live EditMode suite 158/158 | 2026-09-19 | f21959a | [260919-irk-wireframe-second-pass](./quick/260919-irk-wireframe-second-pass/) |
 | 260919-k0e | Wireframe on ANY After mesh (irk gate was split-mesh-only): Render/RenderPane take an explicit wireMesh — split mesh keeps its line submesh, source/generated meshes get a cached standalone line-topology wire mesh (assets never mutated, disposed in OnDisable); Debug.LogException in RecomputePreview/RunProcess catches (full stack to console); five stage-gate rows ToggleLeft→Toggle (checkbox before label); live EditMode suite 158/158 | 2026-09-19 | c52579f | [260919-k0e-wireframe-any-after-mesh-logging-toggles](./quick/260919-k0e-wireframe-any-after-mesh-logging-toggles/) |
 | 260921-i1b | Stage & Shader Gates header (boldLabel + miniLabel help line) above the DIP-01 step-switch row in NamerEditorWindow — pipeline-stage vs. live shader-only gate semantics; two-line diff, grep-gated, checkpoint auto-approved (auto_advance) | 2026-09-21 | 33840f8 | [260921-i1b-add-header-above-step-switch-row-in-name](./quick/260921-i1b-add-header-above-step-switch-row-in-name/) |
+| 260921-l5s | docs/USER_GUIDE.md (TOC + 8 UI-region sections in draw order, verbatim labels, b75d925 AO semantics) + 11 section images under docs/images/ (user-supplied captures incl. bonus toggle-triangles) + README.md rewritten as project overview with NAMER-preview.png hero (reserved for README per user direction) | 2026-09-21 | 1d6d30d | [260921-l5s-docs-user-guide-section-images](./quick/260921-l5s-docs-user-guide-section-images/) |
 
 ## Deferred Items
 

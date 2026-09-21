@@ -101,8 +101,10 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 // D-05 decomposition needs the source mesh the inspection wears. Resolve it
                 // once from the selection (a scene object, prefab, or model) so the split and
-                // the later renderer sharedMesh swap agree on the same source.
-                Mesh decomposeSourceMesh = settings.DecompositionEnabled ? ResolveSourceMesh(selection) : null;
+                // the later renderer sharedMesh swap agree on the same source. The 2026-09-21
+                // AO contract follow-up also resolves it for the AO stage alone: the bake is
+                // the synthetic source whenever the stage is on, decomposition or not.
+                Mesh decomposeSourceMesh = (settings.DecompositionEnabled || settings.AoStageEnabled) ? ResolveSourceMesh(selection) : null;
 
                 // CR-01: one vertex-color stream per source mesh cannot carry N materials'
                 // fits simultaneously, and a multi-mesh selection resolves only its FIRST
@@ -130,7 +132,13 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 foreach (NamerMaterialInspection inspection in model.Materials)
                 {
-                    inspection.AoUnmultiplyStrength = settings.AoStageEnabled ? settings.AoUnmultiplyStrength : 0f;
+                    // 2026-09-21 contract: the AO stage checkbox gates SYNTHESIS only
+                    // (bake vs white fill, in the D-07 gate) — never the authored-map
+                    // transfer — so the un-multiply strength passes through unchanged:
+                    // with the stage off and no authored map, surface B is white and the
+                    // divide is the identity whatever the strength.
+                    inspection.AoUnmultiplyStrength = settings.AoUnmultiplyStrength;
+                    inspection.AoStageEnabled = settings.AoStageEnabled;
                     inspection.AoBlurRadius = settings.AoBlurRadius;
                     inspection.AoStrength = settings.AoStrength;
                     inspection.AoContrast = settings.AoContrast;
@@ -139,8 +147,12 @@ namespace GraffitiEntertainment.Namer.Editor
 
                     // ResolveSourceMesh ordering: attach the source mesh BEFORE Process so the
                     // projection/transfer and the AO three-way gate can reference it. (The
-                    // decomp block's old assignment here moved up.)
-                    if (settings.DecompositionEnabled)
+                    // decomp block's old assignment here moved up.) Primed for the AO stage
+                    // too (2026-09-21 contract follow-up): AO on + decomposition off bakes
+                    // instead of packing white. The CR-01 guard above still nulls the mesh
+                    // for multi-material/multi-mesh selections, so those keep the safe
+                    // white fill.
+                    if (settings.DecompositionEnabled || settings.AoStageEnabled)
                     {
                         inspection.BakeSourceMesh = decomposeSourceMesh;
                     }

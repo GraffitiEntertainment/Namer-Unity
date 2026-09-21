@@ -116,7 +116,6 @@ namespace GraffitiEntertainment.Namer.Editor
 
             RenderTexture roughnessTex = null;
             RenderTexture projectedOut = null;
-            bool usesExtractedAo = false;
             bool usesBakedAo = false;
             // SmoothnessTextureChannel == 1 authors per-pixel smoothness in the base-map
             // alpha (URP Lit / Standard): that is authored data just like a
@@ -143,29 +142,39 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 if (inspection.OcclusionMap != null)
                 {
+                    // D-07 gate, clause 0 (2026-09-21 contract): an authored map is
+                    // source data and always transfers, regardless of the AO stage
+                    // checkbox (the checkbox gates synthesis only).
                     aoIn = _pool.Lease(unorm8);
                     Upload(inspection.OcclusionMap, aoIn, WhiteFill());
-                    usesExtractedAo = false;
-                    usesBakedAo = false;
                 }
-                else if (EnsureAoPipeline().HasCachedBake(inspection.BakeSourceMesh, inspection.OccluderMesh, w, h))
+                else if (inspection.AoStageEnabled)
                 {
-                    // D-07 three-way gate: a cached geometry bake supersedes image-space extraction.
+                    // D-07 gate, clauses 2-3: AO stage on and no authored map -> the
+                    // GEOMETRY BAKE is the synthetic source (the albedo-conflated
+                    // luminance extraction is retired from the automatic path).
+                    // BakeAndUpload reuses the cache or bakes fresh on demand; it
+                    // returns null when no bake mesh is primed (decomposition off),
+                    // leaving aoIn null for the white fill below.
                     aoIn = EnsureAoPipeline().BakeAndUpload(inspection, w, h);
-                    usesBakedAo = true;
+                    usesBakedAo = aoIn != null;
                 }
-                else
+
+                if (aoIn == null)
                 {
-                    // D-07 three-way gate: no authored map and no cached bake -> extract AO.
-                    aoIn = EnsureAoPipeline().Extract(inspection, baseColorIn, w, h);
-                    usesExtractedAo = true;
+                    // D-07 gate: AO stage off (or no bake source) -> surface B packs
+                    // white (1.0) through the existing WhiteFill upload path, and the
+                    // un-multiply divides by 1 whatever the strength — the stage gate
+                    // subsumes the old strength=0-only behavior.
+                    aoIn = _pool.Lease(unorm8);
+                    Upload(null, aoIn, WhiteFill());
                 }
 
                 Upload(inspection.MetallicGlossMap, metallicGlossIn, NeutralMetallicGlossTexture());
 
                 // (a) Normalize + octahedral encode -> _BaseColorOut / _PackInputs / _Octahedral.
                 BindAndDispatchNormalizeEncode(inspection, baseColorIn, normalTexel, aoIn, metallicGlossIn,
-                    baseColorOut, octahedral, packInputs, w, h, usesExtractedAo || usesBakedAo);
+                    baseColorOut, octahedral, packInputs, w, h, usesBakedAo);
 
                 // (b) 04.2 projection write-back + roughness dip, between the normalized base
                 //     and the surface pack (D-01 authored-map-wins gate).
@@ -241,7 +250,7 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 Release(baseColorIn);
                 Release(normalTexel);
-                if (usesExtractedAo || usesBakedAo)
+                if (usesBakedAo)
                 {
                     _aoPipeline.ReleaseAo(aoIn);
                 }

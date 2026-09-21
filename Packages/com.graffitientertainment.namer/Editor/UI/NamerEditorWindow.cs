@@ -381,7 +381,12 @@ namespace GraffitiEntertainment.Namer.Editor
                 ReleaseDecompPreview();
                 EnsureMaterials();
 
-                inspection.AoUnmultiplyStrength = _aoStageEnabled ? _aoUnmultiplyStrength : 0f;
+                // 2026-09-21 contract: the AO stage checkbox gates synthesis only (bake
+                // vs white fill, in the D-07 gate) — never the authored-map transfer —
+                // so the un-multiply strength passes through unchanged (white surface B
+                // makes the divide an identity whatever the strength).
+                inspection.AoUnmultiplyStrength = _aoUnmultiplyStrength;
+                inspection.AoStageEnabled = _aoStageEnabled;
                 inspection.AoBlurRadius = _aoBlurRadius;
                 inspection.AoStrength = _aoStrength;
                 inspection.AoContrast = _aoContrast;
@@ -394,7 +399,13 @@ namespace GraffitiEntertainment.Namer.Editor
                 // will never deliver.
                 bool decompWillRun = _decompositionEnabled && string.IsNullOrEmpty(_decompGuardReason);
 
-                inspection.BakeSourceMesh = decompWillRun ? _previewMesh : null;
+                // 2026-09-21 contract follow-up: prime the bake mesh for the AO stage too,
+                // so AO on + decomposition off previews the bake Process actually generates
+                // (not the white fill). The guard reason still suppresses priming — Process
+                // nulls the mesh for CR-01-guarded selections, so the preview must match.
+                bool primeBakeMesh = (decompWillRun || _aoStageEnabled) && string.IsNullOrEmpty(_decompGuardReason);
+
+                inspection.BakeSourceMesh = primeBakeMesh ? _previewMesh : null;
                 int baseW = inspection.BaseMap != null ? inspection.BaseMap.width : NamerComputePipeline.DefaultBaseResolution;
                 int baseH = inspection.BaseMap != null ? inspection.BaseMap.height : NamerComputePipeline.DefaultBaseResolution;
 
@@ -886,7 +897,7 @@ namespace GraffitiEntertainment.Namer.Editor
 
             bool newAo = EditorGUILayout.ToggleLeft(
                 new GUIContent("AO",
-                    "Hard stage gate for AO un-multiply — skips the un-multiply without touching the strength slider."),
+                    "Hard stage gate for the AO stage: OFF packs surface B white (no synthetic AO); ON packs the AO map — an authored _OcclusionMap always transfers either way, and without one the geometry bake is the synthetic source. The un-multiply strength slider is independent of this gate."),
                 _aoStageEnabled);
             if (newAo != _aoStageEnabled)
             {

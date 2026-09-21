@@ -12,13 +12,17 @@ using UnityEditor;
 namespace GraffitiEntertainment.Namer.Tests
 {
     /// <summary>
-    /// Phase 03.1 image-space AO extraction tests (D-07/D-08/D-09). Proves that a
-    /// no-authored-_OcclusionMap source now produces non-white AO (kills the live pain),
-    /// that the un-multiply divisor and packed B channel are the SAME AO (round-trip at
-    /// strength 1), that the 0.1 floor is divisor-side only, and that an authored map
+    /// D-07 AO stage-gate tests (2026-09-21 contract). Prove that the AO stage checkbox
+    /// gates SYNTHESIS only: OFF with no authored <c>_OcclusionMap</c> packs surface B
+    /// flat white via the WhiteFill path (the albedo-conflated luminance extraction is
+    /// retired from the automatic path), while an authored map transfers its raw bytes
+    /// and round-trips the un-multiply identically whether the stage is ON or OFF. Also
+    /// pins that the un-multiply divisor and packed B channel are the SAME AO (round-trip
+    /// at strength 1), that the 0.1 floor is divisor-side only, and that an authored map
     /// stays byte-identical with the epsilon (not 0.1) floor. Capability-gated (D-15):
     /// every GPU test skips with an explicit report when compute/async-readback is
-    /// unavailable, never a silent pass.
+    /// unavailable, never a silent pass. The bake-as-synthetic-source (stage ON, no
+    /// authored map) is covered in <c>NamerAOBakeTests</c>.
     /// </summary>
     public class NamerAOExtractionTests
     {
@@ -31,11 +35,11 @@ namespace GraffitiEntertainment.Namer.Tests
             SystemInfo.supportsComputeShaders && SystemInfo.supportsAsyncGPUReadback;
 
         [UnityTest]
-        public IEnumerator Extraction_ProducesNonWhiteAo_WhenNoOcclusionMap()
+        public IEnumerator AoStageOff_NoOcclusionMap_PacksWhiteAo()
         {
             if (!ComputeAvailable)
             {
-                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU AO extraction test (D-15: Metal is the verified target).");
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU AO stage-gate test (D-15: Metal is the verified target).");
                 yield break;
             }
 
@@ -59,6 +63,11 @@ namespace GraffitiEntertainment.Namer.Tests
                     baseMap.SetPixels(pixels);
                     baseMap.Apply(false, false);
 
+                    // 2026-09-21 contract, clause 2: AO stage OFF (the field's default)
+                    // skips the whole synthetic stage — surface B packs white via the
+                    // WhiteFill path regardless of albedo. The retired luminance
+                    // extraction darkened exactly the dark-painted half (ao ~ 0.29 there),
+                    // so the dark-region byte is the discriminating assertion.
                     NamerMaterialInspection inspection = BuildInspection(baseMap, baseIsSrgb: false, occlusionMap: null);
 
                     NamerComputeResult result = pipeline.Process(inspection);
@@ -69,23 +78,100 @@ namespace GraffitiEntertainment.Namer.Tests
                         int brightIndex = 8 * WorkingSize + 8;
                         int darkIndex = 8 * WorkingSize + (WorkingSize - 8);
 
-                        // At least one sampled (dark-region) texel is non-white, and a
-                        // bright-region texel is not darker than a dark-region texel.
-                        Assert.Less((int)surface[darkIndex].b, 250,
-                            "dark-region AO byte must be non-white (b < 250) — extraction must not produce a flat white fill");
-                        Assert.GreaterOrEqual((int)surface[brightIndex].b, (int)surface[darkIndex].b,
-                            "bright-region AO byte must be >= dark-region AO byte");
+                        Assert.AreEqual(255, (int)surface[brightIndex].b,
+                            "AO stage off must pack a white (255) surface B byte on the bright half");
+                        Assert.AreEqual(255, (int)surface[darkIndex].b,
+                            "AO stage off must pack a white (255) surface B byte on the dark half — no albedo-driven synthetic AO");
                     }
                     finally
                     {
                         pipeline.ReleaseResult(result);
                     }
 
-                    Assert.AreEqual(0, pipeline.LiveRenderTargetCount, "pool must return to baseline after extraction (no leak)");
+                    Assert.AreEqual(0, pipeline.LiveRenderTargetCount, "pool must return to baseline after the stage-off run (no leak)");
                 }
                 finally
                 {
                     Destroy(baseMap);
+                }
+            }
+            finally
+            {
+                pipeline.Dispose();
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator AoStageOff_AuthoredOcclusionMap_TransfersAuthoredAo()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU authored-transfer test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            NamerComputePipeline pipeline = new NamerComputePipeline();
+            try
+            {
+                Texture2D baseMap = new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, false, true);
+                Texture2D aoMap = new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, false, true);
+                try
+                {
+                    FillSolid(baseMap, new Color(0.5f, 0.5f, 0.5f, 1.0f));
+                    FillOcclusionSplit(aoMap);
+
+                    int left = (WorkingSize / 2) * WorkingSize + WorkingSize / 4;
+                    int right = (WorkingSize / 2) * WorkingSize + (3 * WorkingSize / 4);
+
+                    // 2026-09-21 contract, clause 0: an authored map is source data — it
+                    // transfers with the stage OFF, and the run is byte-identical to the
+                    // stage-ON run of the same fixture (authored data round-trips the
+                    // same either way; the checkbox gates synthesis only).
+                    NamerComputeResult off = pipeline.Process(
+                        BuildInspection(baseMap, baseIsSrgb: false, occlusionMap: aoMap, aoStageEnabled: false));
+                    Color32[] offSurface;
+                    Color32[] offBase;
+                    try
+                    {
+                        offSurface = ReadBackColor32(off.PackedSurface, WorkingSize * WorkingSize);
+                        offBase = ReadBackColor32(off.NormalizedBaseColor, WorkingSize * WorkingSize);
+
+                        Assert.AreEqual(255, (int)offSurface[left].b,
+                            "authored ao == 1 must pack to surface B 255 with the AO stage OFF — authored data is not gated");
+                        Assert.AreEqual(128, (int)offSurface[right].b,
+                            "authored ao byte 128 must transfer raw into surface B with the AO stage OFF");
+                        Assert.Greater((int)offBase[right].r, (int)offBase[left].r,
+                            "the un-multiply must run at the slider strength (1) with the stage OFF — 0.5 / 0.5 brightens the occluded half");
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(off);
+                    }
+
+                    NamerComputeResult on = pipeline.Process(
+                        BuildInspection(baseMap, baseIsSrgb: false, occlusionMap: aoMap, aoStageEnabled: true));
+                    try
+                    {
+                        Color32[] onSurface = ReadBackColor32(on.PackedSurface, WorkingSize * WorkingSize);
+                        Color32[] onBase = ReadBackColor32(on.NormalizedBaseColor, WorkingSize * WorkingSize);
+
+                        Assert.AreEqual(0, CountByteMismatches(offSurface, onSurface),
+                            "packed surface must be byte-identical across the AO stage toggle when an AO map is authored");
+                        Assert.AreEqual(0, CountByteMismatches(offBase, onBase),
+                            "normalized base must be byte-identical across the AO stage toggle when an AO map is authored");
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(on);
+                    }
+
+                    Assert.AreEqual(0, pipeline.LiveRenderTargetCount, "pool must return to baseline after the authored-transfer runs (no leak)");
+                }
+                finally
+                {
+                    Destroy(baseMap, aoMap);
                 }
             }
             finally
@@ -200,7 +286,7 @@ namespace GraffitiEntertainment.Namer.Tests
 
         // --------------------------------------------------------------------
 
-        private static NamerMaterialInspection BuildInspection(Texture2D baseMap, bool baseIsSrgb, Texture2D occlusionMap)
+        private static NamerMaterialInspection BuildInspection(Texture2D baseMap, bool baseIsSrgb, Texture2D occlusionMap, bool aoStageEnabled = false)
         {
             return new NamerMaterialInspection
             {
@@ -214,8 +300,42 @@ namespace GraffitiEntertainment.Namer.Tests
                 Roughness = 1.0f,
                 Emissive = 0.0f,
                 AoUnmultiplyStrength = 1.0f,
+                AoStageEnabled = aoStageEnabled,
                 SmoothnessTextureChannel = 0,
             };
+        }
+
+        /// <summary>Left half ao = 1 (white), right half ao = 128/255, in the green channel.</summary>
+        private static void FillOcclusionSplit(Texture2D occlusion)
+        {
+            Color[] pixels = new Color[occlusion.width * occlusion.height];
+            for (int y = 0; y < occlusion.height; y++)
+            {
+                for (int x = 0; x < occlusion.width; x++)
+                {
+                    float ao = x < occlusion.width / 2 ? 1f : 128f / 255f;
+                    pixels[y * occlusion.width + x] = new Color(0f, ao, 0f, 1f);
+                }
+            }
+
+            occlusion.SetPixels(pixels);
+            occlusion.Apply(false, false);
+        }
+
+        private static int CountByteMismatches(Color32[] expected, Color32[] actual)
+        {
+            Assert.AreEqual(expected.Length, actual.Length, "mismatch count needs equal-length arrays");
+            int mismatches = 0;
+            for (int i = 0; i < expected.Length; i++)
+            {
+                if (expected[i].r != actual[i].r || expected[i].g != actual[i].g
+                    || expected[i].b != actual[i].b || expected[i].a != actual[i].a)
+                {
+                    mismatches++;
+                }
+            }
+
+            return mismatches;
         }
 
         private static void RunNormalizeEncodePack(

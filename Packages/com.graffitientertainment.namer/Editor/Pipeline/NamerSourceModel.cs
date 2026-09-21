@@ -84,6 +84,17 @@ namespace GraffitiEntertainment.Namer.Editor
         public float AoStrength = 1f;   // 1 = full AO, 0 = white/no AO
         public float AoContrast = 1f;   // 1 = identity, pivot 0.5
 
+        // AO stage gate (2026-09-21 contract). Gates SYNTHESIS only: false (the inline
+        // default, matching AoUnmultiplyStrength's no-default convention so direct
+        // NamerComputePipeline.Process callers and fixtures keep the identity path)
+        // skips the synthetic stage entirely — surface B packs white via the WhiteFill
+        // upload and the un-multiply divides by 1 regardless of strength; true with no
+        // authored _OcclusionMap makes the GEOMETRY BAKE the synthetic source (the
+        // albedo-driven luminance extraction is retired from the automatic path). An
+        // authored _OcclusionMap always transfers regardless of this flag — authored
+        // data is not gated. The shipped default-on arrives via settings/constants.
+        public bool AoStageEnabled;
+
         public Texture2D EmissionMap;
         public Color EmissionColor;
         public float Emissive;

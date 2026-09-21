@@ -76,6 +76,7 @@ Camera controls over the preview:
 - Plain scroll scrolls the dialog as usual.
 
 ### Shaded-view toggle row
+![Shaded View Toggle](images/shaded-view-toggle.png)
 
 Below the preview sit seven checkboxes: `Base/Residual`, `Roughness`, `AO`, `Metallic`, `Emissive`, `Vertex Color`, and `Normal`. Each one neutralizes the matching input in the full shaded After view — uncheck `Roughness`, for instance, and the After pane shades with a neutral roughness so you can see what that channel contributes. These are shader-only debug toggles: they are live, they trigger no GPU recompute, and they are not persisted. Metallic and Emissive here are additionally ANDed with their Stage & Shader Gates counterparts, so turning a contribution off at the gates also disables it here.
 

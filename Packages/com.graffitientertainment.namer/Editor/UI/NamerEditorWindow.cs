@@ -757,7 +757,12 @@ namespace GraffitiEntertainment.Namer.Editor
             if (split.BoneWeights != null)
             {
                 // Variable-count API (mirrors ApplySplitStreams): preserves >4 influences.
-                mesh.SetBoneWeights(split.BonesPerVertex, split.BoneWeights);
+                // NativeArray-only overload — the mesh copies the data during the call.
+                using (NativeArray<byte> bonesPerVertex = new NativeArray<byte>(split.BonesPerVertex, Allocator.Temp))
+                using (NativeArray<BoneWeight1> boneWeights = new NativeArray<BoneWeight1>(split.BoneWeights, Allocator.Temp))
+                {
+                    mesh.SetBoneWeights(bonesPerVertex, boneWeights);
+                }
             }
 
             mesh.subMeshCount = split.SubMeshTriangles.Length;

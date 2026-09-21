@@ -162,7 +162,11 @@ namespace GraffitiEntertainment.Namer.Tests
                     Matrix4x4.identity, Matrix4x4.identity, Matrix4x4.identity,
                     Matrix4x4.identity, Matrix4x4.identity,
                 };
-                mesh.SetBoneWeights(bonesPerVertex, weights);
+                using (NativeArray<byte> nativeBonesPerVertex = new NativeArray<byte>(bonesPerVertex, Allocator.Temp))
+                using (NativeArray<BoneWeight1> nativeWeights = new NativeArray<BoneWeight1>(weights, Allocator.Temp))
+                {
+                    mesh.SetBoneWeights(nativeBonesPerVertex, nativeWeights);
+                }
 
                 NamerSplitResult result = MeshVertexSplitter.Split(mesh);
 

@@ -120,8 +120,8 @@ namespace GraffitiEntertainment.Namer.Editor
             // disposed immediately — the result stays free of native lifetime coupling.
             byte[] srcBonesPerVertex;
             BoneWeight1[] srcBoneWeights;
-            using (NativeArray<byte> nativeBonesPerVertex = sourceMesh.GetBonesPerVertex(Allocator.Temp))
-            using (NativeArray<BoneWeight1> nativeBoneWeights = sourceMesh.GetAllBoneWeights(Allocator.Temp))
+            using (NativeArray<byte> nativeBonesPerVertex = sourceMesh.GetBonesPerVertex())
+            using (NativeArray<BoneWeight1> nativeBoneWeights = sourceMesh.GetAllBoneWeights())
             {
                 srcBonesPerVertex = nativeBonesPerVertex.ToArray();
                 srcBoneWeights = nativeBoneWeights.ToArray();

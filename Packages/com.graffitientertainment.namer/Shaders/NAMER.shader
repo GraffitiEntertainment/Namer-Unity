@@ -555,13 +555,18 @@ Shader "GraffitiEntertainment.Namer/NAMER"
 
             #pragma shader_feature_local_fragment _EMISSION
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/MetaInput.hlsl"
+            // NamerSurface (Core.hlsl -> UnityInput.hlsl, which declares
+            // unity_LightmapST) must be included BEFORE MetaInput/MetaPass:
+            // the reverse order leaves unity_LightmapST undeclared in the
+            // Meta vertex program on metal.
             #include "NamerSurface.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/MetaInput.hlsl"
 
             struct MetaAttributes
             {
                 float4 positionOS   : POSITION;
                 float3 normalOS     : NORMAL;
+                float4 color        : COLOR;
                 float2 uv0          : TEXCOORD0;
                 float2 uv1          : TEXCOORD1;
                 float2 uv2          : TEXCOORD2;
@@ -572,6 +577,7 @@ Shader "GraffitiEntertainment.Namer/NAMER"
             {
                 float4 positionCS   : SV_POSITION;
                 float2 uv           : TEXCOORD0;
+                float4 vertexColor  : TEXCOORD1;
             };
 
             MetaVaryings NamerMetaVertex(MetaAttributes input)
@@ -579,6 +585,7 @@ Shader "GraffitiEntertainment.Namer/NAMER"
                 MetaVaryings output = (MetaVaryings)0;
                 output.positionCS = UnityMetaVertexPosition(input.positionOS.xyz, input.uv1, input.uv2);
                 output.uv = TRANSFORM_TEX(input.uv0, _BaseResidualMap);
+                output.vertexColor = input.color;
                 return output;
             }
 
@@ -596,7 +603,7 @@ Shader "GraffitiEntertainment.Namer/NAMER"
                 NAMER_DECODE_SURFACE(surface, metallic, emissive, roughness, smoothness, normalTS, ao);
 
                 UnityMetaInput metaInput;
-                metaInput.Albedo = baseResidual.rgb * _BaseColor.rgb;   // vertex color unavailable in Meta pass
+                metaInput.Albedo = baseResidual.rgb * _BaseColor.rgb * input.vertexColor.rgb;
 #ifdef _EMISSION
                 metaInput.Emission = _EmissionColor.rgb * (emissive ? 1.0 : 0.0);
 #else

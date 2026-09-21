@@ -851,6 +851,8 @@ namespace GraffitiEntertainment.Namer.Editor
         /// </summary>
         private void DrawStepSwitches()
         {
+            EditorGUILayout.LabelField("Stage & Shader Gates", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("VC + Residual, Roughness, and AO gate pipeline stages — applied on the next Process run. Metallic and Emissive gate the shader only (live, no re-Process needed).", EditorStyles.miniLabel);
             EditorGUI.BeginDisabledGroup(_busy);
             EditorGUILayout.BeginHorizontal();
 

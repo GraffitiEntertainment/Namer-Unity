@@ -43,13 +43,13 @@ Material:
     - _Cull: 2
     - _Cutoff: 0.5
     - _DbgEnableAO: 1
-    - _DbgEnableEmissive: 1
-    - _DbgEnableMetallic: 1
+    - _DbgEnableEmissive: 0
+    - _DbgEnableMetallic: 0
     - _DbgEnableNormal: 1
     - _DbgEnableResidual: 1
-    - _DbgEnableRoughness: 1
+    - _DbgEnableRoughness: 0
     - _DbgEnableVertexColor: 1
-    - _DbgRoughnessNeutral: 0.5
+    - _DbgRoughnessNeutral: 1
     - _DstBlend: 0
     - _DstBlendAlpha: 0
     - _EMISSION: 0

@@ -585,8 +585,8 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <paramref name="writeResidual"/> the residual is forced kept (AlwaysKeep); otherwise
         /// forced dropped (NeverKeep) — the 04.2 checkbox, replacing the retired D-13 Gate.
         /// <paramref name="coverageTarget"/> is the percentile-gate target threaded into
-        /// <c>GenerateResidual</c> (04.3 D-05; defaults to the locked 0.99 while the
-        /// window slider arrives in 04.3-03).
+        /// <c>GenerateResidual</c> (04.3 D-05; defaults to
+        /// <see cref="NamerEditorConstants.DefaultCoverageTarget"/>).
         /// </summary>
         internal static NamerProjectionContext CreateProjectionContext(
             NamerSplitResult split,

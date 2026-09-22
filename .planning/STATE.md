@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 04.3 context gathered
-last_updated: "2026-09-22T21:08:11.404Z"
+last_updated: "2026-09-22T21:18:31.710Z"
 last_activity: 2026-09-22
 progress:
   total_phases: 9
   completed_phases: 7
   total_plans: 37
-  completed_plans: 35
+  completed_plans: 36
   percent: 78
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 ## Current Position
 
 Phase: 04.3 (adaptive-residual-resolution-lod-texture-tiers-residual-size) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-09-22
 
-Progress: [██████████] 95%
+Progress: [██████████] 97%
 
 ## Performance Metrics
 
@@ -90,6 +90,7 @@ Progress: [██████████] 95%
 | Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P05 | 6min | 2 tasks | 4 files |
 | Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P10 | 4min | 2 tasks | 3 files |
 | Phase 04.3 P01 | 49min | 2 tasks | 3 files |
+| Phase 04.3 P02 | 6min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -188,6 +189,9 @@ Recent decisions affecting current work:
 - [Phase 04.3 P01]: EvaluateResolution keeps its float return and now returns the covered-normalized within-tolerance fraction (same math as BuildStats: covStats.MeanErr / CoverageFraction) — per-rung max error has no reader under the pure percentile gate (D-02)
 - [Phase 04.3 P01]: Coverage and AchievedCoverage are distinct stats fields derived from the same coverage reduction — the distinct name prevents gate/UI conflation (D-03/D-07); AchievedCoverage reads 0 on CannotDecompose, coveragePct on drop/final paths
 - [Phase 04.3 P01]: coverageTarget threads as an optional trailing GenerateResidual param defaulting to NamerEditorConstants.DefaultCoverageTarget (0.99f); ChooseResolution clamps it to [0,1] once up front (T-04.3-01) so out-of-range values degrade to the long-edge fallback, never mis-gate
+- [Phase 04.3]: CreateProjectionContext takes coverageTarget as a trailing param with the NamerEditorConstants.DefaultCoverageTarget default — NamerEditorWindow's preview call stays compiling byte-identically until 04.3-03 (04.2/04.3 trailing-param precedent)
+- [Phase 04.3]: Four (not two) exhaustive NamerProcessor.* prefs sandboxes needed the CoverageTarget round-trip: OneTexture/RoughnessFit carry the same 10-key mirror struct as the two planned files (Rule 2 deviation, 04.3-02) — grep for the sandbox struct, not just plan-listed files
+- [Phase 04.3]: 04.3-02 EditMode live run deferred to the orchestrator's post-wave regression gate (interactive editor holds the project lock, no unity-mcp relay in the executor session); compile equivalence proven via Unity's bundled Roslyn against the csproj reference closure
 
 ### Pending Todos
 
@@ -227,6 +231,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-22T21:08:03.614Z
+Last session: 2026-09-22T21:18:31.701Z
 Stopped at: Phase 04.3 context gathered
 Resume file: None

@@ -1,0 +1,158 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{namer2026}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\citation{namer2026}
+\citation{gouraud1971}
+\citation{yuksel2010}
+\citation{cigolle2014}
+\citation{bc7}
+\citation{vaidyanathan2023}
+\@writefile{toc}{\contentsline {paragraph}{Scope and evidence.}{2}{section*.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Related Work}{2}{section.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Mesh-associated color.}{2}{section*.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Normal representations and texture coding.}{2}{section*.3}\protected@file@percent }
+\citation{chang2015}
+\citation{hertzmann1998}
+\citation{pharr2004ao}
+\citation{pbrt2023sampling}
+\citation{barron2015}
+\citation{gltf2}
+\@writefile{toc}{\contentsline {paragraph}{Recoloring and painterly appearance.}{3}{section*.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Occlusion, intrinsic appearance, and material semantics.}{3}{section*.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Representation and Surface Format}{3}{section.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Separate extraction from the storage contract}{3}{subsection.3.1}\protected@file@percent }
+\newlabel{eq:materialfields}{{1}{3}{Separate extraction from the storage contract}{equation.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Representation modes}{3}{subsection.3.2}\protected@file@percent }
+\newlabel{eq:vertexfield}{{2}{3}{Representation modes}{equation.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Component scope at the pinned commit and the planned extensions. ``Implemented'' denotes inspected code, not a new benchmark result.}}{4}{table.caption.6}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{tab:status}{{1}{4}{Component scope at the pinned commit and the planned extensions. ``Implemented'' denotes inspected code, not a new benchmark result}{table.caption.6}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Material modes. The table excludes shared engine textures, constant defaults, and an independently assigned roughness-offset map.}}{4}{table.caption.7}\protected@file@percent }
+\newlabel{tab:modes}{{2}{4}{Material modes. The table excludes shared engine textures, constant defaults, and an independently assigned roughness-offset map}{table.caption.7}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Material-level information flow. AO is acquired and separated before color fitting; it is not merely packed after the fit. Future metallic/emissive extraction supplies semantic masks and shared values, while color tables edit appearance independently. The diagram is a method schematic, not a rendering result.}}{4}{figure.caption.8}\protected@file@percent }
+\newlabel{fig:pipeline}{{1}{4}{Material-level information flow. AO is acquired and separated before color fitting; it is not merely packed after the fit. Future metallic/emissive extraction supplies semantic masks and shared values, while color tables edit appearance independently. The diagram is a method schematic, not a rendering result}{figure.caption.8}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Representative NAMER before/after preview from the Unity editor. The left pane shows the source material and the right pane shows the converted NAMER material in the synchronized preview. The close visual agreement in this single example is illustrative only; it is not an aggregate fidelity measurement or a substitute for controlled evaluation.}}{5}{figure.caption.9}\protected@file@percent }
+\newlabel{fig:preview}{{2}{5}{Representative NAMER before/after preview from the Unity editor. The left pane shows the source material and the right pane shows the converted NAMER material in the synchronized preview. The close visual agreement in this single example is illustrative only; it is not an aggregate fidelity measurement or a substitute for controlled evaluation}{figure.caption.9}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Packed channels}{5}{subsection.3.3}\protected@file@percent }
+\newlabel{eq:pack}{{4}{5}{Packed channels}{equation.4}{}}
+\newlabel{eq:roughdecode}{{5}{5}{Packed channels}{equation.5}{}}
+\citation{namer2026}
+\citation{namer2026}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Surface texel layout. Metallic and emissive are flags, not continuous-valued material channels. Bit positions 7, 6, and 5--0 refer to the alpha byte.}}{6}{figure.caption.10}\protected@file@percent }
+\newlabel{fig:bits}{{3}{6}{Surface texel layout. Metallic and emissive are flags, not continuous-valued material channels. Bit positions 7, 6, and 5--0 refer to the alpha byte}{figure.caption.10}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Normal encoding and its domain}{6}{subsection.3.4}\protected@file@percent }
+\newlabel{eq:normalencode}{{6}{6}{Normal encoding and its domain}{equation.6}{}}
+\newlabel{eq:normaldecode}{{8}{6}{Normal encoding and its domain}{equation.8}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Input semantics and linear working data}{6}{subsection.3.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Ambient Occlusion Extraction and Separation}{6}{section.4}\protected@file@percent }
+\newlabel{sec:ao}{{4}{6}{Ambient Occlusion Extraction and Separation}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Three sources, one explicit AO field}{6}{subsection.4.1}\protected@file@percent }
+\citation{namer2026}
+\citation{barron2015}
+\citation{pharr2004ao}
+\citation{pbrt2023sampling}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Image-space extraction retained in the implementation}{7}{subsection.4.2}\protected@file@percent }
+\newlabel{eq:imageao}{{10}{7}{Image-space extraction retained in the implementation}{equation.10}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Geometry-based AO synthesis}{7}{subsection.4.3}\protected@file@percent }
+\newlabel{eq:geomao}{{11}{7}{Geometry-based AO synthesis}{equation.11}{}}
+\citation{namer2026}
+\citation{namer2026}
+\newlabel{eq:aobake}{{12}{8}{Geometry-based AO synthesis}{equation.12}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}AO shaping and removal from base color}{8}{subsection.4.4}\protected@file@percent }
+\newlabel{eq:aoremap}{{15}{8}{AO shaping and removal from base color}{equation.15}{}}
+\newlabel{eq:ao}{{16}{8}{AO shaping and removal from base color}{equation.16}{}}
+\newlabel{eq:aoorder}{{17}{8}{AO shaping and removal from base color}{equation.17}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5}Recomposition, lighting, and appearance control}{9}{subsection.4.5}\protected@file@percent }
+\newlabel{eq:aoruntime}{{18}{9}{Recomposition, lighting, and appearance control}{equation.18}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Mesh-Conditioned Color Approximation}{9}{section.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Seams and available degrees of freedom}{9}{subsection.5.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Triangle-local least squares}{9}{subsection.5.2}\protected@file@percent }
+\newlabel{eq:grid}{{19}{9}{Triangle-local least squares}{equation.19}{}}
+\newlabel{eq:fit}{{20}{10}{Triangle-local least squares}{equation.20}{}}
+\newlabel{eq:quantvertex}{{21}{10}{Triangle-local least squares}{equation.21}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Projection changes the target}{10}{subsection.5.3}\protected@file@percent }
+\newlabel{eq:identity}{{22}{10}{Projection changes the target}{equation.22}{}}
+\newlabel{eq:removed}{{23}{10}{Projection changes the target}{equation.23}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Representative vertex-color decomposition controls and diagnostics. The editor reports coverage, average and maximum reconstruction error, removed-detail error, and residual output state so the approximation can be inspected rather than treated as an opaque conversion. The displayed numbers are an example asset state, not benchmark averages.}}{11}{figure.caption.11}\protected@file@percent }
+\newlabel{fig:decompui}{{4}{11}{Representative vertex-color decomposition controls and diagnostics. The editor reports coverage, average and maximum reconstruction error, removed-detail error, and residual output state so the approximation can be inspected rather than treated as an opaque conversion. The displayed numbers are an example asset state, not benchmark averages}{figure.caption.11}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Optional Color Residual and Detail Transfer}{11}{section.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Multiplicative residual}{11}{subsection.6.1}\protected@file@percent }
+\newlabel{eq:residual}{{24}{11}{Multiplicative residual}{equation.24}{}}
+\newlabel{eq:error}{{25}{11}{Multiplicative residual}{equation.25}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Signed detail-to-roughness transfer}{11}{subsection.6.2}\protected@file@percent }
+\newlabel{eq:luma}{{26}{11}{Signed detail-to-roughness transfer}{equation.26}{}}
+\newlabel{eq:transfer}{{28}{12}{Signed detail-to-roughness transfer}{equation.28}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Fallback and compositional choices}{12}{subsection.6.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Qualitative gallery of extracted intermediate maps and gated model previews from the Unity workflow. Panels (a)--(f) show residual-color, roughness, and ambient-occlusion intermediates with their corresponding model previews. Panels (g)--(j) show the vertex-color-only reconstruction, the vertex-color-plus-normal reconstruction without residual color, the decoded normal map, and the normal-mapped shaded preview.}}{13}{figure.caption.12}\protected@file@percent }
+\newlabel{fig:gallery}{{5}{13}{Qualitative gallery of extracted intermediate maps and gated model previews from the Unity workflow. Panels (a)--(f) show residual-color, roughness, and ambient-occlusion intermediates with their corresponding model previews. Panels (g)--(j) show the vertex-color-only reconstruction, the vertex-color-plus-normal reconstruction without residual color, the decoded normal map, and the normal-mapped shaded preview}{figure.caption.12}{}}
+\citation{barron2015,gltf2}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Planned Metallic and Emissive Extraction}{14}{section.7}\protected@file@percent }
+\newlabel{sec:metalemit}{{7}{14}{Planned Metallic and Emissive Extraction}{section.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}From channel availability to channel estimation}{14}{subsection.7.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.2}Metallic mask and material-level value}{14}{subsection.7.2}\protected@file@percent }
+\newlabel{eq:metalmodel}{{29}{14}{Metallic mask and material-level value}{equation.29}{}}
+\newlabel{eq:metalfit}{{30}{14}{Metallic mask and material-level value}{equation.30}{}}
+\citation{gltf2}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.3}Emissive mask and shared emission color}{15}{subsection.7.3}\protected@file@percent }
+\newlabel{eq:emissionmodel}{{31}{15}{Emissive mask and shared emission color}{equation.31}{}}
+\newlabel{eq:emissionfit}{{32}{15}{Emissive mask and shared emission color}{equation.32}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.4}Keep emission, occlusion, and roughness distinct}{15}{subsection.7.4}\protected@file@percent }
+\newlabel{eq:emissioncompose}{{33}{15}{Keep emission, occlusion, and roughness distinct}{equation.33}{}}
+\newlabel{eq:emissionroughness}{{34}{15}{Keep emission, occlusion, and roughness distinct}{equation.34}{}}
+\citation{namer2026}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.5}Preview, confidence, and compact persistence}{16}{subsection.7.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {8}Unity Implementation}{16}{section.8}\protected@file@percent }
+\citation{bc7}
+\@writefile{toc}{\contentsline {section}{\numberline {9}Analytical Characterization and Scalar Checks}{17}{section.9}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.1}Storage accounting}{17}{subsection.9.1}\protected@file@percent }
+\newlabel{eq:storage}{{35}{17}{Storage accounting}{equation.35}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Calculated storage, not measured runtime memory. MiB means $2^{20}$ bytes. All full-resolution maps are $2048^2$; residual dimensions are listed separately.}}{17}{table.caption.13}\protected@file@percent }
+\newlabel{tab:storage}{{3}{17}{Calculated storage, not measured runtime memory. MiB means $2^{20}$ bytes. All full-resolution maps are $2048^2$; residual dimensions are listed separately}{table.caption.13}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.2}Reproducible equation checks}{17}{subsection.9.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Executed scalar checks. These verify selected equations and examples, not the full conversion pipeline or rendered appearance.}}{18}{table.caption.14}\protected@file@percent }
+\newlabel{tab:checks}{{4}{18}{Executed scalar checks. These verify selected equations and examples, not the full conversion pipeline or rendered appearance}{table.caption.14}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.3}AO and prospective value-model checks}{18}{subsection.9.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {10}Planned Extension: Editable Color Tables}{18}{section.10}\protected@file@percent }
+\newlabel{sec:palette}{{10}{18}{Planned Extension: Editable Color Tables}{section.10}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.1}Separating color identity from surface response}{18}{subsection.10.1}\protected@file@percent }
+\newlabel{eq:palettesimple}{{36}{18}{Separating color identity from surface response}{equation.36}{}}
+\citation{hertzmann1998}
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.2}Palette coefficients for shared variants}{19}{subsection.10.2}\protected@file@percent }
+\newlabel{eq:paletteweights}{{37}{19}{Palette coefficients for shared variants}{equation.37}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.3}Order of operations and residual treatment}{19}{subsection.10.3}\protected@file@percent }
+\newlabel{eq:noncommute}{{38}{19}{Order of operations and residual treatment}{equation.38}{}}
+\newlabel{eq:styleresidual}{{39}{19}{Order of operations and residual treatment}{equation.39}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.4}Toward a hand-painted-style workflow}{19}{subsection.10.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {11}Limitations and Evaluation Protocol}{20}{section.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {11.1}Representation and implementation limits}{20}{subsection.11.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {11.2}Experiments needed to establish practical benefit}{20}{subsection.11.2}\protected@file@percent }
+\newlabel{sec:evaluation}{{11.2}{20}{Experiments needed to establish practical benefit}{subsection.11.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {12}Conclusion}{21}{section.12}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {A}Normal Inverse: Branch Condition and Counterexample}{21}{appendix.A}\protected@file@percent }
+\newlabel{app:normal}{{A}{21}{Normal Inverse: Branch Condition and Counterexample}{appendix.A}{}}
+\newlabel{eq:roots}{{42}{21}{Normal Inverse: Branch Condition and Counterexample}{equation.42}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {B}Occlusion Recomposition Conditions}{22}{appendix.B}\protected@file@percent }
+\newlabel{app:ao}{{B}{22}{Occlusion Recomposition Conditions}{appendix.B}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {C}Why Packed Alpha Cannot Be Filtered as a Scalar}{22}{appendix.C}\protected@file@percent }
+\newlabel{app:filter}{{C}{22}{Why Packed Alpha Cannot Be Filtered as a Scalar}{appendix.C}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {D}Implementation Traceability and Reproduction}{22}{appendix.D}\protected@file@percent }
+\newlabel{app:trace}{{D}{22}{Implementation Traceability and Reproduction}{appendix.D}{}}
+\bibcite{namer2026}{{1}{}{{}}{{}}}
+\bibcite{gouraud1971}{{2}{}{{}}{{}}}
+\bibcite{yuksel2010}{{3}{}{{}}{{}}}
+\bibcite{cigolle2014}{{4}{}{{}}{{}}}
+\bibcite{bc7}{{5}{}{{}}{{}}}
+\bibcite{vaidyanathan2023}{{6}{}{{}}{{}}}
+\bibcite{chang2015}{{7}{}{{}}{{}}}
+\bibcite{hertzmann1998}{{8}{}{{}}{{}}}
+\bibcite{pharr2004ao}{{9}{}{{}}{{}}}
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Source locations supporting the implementation description.}}{23}{table.caption.15}\protected@file@percent }
+\newlabel{tab:trace}{{5}{23}{Source locations supporting the implementation description}{table.caption.15}{}}
+\bibcite{pbrt2023sampling}{{10}{}{{}}{{}}}
+\bibcite{barron2015}{{11}{}{{}}{{}}}
+\bibcite{gltf2}{{12}{}{{}}{{}}}
+\providecommand\NAT@force@numbers{}\NAT@force@numbers
+\gdef \@abspage@last{24}

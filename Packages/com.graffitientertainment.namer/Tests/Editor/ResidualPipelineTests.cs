@@ -37,6 +37,13 @@ namespace GraffitiEntertainment.Namer.Tests
         private const float kHalfFloatRelativeEpsilon = 0.001f; // 2^-10; half has 10 mantissa bits
         private const float kReconstructionAbsTolerance = 0.001f; // ~VcFloor, covers the below-floor clamp region
 
+        // 04.3 percentile-gate fixture (plan 01): a flat 0.5 gray base with a 4x4 white
+        // block at the corner is a 16-texel out-of-tolerance tail (0.024% of texels) —
+        // far below the default 0.99 target's 1% budget (655 of 65536 texels at 256^2)
+        // but above a 1.0 target's zero tolerance.
+        private const float kTailBaseValue = 0.5f;
+        private const int kTailBlockSize = 4;
+
         [UnityTest]
         public IEnumerator Residual_ReconstructsBase_WithinByteTolerance()
         {
@@ -337,8 +344,12 @@ namespace GraffitiEntertainment.Namer.Tests
                 yield break;
             }
 
-            // Adaptive (D-16): a gradient base with Auto resolution picks a ladder value
-            // <= source whose reconstruction stays within threshold.
+            // Adaptive (D-16, 04.3 percentile gate D-01): a gradient base with Auto
+            // resolution picks a ladder value <= source; a rung passes when >= 99%
+            // (default target) of UV-covered texels reconstruct within threshold, and
+            // MaxError is reported, not gated (D-02). The smooth-gradient fixture
+            // reconstructs within threshold everywhere, so max and coverage gates agree
+            // here (max <= threshold implies coverage 1.0 >= 0.99).
             {
                 const int w = 256;
                 const int h = 256;
@@ -358,6 +369,7 @@ namespace GraffitiEntertainment.Namer.Tests
                             Assert.IsNotNull(output.Residual);
                             Assert.LessOrEqual(output.Stats.ChosenResolution, w);
                             Assert.LessOrEqual(output.Stats.MaxError, threshold, "chosen resolution must stay within the error threshold");
+                            Assert.GreaterOrEqual(output.Stats.AchievedCoverage, 0.99f, "chosen rung must meet the default 0.99 coverage target");
                             Assert.AreEqual(output.Stats.ChosenResolution, output.Residual.width, "residual must be produced at the chosen resolution");
 
                             bool inLadder = false;
@@ -412,6 +424,114 @@ namespace GraffitiEntertainment.Namer.Tests
                     {
                         Release(baseRt);
                     }
+                }
+            }
+
+            yield return null;
+        }
+
+        // 04.3 plan 01, D-01/D-02 proof (the discriminating fixture). Base = flat 0.5
+        // gray with a 4x4 white block at [0..3]x[0..3] — a 16-texel out-of-tolerance
+        // tail (0.024% of texels). Under the OLD max-error gate this fixture evaluates
+        // only rung 128 (256 >= the long edge skips 256 and every larger rung), fails
+        // on max error, and falls back to 256; under the percentile gate the same rung
+        // passes on coverage. Gate keeps the residual: the fit-only max error at the
+        // white block is ~0.5 > 0.05, so the drop check cannot fire. Failing texels are
+        // the ~16-texel block plus a small bilinear smear halo — orders of magnitude
+        // below the 1% budget of 655 texels, so the margins are wide.
+        [UnityTest]
+        public IEnumerator GenerateResidual_PercentileGate_IgnoresErrorTail()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU percentile-gate test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            const int w = 256;
+            const int h = 256;
+            const float threshold = 0.05f;
+
+            NamerSplitResult split = CreateSplitQuad(0f, 1f);
+            Color32[] colors = ConstantColors(split.VertexCount, 128);
+            RenderTexture baseRt = CreateTailBlockBase(w, h);
+
+            using (NamerDecompPipeline pipeline = new NamerDecompPipeline())
+            {
+                try
+                {
+                    NamerDecompOutput output = pipeline.GenerateResidual(
+                        split, colors, baseRt, w, h, threshold, 0,
+                        projectedOut: null, mode: NamerResidualMode.Gate, coverageTarget: 0.99f);
+                    try
+                    {
+                        Assert.AreEqual(128, output.Stats.ChosenResolution, "the error tail must not gate the rung (D-02)");
+                        Assert.IsTrue(output.Stats.ResidualRequired, "the white block's fit-only error (~0.5) exceeds the threshold, so Gate keeps the residual");
+                        Assert.AreEqual(128, output.Residual.width);
+                        Assert.Greater(output.Stats.MaxError, threshold, "the ignored tail stays visible in MaxError (D-02 honest reporting)");
+                        Assert.GreaterOrEqual(output.Stats.AchievedCoverage, 0.99f, "the rung passes on the percentile statistic");
+                    }
+                    finally
+                    {
+                        output.Dispose();
+                    }
+                }
+                finally
+                {
+                    Release(baseRt);
+                }
+            }
+
+            yield return null;
+        }
+
+        // 04.3 plan 01, D-05 semantics at pipeline level + D-08 fallback shape. Same
+        // fixture as GenerateResidual_PercentileGate_IgnoresErrorTail but a 1.0
+        // coverage target: the 0.024% tail makes rung-128 coverage < 1.0, the rung is
+        // rejected, and the walk falls back to the source long edge — proving the
+        // target knob actually moves the choice. The fallback's achieved coverage is
+        // ~1.0 because the full-res reconstruction is the one evaluated — the
+        // SHORTFALL was at the rejected rung; that is D-08's honest shape (no forced
+        // smaller rung, no warning).
+        [UnityTest]
+        public IEnumerator GenerateResidual_PercentileGate_TargetStrictnessMovesTheRung()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU percentile-gate test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            const int w = 256;
+            const int h = 256;
+            const float threshold = 0.05f;
+
+            NamerSplitResult split = CreateSplitQuad(0f, 1f);
+            Color32[] colors = ConstantColors(split.VertexCount, 128);
+            RenderTexture baseRt = CreateTailBlockBase(w, h);
+
+            using (NamerDecompPipeline pipeline = new NamerDecompPipeline())
+            {
+                try
+                {
+                    NamerDecompOutput output = pipeline.GenerateResidual(
+                        split, colors, baseRt, w, h, threshold, 0,
+                        projectedOut: null, mode: NamerResidualMode.Gate, coverageTarget: 1f);
+                    try
+                    {
+                        Assert.AreEqual(256, output.Stats.ChosenResolution, "a 1.0 target rejects the tail rung and falls back to the source long edge (D-08)");
+                        Assert.AreEqual(256, output.Residual.width);
+                        Assert.IsTrue(output.Stats.ResidualRequired);
+                        Assert.GreaterOrEqual(output.Stats.AchievedCoverage, 0.99f, "the fallback reconstruction at full res is honestly reported");
+                    }
+                    finally
+                    {
+                        output.Dispose();
+                    }
+                }
+                finally
+                {
+                    Release(baseRt);
                 }
             }
 
@@ -1429,6 +1549,20 @@ namespace GraffitiEntertainment.Namer.Tests
             return UploadBase(w, h, (x, y) =>
             {
                 float v = x / (float)(w - 1);
+                return new Color(v, v, v, 1f);
+            });
+        }
+
+        // 04.3 percentile-gate fixture: flat kTailBaseValue gray with a white
+        // kTailBlockSize x kTailBlockSize block at the corner — a sparse
+        // out-of-tolerance tail a percentile gate must ignore (default target) and a
+        // strict 1.0 target must reject.
+        private static RenderTexture CreateTailBlockBase(int w, int h)
+        {
+            return UploadBase(w, h, (x, y) =>
+            {
+                bool inTail = x < kTailBlockSize && y < kTailBlockSize;
+                float v = inTail ? 1f : kTailBaseValue;
                 return new Color(v, v, v, 1f);
             });
         }

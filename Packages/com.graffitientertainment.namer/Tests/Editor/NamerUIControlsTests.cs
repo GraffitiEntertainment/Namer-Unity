@@ -15,12 +15,16 @@ namespace GraffitiEntertainment.Namer.Tests
     /// asserts a computed overlap-depth statistic — the honest-copy decision (measured numbers
     /// in tooltips, not a computed counter) is deliberate (04.2 CONTEXT: "at most an honest
     /// statement, not repair").
+    /// 04.3 adds the CoverageTarget knob (D-05, slider 0.90-1.00, default 0.99, persisted
+    /// under "NamerProcessor.CoverageTarget"): persistence and the fresh-prefs default are
+    /// test-enforced below.
     /// </summary>
     public class NamerUIControlsTests
     {
         private const string DipSourceKey = "NamerProcessor.DipSource";
         private const string WriteResidualKey = "NamerProcessor.WriteResidual";
         private const string RoughnessExtractStrengthKey = "NamerProcessor.RoughnessExtractStrength";
+        private const string CoverageTargetKey = "NamerProcessor.CoverageTarget";
 
         /// <summary>
         /// Settings round-trip: writing the three controls through one
@@ -108,6 +112,62 @@ namespace GraffitiEntertainment.Namer.Tests
 
                 if (hadStrength) { EditorPrefs.SetFloat(RoughnessExtractStrengthKey, strength); }
                 else { EditorPrefs.DeleteKey(RoughnessExtractStrengthKey); }
+            }
+        }
+
+        /// <summary>
+        /// Coverage-target round-trip (D-05): writing CoverageTarget through one
+        /// <see cref="NamerProcessorSettings"/> instance is visible to a NEW instance.
+        /// Pre-test value is snapshotted and restored in <c>finally</c>.
+        /// </summary>
+        [Test]
+        public void CoverageTarget_PersistsViaEditorPrefs()
+        {
+            float coverageTarget = EditorPrefs.GetFloat(CoverageTargetKey, 0.99f);
+            bool hadCoverageTarget = EditorPrefs.HasKey(CoverageTargetKey);
+
+            try
+            {
+                var first = new NamerProcessorSettings
+                {
+                    CoverageTarget = 0.95f,
+                };
+
+                NamerProcessorSettings second = new NamerProcessorSettings();
+                Assert.AreEqual(0.95f, second.CoverageTarget,
+                    "CoverageTarget must persist via EditorPrefs (D-05)");
+            }
+            finally
+            {
+                if (hadCoverageTarget) { EditorPrefs.SetFloat(CoverageTargetKey, coverageTarget); }
+                else { EditorPrefs.DeleteKey(CoverageTargetKey); }
+            }
+        }
+
+        /// <summary>
+        /// Fresh-prefs coverage-target default (D-05): with no key present the shipped
+        /// default reads back as the constant 0.99.
+        /// </summary>
+        [Test]
+        public void CoverageTarget_FreshPrefsDefault()
+        {
+            float coverageTarget = EditorPrefs.GetFloat(CoverageTargetKey, 0.99f);
+            bool hadCoverageTarget = EditorPrefs.HasKey(CoverageTargetKey);
+
+            try
+            {
+                EditorPrefs.DeleteKey(CoverageTargetKey);
+
+                NamerProcessorSettings settings = new NamerProcessorSettings();
+                Assert.AreEqual(NamerEditorConstants.DefaultCoverageTarget, settings.CoverageTarget,
+                    "fresh CoverageTarget must default to NamerEditorConstants.DefaultCoverageTarget");
+                Assert.AreEqual(0.99f, settings.CoverageTarget,
+                    "fresh CoverageTarget must default to the shipped 0.99 percentile gate target");
+            }
+            finally
+            {
+                if (hadCoverageTarget) { EditorPrefs.SetFloat(CoverageTargetKey, coverageTarget); }
+                else { EditorPrefs.DeleteKey(CoverageTargetKey); }
             }
         }
 

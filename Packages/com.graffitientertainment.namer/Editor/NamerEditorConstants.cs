@@ -74,6 +74,9 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>Default reconstruction-error threshold (D-15).</summary>
         public const float DefaultErrorThreshold = 0.02f;
 
+        /// <summary>Default percentile coverage target for the adaptive residual-resolution search (D-05: fraction of UV-covered texels that must reconstruct within the error threshold; 0.99).</summary>
+        public const float DefaultCoverageTarget = 0.99f;
+
         /// <summary>Default residual-resolution ladder index (D-17: 0 = Auto).</summary>
         public const int DefaultResidualResolution = 0;
     }

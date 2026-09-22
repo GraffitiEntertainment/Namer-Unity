@@ -711,19 +711,6 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Counts the DISTINCT source meshes a selection involves, mirroring
-        /// <see cref="ResolveSourceMesh"/>'s per-case resolution — scene renderers, then
-        /// prefab sub-assets + prefab contents renderers, then model/FBX sub-assets — but
-        /// collecting a <see cref="HashSet{T}"/> of mesh instance IDs instead of stopping
-        /// at the first mesh (CR-01 guard input). In the Regular/Variant prefab case the
-        /// resolver returns the <see cref="FindMeshSubAsset"/> mesh FIRST without ever
-        /// looking at renderers, so the counter collects the mesh sub-assets AND the
-        /// contents renderers' meshes (WR-03): when those differ, decomposition would run
-        /// on the sub-asset while <see cref="BindGeneratedMaterials"/> keys the swap on
-        /// what the renderers actually wear — the CR-01 silent-wrong-render failure mode —
-        /// so the mismatch itself must trip the guard.
-        /// </summary>
-        /// <summary>
         /// The CR-01 predicate shared by <see cref="Process"/> and the processor window's
         /// preview: the reason vertex-color decomposition cannot run for this selection
         /// (one vertex-color stream per source mesh cannot carry N materials' fits), or
@@ -754,6 +741,19 @@ namespace GraffitiEntertainment.Namer.Editor
             return null;
         }
 
+        /// <summary>
+        /// Counts the DISTINCT source meshes a selection involves, mirroring
+        /// <see cref="ResolveSourceMesh"/>'s per-case resolution — scene renderers, then
+        /// prefab sub-assets + prefab contents renderers, then model/FBX sub-assets — but
+        /// collecting a <see cref="HashSet{T}"/> of mesh instance IDs instead of stopping
+        /// at the first mesh (CR-01 guard input). In the Regular/Variant prefab case the
+        /// resolver returns the <see cref="FindMeshSubAsset"/> mesh FIRST without ever
+        /// looking at renderers, so the counter collects the mesh sub-assets AND the
+        /// contents renderers' meshes (WR-03): when those differ, decomposition would run
+        /// on the sub-asset while <see cref="BindGeneratedMaterials"/> keys the swap on
+        /// what the renderers actually wear — the CR-01 silent-wrong-render failure mode —
+        /// so the mismatch itself must trip the guard.
+        /// </summary>
         private static int CountDistinctSourceMeshes(UnityEngine.Object selection)
         {
             if (selection == null)

@@ -172,7 +172,7 @@ Plans:
 **Goal:** Replace the max-error gate in the residual-resolution search with a percentile coverage gate — pick the lowest rung of the existing {2048..128} down/up round-trip ladder where ~99% of texels stay within the color-recreation tolerance (often 512x512). DEFERRED (not this phase): LOD-based texture tiers (residual off at distance, no-texture smallest LOD) — shelved pending the Ultimate LOD System decision; NAMER will not depend on a third-party LOD generator for now.
 **Requirements**: strengthens VCOL-04, VCOL-05, UI-03 (percentile-gate follow-up from Phase 4/04.2; no dedicated IDs — success criteria derived from CONTEXT.md D-01..D-08)
 **Depends on:** Phase 4
-**Plans:** 1/3 plans executed
+**Plans:** 2/3 plans executed
 
 Plans:
 
@@ -182,7 +182,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 04.3-02-PLAN.md — CoverageTarget persistence (NamerProcessorSettings, D-05) + plumbing through NamerProjectionContext/CreateProjectionContext to GenerateResidual + reflection/prefs-sandbox test couplings
+- [x] 04.3-02-PLAN.md — CoverageTarget persistence (NamerProcessorSettings, D-05) + plumbing through NamerProjectionContext/CreateProjectionContext to GenerateResidual + reflection/prefs-sandbox test couplings
 
 **Wave 3** *(blocked on Waves 1-2 completion)*
 

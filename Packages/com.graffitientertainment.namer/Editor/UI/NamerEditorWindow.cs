@@ -1709,7 +1709,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 int newResolution = EditorGUILayout.Popup(
                     new GUIContent(
                         "Residual Resolution",
-                        "Residual texture resolution. Auto adaptively halves from the source resolution while error stays within the threshold; manual options snap to the same halving steps."),
+                        "Residual texture resolution. Auto adaptively halves from the source resolution while the Coverage Target fraction of covered texels stays within the Error Threshold; manual options snap to the same halving steps."),
                     _residualResolution,
                     new[] { "Auto", "2048", "1024", "512", "256", "128" });
                 if (newResolution != _residualResolution)

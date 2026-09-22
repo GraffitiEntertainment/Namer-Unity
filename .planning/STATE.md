@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: "Phase 04.2 shipped — PR #1"
-stopped_at: Completed 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid-10-PLAN.md
-last_updated: "2026-09-20T21:31:11.986Z"
-last_activity: 2026-09-20
+status: Phase 04.3 inserted (not planned yet)
+stopped_at: Phase 04.3 context gathered
+last_updated: "2026-09-22T17:37:37.257Z"
+last_activity: 2026-09-21
 progress:
-  total_phases: 8
+  total_phases: 9
   completed_phases: 7
   total_plans: 34
   completed_plans: 34
-  percent: 88
+  percent: 78
 ---
 
 # Project State
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-25)
 
 **Core value:** A user can select a textured FBX in Unity, run `Process with NAMER`, and get a correctly rendering, source-compatible NAMER material without ever modifying the imported source assets or leaving the Unity Editor.
-**Current focus:** Phase 04.2 — gouraud-projection-one-texture-with-roughness-transfer-resid
+**Current focus:** Phase 04.3 — adaptive-residual-resolution-lod-texture-tiers-residual-size
 
 ## Current Position
 
-Phase: 04.2 (gouraud-projection-one-texture-with-roughness-transfer-resid) — EXECUTING
+Phase: 04.3 (adaptive-residual-resolution-lod-texture-tiers-residual-size) — INSERTED, not planned yet
 Plan: 5 of 5
-Status: Phase 04.2 shipped — PR #1
+Status: Phase 04.3 inserted (not planned yet)
 Last activity: 2026-09-21
 
 Progress: [██████████] 100%
@@ -96,6 +96,8 @@ Progress: [██████████] 100%
 
 - Phase 03.1 inserted after Phase 3: AO extraction: un-multiply baked AO from the base texture, with bake tweaks (cubemap light from high-res model, blur, etc.) (URGENT)
 - Phase 04.1 inserted after Phase 4: Baked-response roughness extraction + zero-residual one-texture mode — extract gloss baked into base as 6-bit roughness, refit vertex colors, D-13 auto-drop becomes primary path (see notes/roughness-extraction-one-texture-mode.md) (URGENT)
+- Phase 04.3 inserted after Phase 4: Adaptive residual resolution (lowest mip meeting ~99% coverage) + LOD-aware residual/no-texture tiers (URGENT)
+- Phase 04.3 edited: descoped to percentile-coverage residual resolution; LOD texture tiers deferred pending Ultimate LOD System decision
 
 ### Decisions
 
@@ -221,6 +223,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-17T23:46:43.559Z
-Stopped at: Completed 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid-10-PLAN.md
-Resume file: None
+Last session: 2026-09-22T17:37:37.237Z
+Stopped at: Phase 04.3 context gathered
+Resume file: .planning/phases/04.3-adaptive-residual-resolution-lod-texture-tiers-residual-size/04.3-CONTEXT.md

@@ -490,9 +490,12 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture avgA,
             RenderTexture avgB)
         {
-            // Clamp once up front so a programmatic 0 / negative / >1 target degrades
-            // deterministically (0 -> every rung fails -> the long-edge fallback) instead
-            // of mis-gating (T-04.3-01).
+            // Clamp once up front so a programmatic out-of-range target degrades
+            // deterministically instead of throwing (T-04.3-01). A 0 / negative target
+            // clamps to 0: the pass condition (coverage < 0) is then never true, so
+            // EVERY rung passes and the walk ends on the SMALLEST rung (maximum
+            // downsampling). A > 1 target clamps to 1 — the strictest gate — which
+            // fails every imperfect rung and keeps the long-edge fallback.
             float target = Mathf.Clamp(coverageTarget, 0f, 1f);
 
             // Manual override (D-17): the POPUP INDEX resolves to a pixel size — the LONG

@@ -605,6 +605,7 @@ namespace GraffitiEntertainment.Namer.Tests
             public bool OverwriteGenerated;
             public bool DecompositionEnabled;
             public float ErrorThreshold;
+            public float CoverageTarget;
             public int ResidualResolution;
             public float RoughnessExtractStrength;
             public int DipSource;
@@ -615,6 +616,7 @@ namespace GraffitiEntertainment.Namer.Tests
             public bool HadOverwriteGenerated;
             public bool HadDecompositionEnabled;
             public bool HadErrorThreshold;
+            public bool HadCoverageTarget;
             public bool HadResidualResolution;
             public bool HadRoughnessExtractStrength;
             public bool HadDipSource;
@@ -631,6 +633,7 @@ namespace GraffitiEntertainment.Namer.Tests
                 OverwriteGenerated = EditorPrefs.GetBool("NamerProcessor.OverwriteGenerated", false),
                 DecompositionEnabled = EditorPrefs.GetBool("NamerProcessor.DecompositionEnabled", false),
                 ErrorThreshold = EditorPrefs.GetFloat("NamerProcessor.ErrorThreshold", 0.02f),
+                CoverageTarget = EditorPrefs.GetFloat("NamerProcessor.CoverageTarget", 0.99f),
                 ResidualResolution = EditorPrefs.GetInt("NamerProcessor.ResidualResolution", 0),
                 RoughnessExtractStrength = EditorPrefs.GetFloat("NamerProcessor.RoughnessExtractStrength", 1f),
                 DipSource = EditorPrefs.GetInt("NamerProcessor.DipSource", 0),
@@ -641,6 +644,7 @@ namespace GraffitiEntertainment.Namer.Tests
                 HadOverwriteGenerated = EditorPrefs.HasKey("NamerProcessor.OverwriteGenerated"),
                 HadDecompositionEnabled = EditorPrefs.HasKey("NamerProcessor.DecompositionEnabled"),
                 HadErrorThreshold = EditorPrefs.HasKey("NamerProcessor.ErrorThreshold"),
+                HadCoverageTarget = EditorPrefs.HasKey("NamerProcessor.CoverageTarget"),
                 HadResidualResolution = EditorPrefs.HasKey("NamerProcessor.ResidualResolution"),
                 HadRoughnessExtractStrength = EditorPrefs.HasKey("NamerProcessor.RoughnessExtractStrength"),
                 HadDipSource = EditorPrefs.HasKey("NamerProcessor.DipSource"),
@@ -667,6 +671,9 @@ namespace GraffitiEntertainment.Namer.Tests
 
             if (snapshot.HadErrorThreshold) { EditorPrefs.SetFloat("NamerProcessor.ErrorThreshold", snapshot.ErrorThreshold); }
             else { EditorPrefs.DeleteKey("NamerProcessor.ErrorThreshold"); }
+
+            if (snapshot.HadCoverageTarget) { EditorPrefs.SetFloat("NamerProcessor.CoverageTarget", snapshot.CoverageTarget); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.CoverageTarget"); }
 
             if (snapshot.HadResidualResolution) { EditorPrefs.SetInt("NamerProcessor.ResidualResolution", snapshot.ResidualResolution); }
             else { EditorPrefs.DeleteKey("NamerProcessor.ResidualResolution"); }

@@ -179,7 +179,8 @@ namespace GraffitiEntertainment.Namer.Editor
                         {
                             projection = CreateProjectionContext(
                                 fitSplit, decompPipeline, baseW, baseH,
-                                settings.ErrorThreshold, settings.ResidualResolution, settings.WriteResidual);
+                                settings.ErrorThreshold, settings.ResidualResolution, settings.WriteResidual,
+                                settings.CoverageTarget);
                         }
                     }
 
@@ -252,7 +253,8 @@ namespace GraffitiEntertainment.Namer.Editor
                                             computeResult.Width, computeResult.Height,
                                             settings.ErrorThreshold, settings.ResidualResolution,
                                             projectedOut: null,
-                                            mode: settings.WriteResidual ? NamerResidualMode.AlwaysKeep : NamerResidualMode.NeverKeep);
+                                            mode: settings.WriteResidual ? NamerResidualMode.AlwaysKeep : NamerResidualMode.NeverKeep,
+                                            coverageTarget: settings.CoverageTarget);
                                         if (decompOutput.Stats.CannotDecompose)
                                         {
                                             // CR-03 fallback: near-zero rasterizer coverage means the
@@ -582,6 +584,9 @@ namespace GraffitiEntertainment.Namer.Editor
         /// while writing the Gouraud projection into <c>projectedOut</c>. With
         /// <paramref name="writeResidual"/> the residual is forced kept (AlwaysKeep); otherwise
         /// forced dropped (NeverKeep) — the 04.2 checkbox, replacing the retired D-13 Gate.
+        /// <paramref name="coverageTarget"/> is the percentile-gate target threaded into
+        /// <c>GenerateResidual</c> (04.3 D-05; defaults to the locked 0.99 while the
+        /// window slider arrives in 04.3-03).
         /// </summary>
         internal static NamerProjectionContext CreateProjectionContext(
             NamerSplitResult split,
@@ -590,12 +595,14 @@ namespace GraffitiEntertainment.Namer.Editor
             int h,
             float errorThreshold,
             int residualResolution,
-            bool writeResidual)
+            bool writeResidual,
+            float coverageTarget = NamerEditorConstants.DefaultCoverageTarget)
         {
             var context = new NamerProjectionContext
             {
                 Split = split,
                 ErrorThreshold = errorThreshold,
+                CoverageTarget = coverageTarget,
                 ManualResolution = residualResolution,
                 WriteResidual = writeResidual,
             };
@@ -611,7 +618,8 @@ namespace GraffitiEntertainment.Namer.Editor
                         context.Decomp = decomp.GenerateResidual(
                             split, context.Colors, sourceBase, w, h,
                             context.ErrorThreshold, context.ManualResolution, projectedOut,
-                            context.WriteResidual ? NamerResidualMode.AlwaysKeep : NamerResidualMode.NeverKeep);
+                            context.WriteResidual ? NamerResidualMode.AlwaysKeep : NamerResidualMode.NeverKeep,
+                            context.CoverageTarget);
                     }
                 }
                 finally

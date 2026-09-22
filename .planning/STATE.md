@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Phase 04.3 context gathered
-last_updated: "2026-09-22T21:18:31.710Z"
+status: verifying
+stopped_at: Completed 04.3-03-PLAN.md
+last_updated: "2026-09-22T21:27:08.061Z"
 last_activity: 2026-09-22
 progress:
   total_phases: 9
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 37
-  completed_plans: 36
-  percent: 78
+  completed_plans: 37
+  percent: 89
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 
 Phase: 04.3 (adaptive-residual-resolution-lod-texture-tiers-residual-size) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-22
 
-Progress: [██████████] 97%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -91,6 +91,7 @@ Progress: [██████████] 97%
 | Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P10 | 4min | 2 tasks | 3 files |
 | Phase 04.3 P01 | 49min | 2 tasks | 3 files |
 | Phase 04.3 P02 | 6min | 2 tasks | 8 files |
+| Phase 04.3 P03 | 4min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -192,6 +193,9 @@ Recent decisions affecting current work:
 - [Phase 04.3]: CreateProjectionContext takes coverageTarget as a trailing param with the NamerEditorConstants.DefaultCoverageTarget default — NamerEditorWindow's preview call stays compiling byte-identically until 04.3-03 (04.2/04.3 trailing-param precedent)
 - [Phase 04.3]: Four (not two) exhaustive NamerProcessor.* prefs sandboxes needed the CoverageTarget round-trip: OneTexture/RoughnessFit carry the same 10-key mirror struct as the two planned files (Rule 2 deviation, 04.3-02) — grep for the sandbox struct, not just plan-listed files
 - [Phase 04.3]: 04.3-02 EditMode live run deferred to the orchestrator's post-wave regression gate (interactive editor holds the project lock, no unity-mcp relay in the executor session); compile equivalence proven via Unity's bundled Roslyn against the csproj reference closure
+- [Phase ?]: [Phase 04.3 P03]: D-07 achieved-coverage readout rides the Residual row's VALUE string ('written @Npx, coverage X%') + extended tooltip — DecompStatLabels stays the 5-entry array byte-unchanged so the reflection test's expectations stay valid (PATTERNS-blessed over a 6th row)
+- [Phase ?]: [Phase 04.3 P03]: Roslyn compile-equivalence lesson — csc's -out: name IS the assembly name, so InternalsVisibleTo grants silently stop matching under temp output names and surface internal access as CS0117; build to the real assembly name
+- [Phase ?]: [Phase 04.3 P03]: EditMode runtime run deferred to the post-wave regression gate (editor lock, no unity-mcp relay) — 04.2-P04/04.3-02 precedent; both assemblies compile clean via Unity's bundled Roslyn, Tests built against the fresh Editor dll
 
 ### Pending Todos
 
@@ -231,6 +235,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-22T21:18:31.701Z
-Stopped at: Phase 04.3 context gathered
+Last session: 2026-09-22T21:27:08.051Z
+Stopped at: Completed 04.3-03-PLAN.md
 Resume file: None

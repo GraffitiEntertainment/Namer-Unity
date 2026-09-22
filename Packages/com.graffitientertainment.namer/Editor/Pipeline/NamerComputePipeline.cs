@@ -593,8 +593,10 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>Residual error threshold passed to <c>GenerateResidual</c>.</summary>
         public float ErrorThreshold;
 
-        /// <summary>Coverage target passed to <c>GenerateResidual</c> (D-05 percentile gate).</summary>
-        public float CoverageTarget;
+        /// <summary>Coverage target passed to <c>GenerateResidual</c> (D-05 percentile gate).
+        /// Defaults to <see cref="NamerEditorConstants.DefaultCoverageTarget"/> so a hand-built
+        /// context that skips the field does not silently gate at 0 (the smallest rung).</summary>
+        public float CoverageTarget = NamerEditorConstants.DefaultCoverageTarget;
 
         /// <summary>Residual-resolution popup index passed to <c>GenerateResidual</c>.</summary>
         public int ManualResolution;

@@ -21,6 +21,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private const string AoContrastKey = "NamerProcessor.AoContrast";
         private const string DecompositionEnabledKey = "NamerProcessor.DecompositionEnabled";
         private const string ErrorThresholdKey = "NamerProcessor.ErrorThreshold";
+        private const string CoverageTargetKey = "NamerProcessor.CoverageTarget";
         private const string ResidualResolutionKey = "NamerProcessor.ResidualResolution";
         private const string RoughnessExtractStrengthKey = "NamerProcessor.RoughnessExtractStrength";
         private const string DipSourceKey = "NamerProcessor.DipSource";
@@ -132,6 +133,13 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             get { return EditorPrefs.GetFloat(ErrorThresholdKey, NamerEditorConstants.DefaultErrorThreshold); }
             set { EditorPrefs.SetFloat(ErrorThresholdKey, value); }
+        }
+
+        /// <summary>Coverage target for the percentile residual-resolution gate — the fraction of UV-covered texels that must stay within the error threshold (D-05; default 0.99).</summary>
+        public float CoverageTarget
+        {
+            get { return EditorPrefs.GetFloat(CoverageTargetKey, NamerEditorConstants.DefaultCoverageTarget); }
+            set { EditorPrefs.SetFloat(CoverageTargetKey, value); }
         }
 
         /// <summary>Residual resolution popup index (D-17; 0 = Auto, else ladder index).</summary>

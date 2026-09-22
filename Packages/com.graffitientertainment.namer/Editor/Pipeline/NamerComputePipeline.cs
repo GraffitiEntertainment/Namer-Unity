@@ -593,6 +593,9 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>Residual error threshold passed to <c>GenerateResidual</c>.</summary>
         public float ErrorThreshold;
 
+        /// <summary>Coverage target passed to <c>GenerateResidual</c> (D-05 percentile gate).</summary>
+        public float CoverageTarget;
+
         /// <summary>Residual-resolution popup index passed to <c>GenerateResidual</c>.</summary>
         public int ManualResolution;
 

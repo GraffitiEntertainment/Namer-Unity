@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 04.3 context gathered
-last_updated: "2026-09-22T18:09:25.264Z"
-last_activity: 2026-09-22 -- Phase 04.3 planning complete
+last_updated: "2026-09-22T21:08:11.404Z"
+last_activity: 2026-09-22
 progress:
   total_phases: 9
   completed_phases: 7
   total_plans: 37
-  completed_plans: 34
+  completed_plans: 35
   percent: 78
 ---
 
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 
 ## Current Position
 
-Phase: 04.3 (adaptive-residual-resolution-lod-texture-tiers-residual-size) — INSERTED, not planned yet
-Plan: 5 of 5
+Phase: 04.3 (adaptive-residual-resolution-lod-texture-tiers-residual-size) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-09-22 -- Phase 04.3 planning complete
+Last activity: 2026-09-22
 
-Progress: [██████████] 100%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -89,6 +89,7 @@ Progress: [██████████] 100%
 | Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P04 | 17min | 3 tasks | 5 files |
 | Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P05 | 6min | 2 tasks | 4 files |
 | Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid P10 | 4min | 2 tasks | 3 files |
+| Phase 04.3 P01 | 49min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -184,6 +185,9 @@ Recent decisions affecting current work:
 - [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: Added a 6th public test-observability accessor (OrthographicSize) beyond the plan's 5 listed, so the render test can assert the camera's applied size
 - [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: PaneAnchorWorld uses the neutral _framedHalfWidth captured at Frame (first positioning) instead of the per-Render rotated HorizontalHalfExtentWorld — orbit spins in place about a fixed center (GAP-5)
 - [Phase 04.2-gouraud-projection-one-texture-with-roughness-transfer-resid]: Real per-pane clipping via two preview cycles + two persistent pane RTs (option a), each cycle blitting its utility RT into its own pane RT before the next BeginPreview and restoring RenderTexture.active=null after each blit
+- [Phase 04.3 P01]: EvaluateResolution keeps its float return and now returns the covered-normalized within-tolerance fraction (same math as BuildStats: covStats.MeanErr / CoverageFraction) — per-rung max error has no reader under the pure percentile gate (D-02)
+- [Phase 04.3 P01]: Coverage and AchievedCoverage are distinct stats fields derived from the same coverage reduction — the distinct name prevents gate/UI conflation (D-03/D-07); AchievedCoverage reads 0 on CannotDecompose, coveragePct on drop/final paths
+- [Phase 04.3 P01]: coverageTarget threads as an optional trailing GenerateResidual param defaulting to NamerEditorConstants.DefaultCoverageTarget (0.99f); ChooseResolution clamps it to [0,1] once up front (T-04.3-01) so out-of-range values degrade to the long-edge fallback, never mis-gate
 
 ### Pending Todos
 
@@ -223,6 +227,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-22T17:37:37.237Z
+Last session: 2026-09-22T21:08:03.614Z
 Stopped at: Phase 04.3 context gathered
-Resume file: .planning/phases/04.3-adaptive-residual-resolution-lod-texture-tiers-residual-size/04.3-CONTEXT.md
+Resume file: None

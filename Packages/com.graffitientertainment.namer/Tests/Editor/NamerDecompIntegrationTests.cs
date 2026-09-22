@@ -661,6 +661,66 @@ namespace GraffitiEntertainment.Namer.Tests
             yield return null;
         }
 
+        // 04.3 review IN-06: prove the persisted CoverageTarget pref moves what Process
+        // actually produces (settings -> CreateProjectionContext -> GenerateResidual).
+        // The pipeline-level percentile-gate tests pass coverageTarget explicitly; this
+        // runs the same 256x256 tail-block fixture as
+        // GenerateResidual_PercentileGate_TargetStrictnessMovesTheRung
+        // (ResidualPipelineTests) through the settings path: at the 0.99 default the
+        // ~16-texel failing tail sits far under the 1% budget, rung 128 passes and the
+        // written EXR lands at 128; at a strict 1.0 target the rung fails and the D-08
+        // long-edge fallback keeps 256.
+        [UnityTest]
+        public IEnumerator Process_CoverageTargetPref_ChangesGeneratedResidualResolution()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU coverage-target plumbing integration test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            EnsureTempFolder();
+            PrefsSnapshot prefs = CapturePrefs();
+            GameObject gameObject = null;
+            try
+            {
+                Texture2D baseMap = CreateImportedBaseMap(TempFolder + "/SourceBase.png", 256, 256, TailBlock);
+                Material source = CreateSourceMaterial(TempFolder, "SourceMat", baseMap);
+                gameObject = CreateSceneObject(CreateQuadMeshAsset(TempFolder + "/SourceQuad.asset"), source, "CoverageTargetTarget");
+
+                var settings = NewSettings(decompositionEnabled: true);
+                settings.WriteResidual = true; // force the residual EXR whose resolution is asserted
+                settings.ErrorThreshold = 0.05f; // mirror the pipeline fixture's threshold
+                settings.OverwriteGenerated = true; // the strict rerun replaces the lenient output
+
+                settings.CoverageTarget = NamerEditorConstants.DefaultCoverageTarget;
+                NamerProcessResult lenient = NamerProcessor.Process(gameObject, settings);
+                Assert.IsNull(lenient.Error, "Process at the default target should succeed: " + lenient.Error);
+                Texture2D lenientResidual = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                    lenient.GeneratedAssets[0].ResidualTexturePath);
+                Assert.IsNotNull(lenientResidual, "default-target run must write a residual EXR");
+                Assert.AreEqual(128, lenientResidual.width,
+                    "the 0.99 default target must ignore the error tail and keep rung 128 (D-05 settings plumbing)");
+
+                settings.CoverageTarget = 1f;
+                NamerProcessResult strict = NamerProcessor.Process(gameObject, settings);
+                Assert.IsNull(strict.Error, "Process at a 1.0 target should succeed: " + strict.Error);
+                Texture2D strictResidual = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                    strict.GeneratedAssets[0].ResidualTexturePath);
+                Assert.IsNotNull(strictResidual, "1.0-target run must write a residual EXR");
+                Assert.AreEqual(256, strictResidual.width,
+                    "a 1.0 target must reject rung 128 and keep the source long edge (D-08 fallback)");
+            }
+            finally
+            {
+                Destroy(gameObject);
+                RestorePrefs(prefs);
+                AssetDatabase.DeleteAsset(TempFolder);
+            }
+
+            yield return null;
+        }
+
         // --------------------------------------------------------------------
 
         private static NamerProcessorSettings NewSettings(bool decompositionEnabled)
@@ -692,6 +752,19 @@ namespace GraffitiEntertainment.Namer.Tests
             return ((x / 8 + y / 8) % 2 == 0)
                 ? new Color(0.2f, 0.2f, 0.2f, 1f)
                 : new Color(0.8f, 0.8f, 0.8f, 1f);
+        }
+
+        // 04.3 review IN-06 fixture — same shape as ResidualPipelineTests' tail-block
+        // base: flat gray with a white corner block whose failing texels sit far under
+        // the default 0.99 target's budget but trip a strict 1.0 target.
+        private const float TailBaseValue = 0.5f;
+        private const int TailBlockSize = 4;
+
+        private static Color TailBlock(int x, int y)
+        {
+            bool inTail = x < TailBlockSize && y < TailBlockSize;
+            float v = inTail ? 1f : TailBaseValue;
+            return new Color(v, v, v, 1f);
         }
 
         private static Mesh CreateQuadMeshAsset(string path)

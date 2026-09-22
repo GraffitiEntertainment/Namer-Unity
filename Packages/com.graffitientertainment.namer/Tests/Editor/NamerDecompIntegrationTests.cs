@@ -17,7 +17,7 @@ namespace GraffitiEntertainment.Namer.Tests
     /// persistent quad mesh + URP Lit source material, runs Process with decomposition ON
     /// and OFF, and asserts the written mesh + residual + material bind + scene sharedMesh
     /// swap + source immutability. GPU path is <c>[UnityTest]</c> with the compute /
-    /// async-readback capability gate (D-15); the seven <c>NamerProcessor.*</c> EditorPrefs
+    /// async-readback capability gate (D-15); the eleven <c>NamerProcessor.*</c> EditorPrefs
     /// keys are snapshotted and restored.
     /// </summary>
     public class NamerDecompIntegrationTests
@@ -30,6 +30,7 @@ namespace GraffitiEntertainment.Namer.Tests
         private const string OverwriteKey = "NamerProcessor.OverwriteGenerated";
         private const string DecompKey = "NamerProcessor.DecompositionEnabled";
         private const string ThresholdKey = "NamerProcessor.ErrorThreshold";
+        private const string CoverageTargetKey = "NamerProcessor.CoverageTarget";
         private const string ResolutionKey = "NamerProcessor.ResidualResolution";
         private const string RoughnessExtractStrengthKey = "NamerProcessor.RoughnessExtractStrength";
         private const string DipSourceKey = "NamerProcessor.DipSource";
@@ -885,6 +886,7 @@ namespace GraffitiEntertainment.Namer.Tests
             public bool OverwriteGenerated;
             public bool DecompositionEnabled;
             public float ErrorThreshold;
+            public float CoverageTarget;
             public int ResidualResolution;
             public float RoughnessExtractStrength;
             public int DipSource;
@@ -895,6 +897,7 @@ namespace GraffitiEntertainment.Namer.Tests
             public bool HadOverwriteGenerated;
             public bool HadDecompositionEnabled;
             public bool HadErrorThreshold;
+            public bool HadCoverageTarget;
             public bool HadResidualResolution;
             public bool HadRoughnessExtractStrength;
             public bool HadDipSource;
@@ -911,6 +914,7 @@ namespace GraffitiEntertainment.Namer.Tests
                 OverwriteGenerated = EditorPrefs.GetBool(OverwriteKey, false),
                 DecompositionEnabled = EditorPrefs.GetBool(DecompKey, false),
                 ErrorThreshold = EditorPrefs.GetFloat(ThresholdKey, 0.02f),
+                CoverageTarget = EditorPrefs.GetFloat(CoverageTargetKey, 0.99f),
                 ResidualResolution = EditorPrefs.GetInt(ResolutionKey, 0),
                 RoughnessExtractStrength = EditorPrefs.GetFloat(RoughnessExtractStrengthKey, 1f),
                 DipSource = EditorPrefs.GetInt(DipSourceKey, 0),
@@ -921,6 +925,7 @@ namespace GraffitiEntertainment.Namer.Tests
                 HadOverwriteGenerated = EditorPrefs.HasKey(OverwriteKey),
                 HadDecompositionEnabled = EditorPrefs.HasKey(DecompKey),
                 HadErrorThreshold = EditorPrefs.HasKey(ThresholdKey),
+                HadCoverageTarget = EditorPrefs.HasKey(CoverageTargetKey),
                 HadResidualResolution = EditorPrefs.HasKey(ResolutionKey),
                 HadRoughnessExtractStrength = EditorPrefs.HasKey(RoughnessExtractStrengthKey),
                 HadDipSource = EditorPrefs.HasKey(DipSourceKey),
@@ -982,6 +987,15 @@ namespace GraffitiEntertainment.Namer.Tests
             else
             {
                 EditorPrefs.DeleteKey(ThresholdKey);
+            }
+
+            if (snapshot.HadCoverageTarget)
+            {
+                EditorPrefs.SetFloat(CoverageTargetKey, snapshot.CoverageTarget);
+            }
+            else
+            {
+                EditorPrefs.DeleteKey(CoverageTargetKey);
             }
 
             if (snapshot.HadResidualResolution)

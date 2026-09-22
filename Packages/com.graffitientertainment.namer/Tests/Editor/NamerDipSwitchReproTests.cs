@@ -88,8 +88,10 @@ namespace GraffitiEntertainment.Namer.Editor.Tests
                 NamerSplitResult fitSplit = MeshVertexSplitter.Split(mesh);
                 int w = inspection.BaseMap.width;
                 int h = inspection.BaseMap.height;
+                // Trailing arg = the pinned 0.99 default (D-05) — matches the post-04.3-02 parameter order.
                 NamerProjectionContext ctx = (NamerProjectionContext)createCtx.Invoke(
-                    null, new object[] { fitSplit, decompPipeline, w, h, threshold, ResidualRes, true });
+                    null, new object[] { fitSplit, decompPipeline, w, h, threshold, ResidualRes, true,
+                        NamerEditorConstants.DefaultCoverageTarget });
 
                 NamerComputeResult r = pipeline.Process(inspection, ctx);
                 try

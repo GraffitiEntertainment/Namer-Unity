@@ -81,6 +81,7 @@ namespace GraffitiEntertainment.Namer.Editor
 
         private const float ChannelPaneSize = 48f;
         private const float ChannelPopupSize = 384f;
+        private const float kCoverageSliderStep = 0.005f;
 
         private NamerProcessorSettings _settings;
         private NamerPreviewRenderer _preview;
@@ -129,6 +130,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private bool _dbgNormalEnabled = true;
         private bool _showTriangles;
         private float _errorThreshold = NamerEditorConstants.DefaultErrorThreshold;
+        private float _coverageTarget = NamerEditorConstants.DefaultCoverageTarget;
         private int _residualResolution;
         private float _roughnessExtractStrength = NamerEditorConstants.DefaultRoughnessExtractStrength;
         private NamerDipSource _dipSource;
@@ -284,6 +286,7 @@ namespace GraffitiEntertainment.Namer.Editor
             _metallicContributionEnabled = _settings.MetallicContributionEnabled;
             _emissiveContributionEnabled = _settings.EmissiveContributionEnabled;
             _errorThreshold = _settings.ErrorThreshold;
+            _coverageTarget = _settings.CoverageTarget;
             _residualResolution = _settings.ResidualResolution;
             _roughnessExtractStrength = _settings.RoughnessExtractStrength;
             _dipSource = (NamerDipSource)_settings.DipSource;
@@ -420,7 +423,8 @@ namespace GraffitiEntertainment.Namer.Editor
                     EnsureDecompPipeline();
                     NamerSplitResult fitSplit = MeshVertexSplitter.Split(_previewMesh);
                     _projectionContext = NamerProcessor.CreateProjectionContext(
-                        fitSplit, _decompPipeline, baseW, baseH, _errorThreshold, _residualResolution, _writeResidual);
+                        fitSplit, _decompPipeline, baseW, baseH, _errorThreshold, _residualResolution, _writeResidual,
+                        _coverageTarget);
                 }
 
                 _liveResult = _pipeline.Process(inspection, _projectionContext);
@@ -717,7 +721,8 @@ namespace GraffitiEntertainment.Namer.Editor
                     _liveResult.Width, _liveResult.Height,
                     _errorThreshold, _residualResolution,
                     projectedOut: null,
-                    mode: _writeResidual ? NamerResidualMode.AlwaysKeep : NamerResidualMode.NeverKeep);
+                    mode: _writeResidual ? NamerResidualMode.AlwaysKeep : NamerResidualMode.NeverKeep,
+                    coverageTarget: _coverageTarget);
                 _decompStats = _decompOutput.Stats;
                 _previewSplitMesh = BuildPreviewSplitMesh(split, colors);
             }
@@ -1660,11 +1665,12 @@ namespace GraffitiEntertainment.Namer.Editor
                 MarkDirty();
             }
 
-            // Error Threshold + Residual Resolution only act when residual writing is on
-            // (04.2: the checkbox is the residual gate now; the threshold/resolution search
-            // keys on source-reconstruction error for the written EXR). They are rendered
-            // disabled (EditorGUI.DisabledScope) with a one-line hint when Write Residual is
-            // off — matching the phase's disable-state conventions.
+            // Error Threshold + Coverage Target + Residual Resolution only act when residual
+            // writing is on (04.2: the checkbox is the residual gate now; the threshold,
+            // coverage, and resolution search keys on source-reconstruction error for the
+            // written EXR). They are rendered disabled (EditorGUI.DisabledScope) with a
+            // one-line hint when Write Residual is off — matching the phase's disable-state
+            // conventions.
             using (new EditorGUI.DisabledScope(!_writeResidual))
             {
                 float newThreshold = EditorGUILayout.Slider(
@@ -1673,11 +1679,29 @@ namespace GraffitiEntertainment.Namer.Editor
                         "Maximum acceptable reconstruction error for the adaptive residual-resolution search (used when "
                             + "Write Residual is on). Recomputes the preview in memory "
                             + NamerEditorConstants.DebounceSeconds + " s after the slider stops — nothing is written to disk."),
-                    _errorThreshold, 0f, 0.10f);
+                    _errorThreshold, 0f, 0.25f);
                 if (!Mathf.Approximately(newThreshold, _errorThreshold))
                 {
                     _errorThreshold = newThreshold;
                     _settings.ErrorThreshold = newThreshold;
+                    _afterPanelState.MarkTweaking();
+                    MarkDirty();
+                }
+
+                float newCoverage = EditorGUILayout.Slider(
+                    new GUIContent(
+                        "Coverage Target",
+                        "Fraction of UV-covered texels that must stay within the Error Threshold at a candidate residual "
+                            + "resolution — the percentile gate of the adaptive search (D-05). Higher targets keep larger "
+                            + "residuals; when no rung meets the target the full source long edge is kept. Recomputes the "
+                            + "preview in memory " + NamerEditorConstants.DebounceSeconds
+                            + " s after the slider stops — nothing is written to disk."),
+                    _coverageTarget, 0.90f, 1.00f);
+                newCoverage = Mathf.Round(newCoverage / kCoverageSliderStep) * kCoverageSliderStep;
+                if (!Mathf.Approximately(newCoverage, _coverageTarget))
+                {
+                    _coverageTarget = newCoverage;
+                    _settings.CoverageTarget = newCoverage;
                     _afterPanelState.MarkTweaking();
                     MarkDirty();
                 }
@@ -1728,7 +1752,8 @@ namespace GraffitiEntertainment.Namer.Editor
         /// Renders the five read-only decomposition statistics rows (D-09 / VCOL-04), relabeled
         /// in 04.2 to removed-detail semantics. Values show "—" until the first fit completes;
         /// the residual row reads <see cref="ResidualNotWrittenLabel"/> when the residual is not
-        /// written (one-texture) and "written @ Npx" when the EXR is written.
+        /// written (one-texture) and "written @ Npx, coverage X%" (the achieved-coverage
+        /// percentile-gate statistic, D-07) when the EXR is written.
         /// </summary>
         private void DrawDecompStats()
         {
@@ -1765,9 +1790,13 @@ namespace GraffitiEntertainment.Namer.Editor
                 new GUIContent(_decompStats.FitOnlyMaxError.ToString("0.000")));
             EditorGUILayout.LabelField(
                 new GUIContent(DecompStatLabels[4],
-                    "Whether the residual EXR was written (the 04.2 Write Residual checkbox)."),
+                    "Whether the residual EXR was written (the 04.2 Write Residual checkbox). The coverage is the "
+                    + "percentile-gate statistic at the chosen resolution: the fraction of UV-covered texels within "
+                    + "the Error Threshold. When no ladder rung meets the Coverage Target, the full source long edge "
+                    + "is kept (D-08) — the row then shows the source long edge, honestly."),
                 new GUIContent(residualWritten
-                    ? "written @" + _decompStats.ChosenResolution + "px"
+                    ? "written @" + _decompStats.ChosenResolution + "px, coverage "
+                        + (_decompStats.AchievedCoverage * 100f).ToString("0.#") + "%"
                     : ResidualNotWrittenLabel));
         }
 

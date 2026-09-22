@@ -576,7 +576,11 @@ namespace GraffitiEntertainment.Namer.Editor
                 // 0 into _CoverageStat.r, so the raw reduce yields within-count / ALL
                 // texels; dividing by the covered fraction yields within-count / COVERED
                 // texels — the gate fraction must be over covered texels to match the
-                // existing Coverage semantics.
+                // existing Coverage semantics. Known tolerance (04.3 review IN-02): this
+                // fraction is reduced through the R16G16B16A16_SFloat ping-pong chain
+                // (avgA/avgB), so it carries ~2^-11 (~5e-4) relative half-float error —
+                // a rung whose exact coverage sits within ~0.05-0.1% of the target can
+                // gate either way (a one-rung shift at the boundary).
                 float fractionCovered = stats.CoverageFraction;
                 float coverage = fractionCovered > 0f ? covStats.MeanErr / fractionCovered : 0f;
                 return coverage;

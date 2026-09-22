@@ -77,6 +77,9 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>Default percentile coverage target for the adaptive residual-resolution search (D-05: fraction of UV-covered texels that must reconstruct within the error threshold; 0.99).</summary>
         public const float DefaultCoverageTarget = 0.99f;
 
+        /// <summary>Minimum coverage target the window slider writes (04.3 D-05); the persisted pref is clamped up to this floor on read so the slider display and Process always agree.</summary>
+        public const float MinCoverageTarget = 0.90f;
+
         /// <summary>Default residual-resolution ladder index (D-17: 0 = Auto).</summary>
         public const int DefaultResidualResolution = 0;
     }

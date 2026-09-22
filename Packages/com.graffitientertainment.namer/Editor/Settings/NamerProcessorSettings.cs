@@ -1,4 +1,5 @@
 using UnityEditor;
+using UnityEngine;
 
 namespace GraffitiEntertainment.Namer.Editor
 {
@@ -135,10 +136,10 @@ namespace GraffitiEntertainment.Namer.Editor
             set { EditorPrefs.SetFloat(ErrorThresholdKey, value); }
         }
 
-        /// <summary>Coverage target for the percentile residual-resolution gate — the fraction of UV-covered texels that must stay within the error threshold (D-05; default 0.99).</summary>
+        /// <summary>Coverage target for the percentile residual-resolution gate — the fraction of UV-covered texels that must stay within the error threshold (D-05; default 0.99). Out-of-range persisted values are clamped to the slider range on read so the window preview and Process always agree.</summary>
         public float CoverageTarget
         {
-            get { return EditorPrefs.GetFloat(CoverageTargetKey, NamerEditorConstants.DefaultCoverageTarget); }
+            get { return Mathf.Clamp(EditorPrefs.GetFloat(CoverageTargetKey, NamerEditorConstants.DefaultCoverageTarget), NamerEditorConstants.MinCoverageTarget, 1f); }
             set { EditorPrefs.SetFloat(CoverageTargetKey, value); }
         }
 

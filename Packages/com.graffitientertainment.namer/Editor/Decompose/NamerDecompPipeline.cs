@@ -47,6 +47,17 @@ namespace GraffitiEntertainment.Namer.Editor
     public sealed class NamerDecompErrorStats
     {
         public float Coverage;
+
+        /// <summary>
+        /// The percentile-gate statistic (04.3 D-01/D-07): the within-tolerance fraction
+        /// of UV-covered texels of the reconstruction at the chosen resolution. Populated
+        /// on every output path (0 on CannotDecompose); distinct from
+        /// <see cref="Coverage"/> per D-03 — on current paths both derive from the same
+        /// coverage reduction (the existing <see cref="Coverage"/> already IS the
+        /// percentile statistic), the distinct field exists so the gate statistic is
+        /// never conflated with the legacy Coverage label in stats consumers/UI.
+        /// </summary>
+        public float AchievedCoverage;
         public float AvgError;
         public float MaxError;
         public float FitOnlyMaxError;
@@ -162,6 +173,15 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <see cref="GraphicsFormat.R16G16B16A16_SFloat"/> linear render target at
         /// <c>w</c> x <c>h</c>; it is only written (never released here) and may be null to
         /// skip the write-back.
+        ///
+        /// The adaptive search's stop condition is the percentile coverage gate (04.3
+        /// D-01): a rung passes when &gt;= <paramref name="coverageTarget"/> of the
+        /// UV-covered texels reconstruct within <paramref name="errorThreshold"/> (D-04:
+        /// the same tolerance value the UI slider persists). The worst
+        /// <c>(1 - target)</c> tail of texels is ignored by the gate (D-02) while
+        /// <see cref="NamerDecompErrorStats.MaxError"/> stays reported. Walk order, rung
+        /// skipping, the manual override (D-17), and the long-edge fallback (D-08) are
+        /// unchanged.
         /// </summary>
         public NamerDecompOutput GenerateResidual(
             NamerSplitResult split,
@@ -172,7 +192,8 @@ namespace GraffitiEntertainment.Namer.Editor
             float errorThreshold,
             int manualResolution,
             RenderTexture projectedOut = null,
-            NamerResidualMode mode = NamerResidualMode.Gate)
+            NamerResidualMode mode = NamerResidualMode.Gate,
+            float coverageTarget = NamerEditorConstants.DefaultCoverageTarget)
         {
             if (split == null)
             {
@@ -224,6 +245,7 @@ namespace GraffitiEntertainment.Namer.Editor
                     return new NamerDecompOutput(null, new NamerDecompErrorStats
                     {
                         Coverage = 0f,
+                        AchievedCoverage = 0f,
                         AvgError = 0f,
                         MaxError = 0f,
                         FitOnlyMaxError = 0f,
@@ -316,6 +338,7 @@ namespace GraffitiEntertainment.Namer.Editor
                     return new NamerDecompOutput(null, new NamerDecompErrorStats
                     {
                         Coverage = 0f,
+                        AchievedCoverage = 0f,
                         AvgError = 0f,
                         MaxError = 0f,
                         FitOnlyMaxError = 0f,
@@ -386,9 +409,9 @@ namespace GraffitiEntertainment.Namer.Editor
                 fullResidual = dilated;
 
                 // 5. Adaptive downward-halving search (D-16) with the manual ladder override
-                //    (D-17).
+                //    (D-17), gated by the percentile coverage target (04.3 D-01).
                 int chosenResolution = ChooseResolution(fullResidual, vcInterp, baseLinear, heatmap, errorStat, coverageStat,
-                    w, h, errorThreshold, manualResolution, avgA, avgB);
+                    w, h, errorThreshold, coverageTarget, manualResolution, avgA, avgB);
 
                 // 6. Produce the final residual at the chosen resolution (not upsampled back).
                 //    The chosen resolution is the LONG edge; the short edge preserves the
@@ -462,10 +485,16 @@ namespace GraffitiEntertainment.Namer.Editor
             int w,
             int h,
             float errorThreshold,
+            float coverageTarget,
             int manualResolution,
             RenderTexture avgA,
             RenderTexture avgB)
         {
+            // Clamp once up front so a programmatic 0 / negative / >1 target degrades
+            // deterministically (0 -> every rung fails -> the long-edge fallback) instead
+            // of mis-gating (T-04.3-01).
+            float target = Mathf.Clamp(coverageTarget, 0f, 1f);
+
             // Manual override (D-17): the POPUP INDEX resolves to a pixel size — the LONG
             // edge — clamped to <= the source's long edge, and skips the search entirely.
             if (manualResolution > 0)
@@ -475,10 +504,16 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             // Adaptive (D-16): walk the ladder largest -> smallest, skipping any step >=
-            // the source LONG edge (full-res already covers it). Stop at the first violating
-            // step and keep the previous (larger) passing step; fall back to the full source
-            // long edge when the first step already violates or no step is <= the source long
-            // edge (e.g. a 4096 source where the ladder tops out at 2048).
+            // the source LONG edge (full-res already covers it). The percentile coverage
+            // gate (04.3 D-01/D-02): a rung passes when >= target of the UV-covered
+            // texels reconstruct within the error threshold — the worst (1 - target)
+            // tail of texels is ignored, and per-rung max error is deliberately not
+            // surfaced here (D-02 honest MaxError reporting lives in the final
+            // BuildStats). Stop at the first violating step and keep the previous
+            // (larger) passing step; fall back to the full source long edge when the
+            // first step already violates or no step is <= the source long edge (e.g. a
+            // 4096 source where the ladder tops out at 2048) — the fallback stays
+            // warning-free (D-08).
             int longEdge = Mathf.Max(w, h);
             int chosen = longEdge;
             for (int i = 0; i < ResolutionLadder.Length; i++)
@@ -489,8 +524,8 @@ namespace GraffitiEntertainment.Namer.Editor
                     continue;
                 }
 
-                float evalMaxError = EvaluateResolution(fullResidual, vcInterp, baseLinear, heatmap, errorStat, coverageStat, w, h, r, avgA, avgB);
-                if (evalMaxError > errorThreshold)
+                float evalCoverage = EvaluateResolution(fullResidual, vcInterp, baseLinear, heatmap, errorStat, coverageStat, w, h, r, avgA, avgB);
+                if (evalCoverage < target)
                 {
                     break;
                 }
@@ -501,6 +536,15 @@ namespace GraffitiEntertainment.Namer.Editor
             return chosen;
         }
 
+        /// <summary>
+        /// Evaluates one ladder rung: down/up round-trips the full-resolution residual
+        /// and returns the within-tolerance fraction of UV-covered texels for the rung
+        /// (04.3 D-01) — the percentile-gate statistic <see cref="ChooseResolution"/>
+        /// compares against the coverage target. Per-rung max error is intentionally
+        /// not surfaced (it has no reader under the pure percentile gate, D-02); the
+        /// honest <see cref="NamerDecompErrorStats.MaxError"/> readout comes from the
+        /// final BuildStats at the chosen resolution.
+        /// </summary>
         private float EvaluateResolution(
             RenderTexture fullResidual,
             RenderTexture vcInterp,
@@ -523,7 +567,16 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 RunErrorHeatmap(vcInterp, up, baseLinear, heatmap, errorStat, coverageStat, 0f, w, h);
                 ReduceStats stats = ReduceToStats(errorStat, w, h, avgA, avgB);
-                return stats.MaxError;
+                ReduceStats covStats = ReduceToStats(coverageStat, w, h, avgA, avgB);
+
+                // Same covered-texel normalization as BuildStats: uncovered texels write
+                // 0 into _CoverageStat.r, so the raw reduce yields within-count / ALL
+                // texels; dividing by the covered fraction yields within-count / COVERED
+                // texels — the gate fraction must be over covered texels to match the
+                // existing Coverage semantics.
+                float fractionCovered = stats.CoverageFraction;
+                float coverage = fractionCovered > 0f ? covStats.MeanErr / fractionCovered : 0f;
+                return coverage;
             }
             finally
             {
@@ -643,6 +696,7 @@ namespace GraffitiEntertainment.Namer.Editor
             return new NamerDecompErrorStats
             {
                 Coverage = coveragePct,
+                AchievedCoverage = coveragePct,
                 AvgError = avgError,
                 MaxError = error.MaxError,
                 FitOnlyMaxError = fitOnlyMaxError,

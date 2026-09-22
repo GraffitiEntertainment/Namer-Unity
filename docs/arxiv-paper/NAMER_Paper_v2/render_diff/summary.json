@@ -1,0 +1,308 @@
+{
+  "pdf_a": "/mnt/data/NAMER_Paper_v2/namer_paper_before_images.pdf",
+  "pdf_b": "/mnt/data/NAMER_Paper_v2/namer_paper.pdf",
+  "dpi": 100,
+  "engine": "pdftoppm",
+  "pages_a": 21,
+  "pages_b": 22,
+  "changed_pages": 18,
+  "per_page": [
+    {
+      "page": 1,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-01.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-01.png",
+      "changed": false,
+      "pct_changed": 0.0,
+      "bbox": null,
+      "max_channel": 0
+    },
+    {
+      "page": 2,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-02.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-02.png",
+      "changed": false,
+      "pct_changed": 0.0,
+      "bbox": null,
+      "max_channel": 0
+    },
+    {
+      "page": 3,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-03.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-03.png",
+      "changed": false,
+      "pct_changed": 0.0,
+      "bbox": null,
+      "max_channel": 0
+    },
+    {
+      "page": 4,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-04.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-04.png",
+      "changed": false,
+      "pct_changed": 0.0,
+      "bbox": null,
+      "max_channel": 0
+    },
+    {
+      "page": 5,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-05.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-05.png",
+      "changed": true,
+      "pct_changed": 0.3417144385026738,
+      "bbox": [
+        93,
+        99,
+        758,
+        1007
+      ],
+      "max_channel": 255,
+      "diff": "/mnt/data/NAMER_Paper_v2/render_diff/diff/page-5.png"
+    },
+    {
+      "page": 6,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-06.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-06.png",
+      "changed": true,
+      "pct_changed": 0.1705422459893048,
+      "bbox": [
+        93,
+        97,
+        758,
+        1012
+      ],
+      "max_channel": 255,
+      "diff": "/mnt/data/NAMER_Paper_v2/render_diff/diff/page-6.png"
+    },
+    {
+      "page": 7,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-07.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-07.png",
+      "changed": true,
+      "pct_changed": 0.18141176470588236,
+      "bbox": [
+        93,
+        100,
+        758,
+        1017
+      ],
+      "max_channel": 255,
+      "diff": "/mnt/data/NAMER_Paper_v2/render_diff/diff/page-7.png"
+    },
+    {
+      "page": 8,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-08.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-08.png",
+      "changed": true,
+      "pct_changed": 0.1859850267379679,
+      "bbox": [
+        93,
+        100,
+        758,
+        1012
+      ],
+      "max_channel": 255,
+      "diff": "/mnt/data/NAMER_Paper_v2/render_diff/diff/page-8.png"
+    },
+    {
+      "page": 9,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-09.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-09.png",
+      "changed": true,
+      "pct_changed": 0.16996256684491978,
+      "bbox": [
+        93,
+        100,
+        757,
+        1016
+      ],
+      "max_channel": 255,
+      "diff": "/mnt/data/NAMER_Paper_v2/render_diff/diff/page-9.png"
+    },
+    {
+      "page": 10,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-10.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-10.png",
+      "changed": true,
+      "pct_changed": 0.1630566844919786,
+      "bbox": [
+        93,
+        100,
+        758,
+        975
+      ],
+      "max_channel": 255,
+      "diff": "/mnt/data/NAMER_Paper_v2/render_diff/diff/page-10.png"
+    },
+    {
+      "page": 11,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-11.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-11.png",
+      "changed": true,
+      "pct_changed": 0.22943529411764707,
+      "bbox": [
+        93,
+        96,
+        758,
+        1005
+      ],
+      "max_channel": 255,
+      "diff": "/mnt/data/NAMER_Paper_v2/render_diff/diff/page-11.png"
+    },
+    {
+      "page": 12,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-12.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-12.png",
+      "changed": true,
+      "pct_changed": 0.19526844919786096,
+      "bbox": [
+        93,
+        99,
+        758,
+        1017
+      ],
+      "max_channel": 255,
+      "diff": "/mnt/data/NAMER_Paper_v2/render_diff/diff/page-12.png"
+    },
+    {
+      "page": 13,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-13.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-13.png",
+      "changed": true,
+      "pct_changed": 0.18214117647058822,
+      "bbox": [
+        93,
+        100,
+        758,
+        1017
+      ],
+      "max_channel": 255,
+      "diff": "/mnt/data/NAMER_Paper_v2/render_diff/diff/page-13.png"
+    },
+    {
+      "page": 14,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-14.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-14.png",
+      "changed": true,
+      "pct_changed": 0.19771978609625668,
+      "bbox": [
+        93,
+        100,
+        758,
+        1006
+      ],
+      "max_channel": 255,
+      "diff": "/mnt/data/NAMER_Paper_v2/render_diff/diff/page-14.png"
+    },
+    {
+      "page": 15,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-15.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-15.png",
+      "changed": true,
+      "pct_changed": 0.1939048128342246,
+      "bbox": [
+        93,
+        96,
+        758,
+        1006
+      ],
+      "max_channel": 255,
+      "diff": "/mnt/data/NAMER_Paper_v2/render_diff/diff/page-15.png"
+    },
+    {
+      "page": 16,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-16.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-16.png",
+      "changed": true,
+      "pct_changed": 0.16537540106951873,
+      "bbox": [
+        93,
+        96,
+        758,
+        1012
+      ],
+      "max_channel": 255,
+      "diff": "/mnt/data/NAMER_Paper_v2/render_diff/diff/page-16.png"
+    },
+    {
+      "page": 17,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-17.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-17.png",
+      "changed": true,
+      "pct_changed": 0.19179786096256685,
+      "bbox": [
+        93,
+        100,
+        758,
+        1012
+      ],
+      "max_channel": 255,
+      "diff": "/mnt/data/NAMER_Paper_v2/render_diff/diff/page-17.png"
+    },
+    {
+      "page": 18,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-18.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-18.png",
+      "changed": true,
+      "pct_changed": 0.21666310160427807,
+      "bbox": [
+        93,
+        100,
+        758,
+        1011
+      ],
+      "max_channel": 255,
+      "diff": "/mnt/data/NAMER_Paper_v2/render_diff/diff/page-18.png"
+    },
+    {
+      "page": 19,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-19.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-19.png",
+      "changed": true,
+      "pct_changed": 0.18885026737967914,
+      "bbox": [
+        93,
+        100,
+        758,
+        1012
+      ],
+      "max_channel": 255,
+      "diff": "/mnt/data/NAMER_Paper_v2/render_diff/diff/page-19.png"
+    },
+    {
+      "page": 20,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-20.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-20.png",
+      "changed": true,
+      "pct_changed": 0.15455401069518718,
+      "bbox": [
+        93,
+        97,
+        758,
+        1012
+      ],
+      "max_channel": 255,
+      "diff": "/mnt/data/NAMER_Paper_v2/render_diff/diff/page-20.png"
+    },
+    {
+      "page": 21,
+      "a": "/mnt/data/NAMER_Paper_v2/render_diff/render_a/page-21.png",
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-21.png",
+      "changed": true,
+      "pct_changed": 0.16263636363636363,
+      "bbox": [
+        93,
+        97,
+        758,
+        983
+      ],
+      "max_channel": 255,
+      "diff": "/mnt/data/NAMER_Paper_v2/render_diff/diff/page-21.png"
+    },
+    {
+      "page": 22,
+      "missing": true,
+      "a": null,
+      "b": "/mnt/data/NAMER_Paper_v2/render_diff/render_b/page-22.png"
+    }
+  ]
+}

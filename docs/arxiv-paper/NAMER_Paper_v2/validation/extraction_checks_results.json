@@ -1,0 +1,44 @@
+{
+  "scope": "Independent binary64 algebra checks; no Unity, mesh ray tracing, image inference, or rendered evaluation.",
+  "repository_commit": "9eb068520b6e5fcf3ff39e13291dedd3f88e0015",
+  "implemented_equations": {
+    "ao_direction_count": 64,
+    "ao_direction_max_unit_length_error": 1.1102230246251565e-16,
+    "ao_guard_matched_recomposition_cases": 4040,
+    "ao_guard_matched_recomposition_max_error": 1.1102230246251565e-16,
+    "source_color_in_floor_examples": 0.3,
+    "synthetic_a_0_02_floor_0_1_raw_recomposition": 0.05999999999999999,
+    "authored_a_0_02_floor_1e_6_raw_recomposition": 0.3,
+    "zero_strength_unit_contrast_ao": 1.0,
+    "zero_strength_half_contrast_ao": 0.75,
+    "equally_exposed_dark_bright_image_ao_estimates": [
+      0.22222222222222224,
+      1.0
+    ]
+  },
+  "proposed_equations_not_implemented_estimators": {
+    "supplied_mask": [
+      0,
+      1,
+      1
+    ],
+    "metallic_inputs": [
+      0.0,
+      0.6,
+      1.0
+    ],
+    "shared_metallic_value": 0.8,
+    "metallic_squared_error": 0.08000000000000002,
+    "shared_emission_rgb": [
+      3.0,
+      1.0,
+      1.0
+    ],
+    "empty_mask_shared_value": 0.0,
+    "roughness_nonemitter_emitter": [
+      0.25,
+      0.5
+    ]
+  },
+  "all_assertions_passed": true
+}

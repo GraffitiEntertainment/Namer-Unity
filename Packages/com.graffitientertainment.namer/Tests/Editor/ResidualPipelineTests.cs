@@ -738,6 +738,8 @@ namespace GraffitiEntertainment.Namer.Tests
         /// tolerance, so a legitimate below-floor texel is not a false failure. A smeared
         /// low-resolution residual (the 128-class failure) blurs the hash-noise grain and either
         /// trips the full-resolution ladder assertion or blows the per-texel tolerance.
+        /// Phase 5 D-02: with a style profile attached, the "source" in the source-dividend
+        /// identity reads as the STYLED source — the operator is unchanged.
         /// </summary>
         [UnityTest]
         public IEnumerator Residual_FullResolution_ReconstructsSourcePerCoveredTexel()
@@ -784,7 +786,8 @@ namespace GraffitiEntertainment.Namer.Tests
                             // residual = max(source, VcFloor) / max(vcInterp, VcFloor), so the
                             // expected reconstruction is the symmetric-floor quotient. This is
                             // per-texel (not a flat byte tolerance) and stays correct even when
-                            // source or vcInterp sits below VcFloor.
+                            // source or vcInterp sits below VcFloor. Phase 5 D-02: "source"
+                            // here reads as the STYLED source when a style profile is attached.
                             float oracle = vcInterp * Mathf.Max(source, vcFloor) / Mathf.Max(vcInterp, vcFloor);
                             float tolerance = kHalfFloatRelativeEpsilon * oracle + kReconstructionAbsTolerance;
 
@@ -1442,6 +1445,8 @@ namespace GraffitiEntertainment.Namer.Tests
                                 // Source-dividend oracle (same as the full-resolution test):
                                 // reconstruction = vcInterp * residual with
                                 // residual = max(source, VcFloor) / max(vcInterp, VcFloor).
+                                // Phase 5 D-02: "source" = the STYLED source when a style
+                                // profile is attached; the operator is unchanged.
                                 float oracle = vcInterp * Mathf.Max(source, vcFloor) / Mathf.Max(vcInterp, vcFloor);
                                 float tolerance = kHalfFloatRelativeEpsilon * oracle + kReconstructionAbsTolerance;
 

@@ -47,11 +47,15 @@ namespace GraffitiEntertainment.Namer.Tests
                 {
                     // First pass: rasterize + write the Gouraud surface back into projected
                     // (dividend = source base, which is the removed-detail error we ignore here).
+                    // Phase 5 D-02: with a style profile attached this "source base" is the
+                    // STYLED source; the operator is unchanged.
                     NamerDecompOutput first = pipeline.GenerateResidual(
                         split, colors, sourceBase, w, h, threshold, 0, projected, NamerResidualMode.AlwaysKeep);
                     first.Dispose();
 
                     // Second pass: dividend == the projection == divisor -> quotient white.
+                    // (Phase 5 D-02: the source-dividend language in this file always means
+                    // the STYLED source when a style profile is attached.)
                     NamerDecompOutput second = pipeline.GenerateResidual(
                         split, colors, projected, w, h, threshold, 0, null, NamerResidualMode.AlwaysKeep);
                     try

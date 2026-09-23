@@ -161,6 +161,8 @@ namespace GraffitiEntertainment.Namer.Tests
 
         // --------------------------------------------------------------------
         // Criterion 3: Write Residual ON — the source-dividend EXR carries removed detail.
+        // (Phase 5 D-02: "source dividend" reads as the STYLED source when a style
+        // profile is attached; the operator is unchanged.)
         // --------------------------------------------------------------------
 
         [UnityTest]
@@ -211,7 +213,9 @@ namespace GraffitiEntertainment.Namer.Tests
                 // dividend (gradient + speckle) divided by the projection (gradient) leaves a
                 // non-white quotient in the speckle region — the honest removed-detail error.
                 // Mean |q-1| must sit above a loose floor; a projection-dividend quotient
-                // would instead be dead white (the criterion-1 pairing).
+                // would instead be dead white (the criterion-1 pairing). Phase 5 D-02: with a
+                // style profile attached the dividend is the STYLED source; the operator is
+                // unchanged.
                 double meanDeviation;
                 using (NamerDecompPipeline decomp = new NamerDecompPipeline())
                 using (NamerComputePipeline pipeline = new NamerComputePipeline())
@@ -275,7 +279,9 @@ namespace GraffitiEntertainment.Namer.Tests
             // write the Gouraud projection, then generate the residual with dividend := the
             // projection. dividend == divisor at every covered texel, so the quotient is 1.0
             // up to float16 dust (UV-overlap texels included — first-wins rasterization
-            // writes the same surface into both operands).
+            // writes the same surface into both operands). Phase 5 D-02: on the source-dividend
+            // side of this pairing, "source" reads as the STYLED source when a style profile
+            // is attached; the operator is unchanged.
             NamerSplitResult split = CreateSplitQuad(0f, 1f);
             RenderTexture sourceBase = CreateBakedSpeckleBase(w, h);
             RenderTexture projected = CreateRenderTexture(GraphicsFormat.R16G16B16A16_SFloat, w, h);
@@ -292,6 +298,8 @@ namespace GraffitiEntertainment.Namer.Tests
                     first.Dispose();
 
                     // Second pass: dividend == projection == divisor -> quotient white.
+                    // (Phase 5 D-02: source-dividend wording in this file = STYLED source
+                    // when a style profile is attached.)
                     NamerDecompOutput second = pipeline.GenerateResidual(
                         split, colors, projected, w, h, threshold, ResidualResolution, null, NamerResidualMode.AlwaysKeep);
                     try

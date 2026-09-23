@@ -48,6 +48,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private readonly int _kernelSurfacePack;
         private NamerAOPipeline _aoPipeline;
         private NamerRoughnessPipeline _roughnessPipeline;
+        private NamerStylizePipeline _stylizePipeline;
 
         private static Texture2D _whiteFill;
         private static Texture2D _neutralNormalTexture;
@@ -88,8 +89,15 @@ namespace GraffitiEntertainment.Namer.Editor
         /// produces the residual. Extraction then branches: the removed-detail transfer
         /// (DipSource == RemovedDetail) or the Sobel fallback (DipSource == SobelEdge or no
         /// projection); an authored metallic/gloss map leaves the scalar path untouched.
+        ///
+        /// 05-02 D-01 flow: when an ACTIVE <paramref name="stylization"/> is supplied, the
+        /// stylize stage (island-gated bilateral + palette transfer) runs between the
+        /// normalize stage and the projection — "stylize the source, then fit" — so the
+        /// fit, the projection write-back, the residual dividend, and the roughness
+        /// transfer all consume the STYLED base. A null or identity (Active == false)
+        /// context adds zero leases and zero dispatches: byte-identical output.
         /// </summary>
-        public NamerComputeResult Process(NamerMaterialInspection inspection, NamerProjectionContext projection = null)
+        public NamerComputeResult Process(NamerMaterialInspection inspection, NamerProjectionContext projection = null, NamerStyleStylization stylization = null)
         {
             if (inspection == null)
             {
@@ -116,6 +124,10 @@ namespace GraffitiEntertainment.Namer.Editor
 
             RenderTexture roughnessTex = null;
             RenderTexture projectedOut = null;
+            RenderTexture styledBase = null;
+            RenderTexture islandIds = null;
+            RenderTexture stylizeScratchA = null;
+            RenderTexture stylizeScratchB = null;
             bool usesBakedAo = false;
             // SmoothnessTextureChannel == 1 authors per-pixel smoothness in the base-map
             // alpha (URP Lit / Standard): that is authored data just like a
@@ -176,28 +188,52 @@ namespace GraffitiEntertainment.Namer.Editor
                 BindAndDispatchNormalizeEncode(inspection, baseColorIn, normalTexel, aoIn, metallicGlossIn,
                     baseColorOut, octahedral, packInputs, w, h, usesBakedAo);
 
+                // (a2) 05-02 D-01 stylize stage: island-gated bilateral + palette transfer
+                //      on the NORMALIZED SOURCE, before the fit/projection. All targets are
+                //      compute-pool leases handed to the caller-owned-RT stylize pipeline.
+                //      The null / identity (Active == false) path takes ZERO extra leases
+                //      and ZERO dispatches — byte-identical to the pre-5.02 flow.
+                styledBase = baseColorOut;
+                if (stylization != null && stylization.Active)
+                {
+                    styledBase = _pool.Lease(intermediate);
+                    islandIds = _pool.Lease(intermediate);
+                    stylizeScratchA = _pool.Lease(intermediate);
+                    stylizeScratchB = _pool.Lease(intermediate);
+                    EnsureStylizePipeline().Run(baseColorOut, styledBase, islandIds, stylizeScratchA, stylizeScratchB, stylization, w, h);
+
+                    // styledBase fully supersedes baseColorOut downstream (projection,
+                    // roughness transfer, result); return the pre-style lease now so the
+                    // non-projection path cannot strand it.
+                    Release(baseColorOut);
+                    baseColorOut = null;
+                }
+
                 // (b) 04.2 projection write-back + roughness dip, between the normalized base
-                //     and the surface pack (D-01 authored-map-wins gate).
+                //     and the surface pack (D-01 authored-map-wins gate). The base flowing
+                //     through (b) and (c) is the STYLED base when stylization ran.
                 if (projection != null)
                 {
                     projectedOut = _pool.Lease(intermediate);
-                    projection.Run(baseColorOut, projectedOut);
+                    projection.Run(styledBase, projectedOut);
                 }
 
                 if (projection != null && removedDetail && shouldExtract)
                 {
                     // Removed-detail transfer: the removed-luma minuend is the SOURCE base
-                    // (baseColorOut), the projected base is the subtrahend, and the transfer
-                    // map already carries the dip (adopt as-is at pack time).
+                    // (styledBase — pre-projection), the projected base is the subtrahend,
+                    // and the transfer map already carries the dip (adopt as-is at pack time).
+                    // Phase 5 D-02: with a style profile attached, "SOURCE base" reads as
+                    // the STYLED source; the operator is unchanged.
                     roughnessTex = EnsureRoughnessPipeline().ExtractTransferRoughness(
-                        inspection.Roughness, baseColorOut, projectedOut, w, h, inspection.RoughnessExtractStrength);
+                        inspection.Roughness, styledBase, projectedOut, w, h, inspection.RoughnessExtractStrength);
                     roughnessDipApplied = true;
                 }
                 else if (shouldExtract)
                 {
                     // Sobel fallback: decomposition off (or CR-01-guarded) or DipSource ==
                     // SobelEdge — CSSurfacePack applies the slider-scaled dip.
-                    roughnessTex = EnsureRoughnessPipeline().ExtractSobel(baseColorOut, w, h);
+                    roughnessTex = EnsureRoughnessPipeline().ExtractSobel(styledBase, w, h);
                     roughnessDipApplied = false;
                 }
                 // else: authored roughness map present (or strength == 0) -> scalar path.
@@ -215,10 +251,12 @@ namespace GraffitiEntertainment.Namer.Editor
                 // 04.2: NormalizedBaseColor is the projected base when projection ran (so the
                 // written Base PNG IS the projection); the source base is preserved as
                 // SourceBaseColor for the residual-ON dividend and the window preview.
+                // Phase 5 D-02: with a style profile attached, "SOURCE base" reads as the
+                // STYLED source (styledBase); the operator is unchanged.
                 return new NamerComputeResult
                 {
-                    NormalizedBaseColor = projectedOut != null ? projectedOut : baseColorOut,
-                    SourceBaseColor = projectedOut != null ? baseColorOut : null,
+                    NormalizedBaseColor = projectedOut != null ? projectedOut : styledBase,
+                    SourceBaseColor = projectedOut != null ? styledBase : null,
                     PackedSurface = surfaceOut,
                     ExtractedRoughness = roughnessTex,
                     Width = w,
@@ -243,6 +281,10 @@ namespace GraffitiEntertainment.Namer.Editor
                 {
                     Release(projectedOut);
                 }
+                if (styledBase != baseColorOut)
+                {
+                    Release(styledBase);
+                }
                 Release(baseColorOut);
                 throw;
             }
@@ -261,6 +303,9 @@ namespace GraffitiEntertainment.Namer.Editor
                 Release(metallicGlossIn);
                 Release(octahedral);
                 Release(packInputs);
+                Release(islandIds);
+                Release(stylizeScratchA);
+                Release(stylizeScratchB);
             }
         }
 
@@ -306,6 +351,7 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             _aoPipeline?.Dispose();
             _roughnessPipeline?.Dispose();
+            _stylizePipeline?.Dispose();
             _pool.Dispose();
         }
 
@@ -327,6 +373,16 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             return _roughnessPipeline;
+        }
+
+        private NamerStylizePipeline EnsureStylizePipeline()
+        {
+            if (_stylizePipeline == null)
+            {
+                _stylizePipeline = new NamerStylizePipeline();
+            }
+
+            return _stylizePipeline;
         }
 
         /// <summary>

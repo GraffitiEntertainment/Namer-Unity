@@ -581,7 +581,9 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <see cref="NamerProjectionContext.Run"/> callback (invoked by
         /// <see cref="NamerComputePipeline.Process"/> after normalize) reads the source base
         /// back, runs the vertex-color fit, and generates the residual against the SOURCE base
-        /// while writing the Gouraud projection into <c>projectedOut</c>. With
+        /// while writing the Gouraud projection into <c>projectedOut</c>. Phase 5 D-02:
+        /// with a style profile attached, the SOURCE base reads as the STYLED source —
+        /// the operator is unchanged. With
         /// <paramref name="writeResidual"/> the residual is forced kept (AlwaysKeep); otherwise
         /// forced dropped (NeverKeep) — the 04.2 checkbox, replacing the retired D-13 Gate.
         /// <paramref name="coverageTarget"/> is the percentile-gate target threaded into

@@ -1,10 +1,11 @@
 ---
 phase: 5
 slug: stylization
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: 2026-09-23
+reviewed_at: 2026-09-23
 ---
 
 # Phase 5 — UI Design Contract (Unity IMGUI)
@@ -36,6 +37,8 @@ created: 2026-09-23
 - CTA idiom: `GUILayout.Button` with busy label swap "Process with NAMER" → "Processing…" (`:1849-1853`)
 - Debounce: `NamerEditorConstants.DebounceSeconds = 0.3f` — the named constant, never an inline number
 
+**Focal point:** the reference-list header + `Extract Style Stats` button on the profile inspector; the Before/After preview pane on the Processor window. (Checker rec — Visuals dimension.)
+
 ---
 
 ## Spacing Scale (IMGUI translation)
@@ -56,7 +59,7 @@ Exceptions: none beyond the Unity-owned 15px indent level (platform constant, no
 
 ## Typography (EditorStyles roles)
 
-No custom fonts, sizes, or weights. Exactly 4 roles, mapped to EditorStyles (2 visual weights: regular + bold). Light/dark variants follow the Editor skin.
+No custom fonts, sizes, or weights. Exactly 4 roles, mapped to EditorStyles (2 visual weights: regular + bold). Light/dark variants follow the Editor skin. Body line-height is EditorSkin-owned (platform default) and non-authorable, mirroring the Spacing section's delegation of Unity-owned defaults. (Checker rec — Typography dimension.)
 
 | Role | Style | Usage in this phase |
 |------|-------|---------------------|
@@ -171,14 +174,14 @@ Creation: `[MenuItem("Assets/Create/NAMER/Style Profile")]` → `ProjectWindowUt
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: PASS (focal point declared above — rec applied)
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS (line-height delegation declared above — rec applied)
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: PASS
 
-**Approval:** pending
+**Approval:** approved 2026-09-23 (gsd-ui-checker — 4 PASS + 2 non-blocking FLAGs, both recommendations applied post-review)
 
 ---
 

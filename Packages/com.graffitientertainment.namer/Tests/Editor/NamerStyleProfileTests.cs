@@ -137,6 +137,69 @@ namespace GraffitiEntertainment.Namer.Tests
                 "the creation menu must live under the house NAMER root (STYL-01)");
         }
 
+        [Test]
+        public void Profile_IsStale_FlipsAfterReferenceOrWeightChangePostExtract()
+        {
+            Texture2D first = new Texture2D(4, 4, TextureFormat.RGBA32, false) { name = "StaleFirst" };
+            Texture2D second = new Texture2D(4, 4, TextureFormat.RGBA32, false) { name = "StaleSecond" };
+            Texture2D third = new Texture2D(4, 4, TextureFormat.RGBA32, false) { name = "StaleThird" };
+            NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            try
+            {
+                profile.References.Add(first);
+                profile.References.Add(second);
+                profile.References.Add(third);
+                profile.ReferenceWeights.Add(1f);
+                profile.ReferenceWeights.Add(0.75f);
+                profile.ReferenceWeights.Add(0.5f);
+
+                // Simulate a successful Extract write: the fingerprint captured at
+                // extract time equals the current refs + weights state (OQ-4).
+                profile.ReferenceFingerprint = profile.ComputeFingerprint();
+                Assert.IsTrue(profile.IsExtracted, "a captured fingerprint marks the profile extracted");
+                Assert.IsFalse(profile.IsStale,
+                    "unchanged refs + weights must not be stale — the Statistics staleness warning stays hidden");
+
+                profile.ReferenceWeights[1] = 0.8f;
+                Assert.IsTrue(profile.IsStale,
+                    "any weight edit must flip the profile stale (OQ-4/A4 — weights apply at extract time)");
+
+                profile.ReferenceWeights[1] = 0.75f;
+                Assert.IsFalse(profile.IsStale,
+                    "reverting the weight restores the fingerprint match — staleness is pure comparison, no hidden state");
+
+                profile.References[2] = null;
+                Assert.IsTrue(profile.IsStale,
+                    "clearing an assigned reference slot must flip the profile stale (null slots are skipped from the fingerprint)");
+            }
+            finally
+            {
+                DestroyImmediate(profile);
+                DestroyImmediate(first);
+                DestroyImmediate(second);
+                DestroyImmediate(third);
+            }
+        }
+
+        [Test]
+        public void Profile_FreshAsset_RendersStatisticsPlaceholderState()
+        {
+            NamerStyleProfile fresh = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            try
+            {
+                Assert.IsFalse(fresh.IsExtracted,
+                    "a fresh asset must take the Statistics em-dash placeholder path (UI-SPEC P6)");
+                Assert.AreEqual(0, fresh.Stats.AnchorCount,
+                    "zeroed stats back the placeholder rows until the first Extract writes real values");
+                Assert.IsFalse(fresh.IsStale,
+                    "staleness is only meaningful once extracted — a fresh asset never shows the warning");
+            }
+            finally
+            {
+                DestroyImmediate(fresh);
+            }
+        }
+
         private static void DestroyImmediate(Object asset)
         {
             if (asset != null)

@@ -46,8 +46,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Stylization
 
-- [ ] **STYL-01**: User can create a reusable `NAMERStyleProfile` ScriptableObject holding 3–10 reference images and stylization parameters
-- [ ] **STYL-02**: Processor extracts palette/style statistics (dominant colors, hue families, saturation, luminance distribution, shadow/midtone/highlight colors, warm/cool bias, contrast, palette density) from reference images
+- [x] **STYL-01**: User can create a reusable `NAMERStyleProfile` ScriptableObject holding 3–10 reference images and stylization parameters
+- [x] **STYL-02**: Processor extracts palette/style statistics (dominant colors, hue families, saturation, luminance distribution, shadow/midtone/highlight colors, warm/cool bias, contrast, palette density) from reference images
 - [ ] **STYL-03**: Palette mapping preserves source hue identity (dark brown → styled dark brown, green stays green) unless stronger replacement is chosen
 - [ ] **STYL-04**: GPU edge-preserving smoothing (bilateral/Kuwahara/guided class) reduces photographic noise while preserving UV island boundaries, seams, decals, and large transitions
 - [ ] **STYL-05**: Runtime AO and Painted AO are exposed as separate controls; cavity strength and "avoid crushing cavities to black" behavior provided
@@ -135,8 +135,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | VCOL-03 | Phase 4 | Complete |
 | VCOL-04 | Phase 4 | Complete |
 | VCOL-05 | Phase 4 | Complete |
-| STYL-01 | Phase 5 | Pending |
-| STYL-02 | Phase 5 | Pending |
+| STYL-01 | Phase 5 | Complete |
+| STYL-02 | Phase 5 | Complete |
 | STYL-03 | Phase 5 | Pending |
 | STYL-04 | Phase 5 | Pending |
 | STYL-05 | Phase 5 | Pending |

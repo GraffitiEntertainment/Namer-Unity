@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 5 UI-SPEC approved
-last_updated: "2026-09-23T22:11:43.813Z"
-last_activity: 2026-09-23 -- Phase 5 planning complete
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-09-23T22:41:51.858Z"
+last_activity: 2026-09-23
 progress:
   total_phases: 9
   completed_phases: 8
   total_plans: 40
-  completed_plans: 37
+  completed_plans: 38
   percent: 89
 ---
 
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 
 ## Current Position
 
-Phase: 5
-Plan: Not started
+Phase: 5 (stylization) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-09-23 -- Phase 5 planning complete
+Last activity: 2026-09-23
 
-Progress: [██████████] 100%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -93,6 +93,7 @@ Progress: [██████████] 100%
 | Phase 04.3 P01 | 49min | 2 tasks | 3 files |
 | Phase 04.3 P02 | 6min | 2 tasks | 8 files |
 | Phase 04.3 P03 | 4min | 2 tasks | 2 files |
+| Phase 05 P01 | 45min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -197,6 +198,9 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 04.3 P03]: D-07 achieved-coverage readout rides the Residual row's VALUE string ('written @Npx, coverage X%') + extended tooltip — DecompStatLabels stays the 5-entry array byte-unchanged so the reflection test's expectations stay valid (PATTERNS-blessed over a 6th row)
 - [Phase ?]: [Phase 04.3 P03]: Roslyn compile-equivalence lesson — csc's -out: name IS the assembly name, so InternalsVisibleTo grants silently stop matching under temp output names and surface internal access as CS0117; build to the real assembly name
 - [Phase ?]: [Phase 04.3 P03]: EditMode runtime run deferred to the post-wave regression gate (editor lock, no unity-mcp relay) — 04.2-P04/04.3-02 precedent; both assemblies compile clean via Unity's bundled Roslyn, Tests built against the fresh Editor dll
+- [Phase 05]: Extraction runs as deterministic serial CPU accumulation (fixed tables, total-order comparers, fixed Lloyd iterations) — plan-blessed Burst alternative, trivially auditable against the Bake_IsDeterministic bar
+- [Phase 05]: NamerStyleProfile is sealed partial: the Changed event raise helper lives in a partial declaration inside NamerStyleProfileEditor.cs (C# events are declaring-type-only; satisfies the plan's literal Changed?.Invoke gate)
+- [Phase 05]: NamerStyleExtractResult carries TooFewReferences for honest below-MinReferences API failure; the UI prevents the state via the disabled Extract button
 
 ### Pending Todos
 
@@ -236,6 +240,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-23T21:41:16.981Z
-Stopped at: Phase 5 UI-SPEC approved
-Resume file: .planning/phases/05-stylization/05-UI-SPEC.md
+Last session: 2026-09-23T22:41:51.824Z
+Stopped at: Completed 05-01-PLAN.md
+Resume file: None

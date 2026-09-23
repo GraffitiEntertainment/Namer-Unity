@@ -1,8 +1,8 @@
 // NAMERStylize.compute
 // GPU stylization kernels (Phase 5, plan 02 — D-01/D-03).
 //
-// Two kernels build the island-gated bilateral smoothing stage that runs between the
-// normalize/encode stage and the fit/projection:
+// Three kernels build the stylization stage that runs between the normalize/encode
+// stage and the fit/projection (Pattern 5 order: bilateral first, then palette):
 //   CSRasterizeIslandIds  -> barycentric texel-space rasterize of the CPU union-find
 //                            per-triangle island ids (D-03): _IslandOut .r = island id,
 //                            .a = coverage (0 = uncovered atlas gutter). The dispatch
@@ -18,6 +18,15 @@
 //                            gaussian form). Uncovered centers pass through unchanged;
 //                            the center texel always carries weight 1 so the average is
 //                            well-defined; alpha is preserved (Pitfall 5 discipline).
+//   CSPaletteTransfer     -> hue-anchored palette pull (Pattern 5): decompose each texel
+//                            HSV-style, match the nearest anchor by CIRCULAR hue
+//                            distance (achromatic texels match achromatic anchors by
+//                            luma distance instead — hue of a low-sat texel is noise),
+//                            lerp luma/sat by strength, ramp hue by f = strength
+//                            (Preserve) or f = 1 (Replace, D-05/A5), rebuild + saturate,
+//                            preserve base alpha. With no anchors or zero strength the
+//                            kernel is a byte-exact passthrough copy, so dst is always
+//                            fully written even when only smoothing ran.
 //
 // The island id lives in the .r channel of a binary16 R16G16B16A16_SFloat target:
 // integers are exact only through 2048, so the CPU side clamps ids at
@@ -28,6 +37,7 @@
 
 #pragma kernel CSRasterizeIslandIds
 #pragma kernel CSIslandBilateral
+#pragma kernel CSPaletteTransfer
 
 // Barycentric epsilons copied verbatim from NAMERDecomp.compute: the area epsilon is
 // compared against denom = (2*Area_texels)^2 in TEXEL units — the [0,1] UV form
@@ -183,4 +193,223 @@ void CSIslandBilateral(uint3 id : SV_DispatchThreadID)
     }
 
     _Dst[id.xy] = (wsum > 0.0) ? float4(sum / wsum, center.a) : center;
+}
+
+// ---------------------------------------------------------------------------
+// CSPaletteTransfer (Pattern 5, plan task 2)
+// ---------------------------------------------------------------------------
+
+// Anchor matching (STYL-03). Achromatic anchors are flagged at upload
+// (anchor.w = 1) from their own saturation vs this cutoff.
+static const float NAMER_STYLIZE_ACHROMATIC_CUTOFF = 0.15;
+static const float NAMER_STYLIZE_ACHROMATIC_FLAG_GATE = 0.5;
+
+// HSV decompose/rebuild constants.
+static const float NAMER_STYLIZE_HUE_SECTORS = 6.0;    // hue normalized [0,1] x 6 sectors
+static const float NAMER_STYLIZE_HUE_SECTOR_G = 2.0;   // green-major sector offset
+static const float NAMER_STYLIZE_HUE_SECTOR_B = 4.0;   // blue-major sector offset
+static const float NAMER_STYLIZE_HUE_EPS = 1e-6;       // zero-chroma / zero-max guard
+static const float NAMER_STYLIZE_HUE_WRAP_MID = 0.5;   // circular lerp wrap to [-0.5, 0.5)
+static const float NAMER_STYLIZE_LUMA_SCALE_EPS = 1e-4; // K floor for the luma-target rebuild
+
+// Anchor records: (hue, saturation, luma, achromaticFlag) per anchor. NaN/zero-weight
+// anchors are rejected CPU-side before upload (T-05-06); the kernel additionally skips
+// any anchor whose distance fails d >= 0 (NaN compares false), so a stray NaN can never
+// win the match.
+StructuredBuffer<float4> _AnchorParams;
+uint _AnchorCount;
+float _StyleStrength;
+int _HueReplaceMode;   // 0 = Preserve (f = strength), 1 = Replace (f = 1) — D-05/A5
+
+Texture2D<float4> _PaletteSrc;    // last bilateral output (or src when smoothing skipped)
+RWTexture2D<float4> _PaletteOut;  // final styled base (caller-owned dst)
+
+float NamerStylizeSat(float3 c)
+{
+    float maxc = max(c.r, max(c.g, c.b));
+    float minc = min(c.r, min(c.g, c.b));
+    return maxc <= NAMER_STYLIZE_HUE_EPS ? 0.0 : (maxc - minc) / maxc;
+}
+
+// Normalized hue [0,1) (red wraps at 0/1). Zero-chroma colors return 0 (their hue is
+// noise; achromatic texels never match on hue anyway).
+float NamerStylizeHue(float3 c)
+{
+    float maxc = max(c.r, max(c.g, c.b));
+    float minc = min(c.r, min(c.g, c.b));
+    float chroma = maxc - minc;
+    if (chroma <= NAMER_STYLIZE_HUE_EPS)
+    {
+        return 0.0;
+    }
+
+    float h;
+    if (c.r >= maxc)
+    {
+        h = (c.g - c.b) / chroma;                                   // [-1, 1]
+    }
+    else if (c.g >= maxc)
+    {
+        h = (c.b - c.r) / chroma + NAMER_STYLIZE_HUE_SECTOR_G;      // [1, 3]
+    }
+    else
+    {
+        h = (c.r - c.g) / chroma + NAMER_STYLIZE_HUE_SECTOR_B;      // [3, 5]
+    }
+
+    return frac(h / NAMER_STYLIZE_HUE_SECTORS);
+}
+
+// Circular hue distance min(|a-b|, 1-|a-b|).
+float NamerStylizeHueDist(float a, float b)
+{
+    float d = abs(a - b);
+    return min(d, 1.0 - d);
+}
+
+// Circular hue lerp: wrap the delta to [-0.5, 0.5) so the pull always takes the short
+// way around the red wraparound, then apply factor f.
+float NamerStylizeHueLerp(float src, float dst, float f)
+{
+    float d = dst - src;
+    d -= floor(d + NAMER_STYLIZE_HUE_WRAP_MID);
+    return frac(src + d * f);
+}
+
+// Unit HSV color (max channel exactly 1) for (h, s) — the V=1 sector table.
+float3 NamerStylizeHsvUnit(float h, float s)
+{
+    h = frac(h) * NAMER_STYLIZE_HUE_SECTORS;
+    int i = (int)floor(h);
+    float f = h - (float)i;
+    float p = 1.0 - s;
+    float q = 1.0 - s * f;
+    float t = p + s * f;   // == 1 - s * (1 - f)
+    if (i <= 0) { return float3(1.0, t, p); }
+    if (i == 1) { return float3(q, 1.0, p); }
+    if (i == 2) { return float3(p, 1.0, t); }
+    if (i == 3) { return float3(p, q, 1.0); }
+    if (i == 4) { return float3(t, p, 1.0); }
+    return float3(1.0, p, q);
+}
+
+// Rebuild an RGB color for (h, s) whose Rec.709 luma equals the target: for a fixed
+// (h, s), rgb = unit * V, so luma = V * K where K = luma(unit) — solve V = luma / K
+// (floor K guards the saturated-blue near-zero-luma corner). saturate (T-05-06).
+float3 NamerStylizeRebuild(float h, float s, float luma)
+{
+    float3 unit = NamerStylizeHsvUnit(h, s);
+    float k = NamerStylizeLuma(unit);
+    float v = k > NAMER_STYLIZE_LUMA_SCALE_EPS ? luma / k : luma;
+    return saturate(unit * v);
+}
+
+// Hue-anchored palette transfer. Per texel: HSV decompose the linear base; match the
+// nearest anchor — achromatic texels (S < cutoff) match achromatic anchors by LUMA
+// distance with hue untouched, chromatic texels match by circular hue distance; a
+// chromatic texel with no chromatic anchor falls back to the min-distance winner over
+// ALL anchors (never fail). Pull luma/sat by strength; ramp hue by f (Preserve =
+// strength, Replace = 1). Rebuild + saturate, PRESERVE base alpha (Pitfall 5). With
+// zero anchors or zero strength this is a passthrough copy, so the caller-owned dst is
+// always fully written.
+[numthreads(8,8,1)]
+void CSPaletteTransfer(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float4 c = _PaletteSrc[id.xy];
+    if (_AnchorCount == 0u)
+    {
+        _PaletteOut[id.xy] = c;
+        return;
+    }
+
+    float strength = saturate(_StyleStrength);
+    if (strength <= 0.0)
+    {
+        _PaletteOut[id.xy] = c;
+        return;
+    }
+
+    float srcHue = NamerStylizeHue(c.rgb);
+    float srcSat = NamerStylizeSat(c.rgb);
+    float srcLuma = NamerStylizeLuma(c.rgb);
+    bool texelAchromatic = srcSat < NAMER_STYLIZE_ACHROMATIC_CUTOFF;
+
+    int winner = -1;
+    float bestDist = 0.0;
+    if (texelAchromatic)
+    {
+        for (uint i = 0u; i < _AnchorCount; ++i)
+        {
+            float4 anchor = _AnchorParams[i];
+            if (anchor.w < NAMER_STYLIZE_ACHROMATIC_FLAG_GATE)
+            {
+                continue;
+            }
+
+            float d = abs(srcLuma - anchor.z);
+            if (d >= 0.0 && (winner < 0 || d < bestDist))
+            {
+                winner = (int)i;
+                bestDist = d;
+            }
+        }
+    }
+    else
+    {
+        for (uint j = 0u; j < _AnchorCount; ++j)
+        {
+            float4 anchor = _AnchorParams[j];
+            if (anchor.w >= NAMER_STYLIZE_ACHROMATIC_FLAG_GATE)
+            {
+                continue;
+            }
+
+            float d = NamerStylizeHueDist(srcHue, anchor.x);
+            if (d >= 0.0 && (winner < 0 || d < bestDist))
+            {
+                winner = (int)j;
+                bestDist = d;
+            }
+        }
+    }
+
+    if (winner < 0)
+    {
+        // Never-fail fallback: no anchor in the texel's own pool — match over ALL
+        // anchors by circular hue distance (the extractor always produces both pools,
+        // so this only fires for hand-built contexts).
+        for (uint k = 0u; k < _AnchorCount; ++k)
+        {
+            float d = NamerStylizeHueDist(srcHue, _AnchorParams[k].x);
+            if (d >= 0.0 && (winner < 0 || d < bestDist))
+            {
+                winner = (int)k;
+                bestDist = d;
+            }
+        }
+    }
+
+    if (winner < 0)
+    {
+        _PaletteOut[id.xy] = c;
+        return;
+    }
+
+    float4 anchor = _AnchorParams[winner];
+    float outLuma = lerp(srcLuma, anchor.z, strength);
+    float outSat = lerp(srcSat, anchor.y, strength);
+    float outHue = srcHue;
+    if (!texelAchromatic)
+    {
+        float f = (_HueReplaceMode == 1) ? 1.0 : strength;
+        outHue = NamerStylizeHueLerp(srcHue, anchor.x, f);
+    }
+
+    float3 rgb = NamerStylizeRebuild(outHue, outSat, outLuma);
+    _PaletteOut[id.xy] = float4(rgb, c.a);
 }

@@ -82,5 +82,32 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>Default residual-resolution ladder index (D-17: 0 = Auto).</summary>
         public const int DefaultResidualResolution = 0;
+
+        /// <summary>Minimum assigned reference images required by Extract Style Stats (05 UI-SPEC section C; STYL-01).</summary>
+        public const int MinReferences = 3;
+
+        /// <summary>Maximum reference-image slots on a style profile (05 UI-SPEC section C; STYL-01).</summary>
+        public const int MaxReferences = 10;
+
+        /// <summary>Default style strength (D-04; 0 = original, 1 = full palette snap).</summary>
+        public const float DefaultStyleStrength = 0.5f;
+
+        /// <summary>Default island-gated bilateral smoothing strength (D-03; 0 = off).</summary>
+        public const float DefaultSmoothingStrength = 0f;
+
+        /// <summary>Default cavity floor after AO contrast (D-08; 0 = no floor).</summary>
+        public const float DefaultCavityFloor = 0f;
+
+        /// <summary>Default normal-detail reduction (D-07; 0 = keep authored detail).</summary>
+        public const float DefaultNormalDetailReduction = 0f;
+
+        /// <summary>Default roughness simplification (D-07; 0 = off).</summary>
+        public const float DefaultRoughnessSimplify = 0f;
+
+        /// <summary>Default per-reference extraction weight (D-05 Advanced; weights apply at extract time).</summary>
+        public const float DefaultReferenceWeight = 1f;
+
+        /// <summary>Default hue mode popup index (D-05; 0 = Preserve, 1 = Replace).</summary>
+        public const int DefaultHueMode = 0;
     }
 }

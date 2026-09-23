@@ -100,6 +100,8 @@ float _FitOnly;           // 1 = residual is identity (fit-only error), 0 = full
 uint _TriCount;
 uint2 _AvgSrcSize;
 uint2 _AvgDstSize;
+uint2 _RawSrcSize;       // un-reduced source dims: partial-block footprint weighting (PR #5)
+uint _ChildSpan;         // raw texels per child block edge at this reduce level (1, 8, 64, ...)
 
 // Rasterize the quantized Color32 colors into UV space. One thread per texel walks every
 // triangle, runs a barycentric point-in-triangle test (the exact math of
@@ -351,6 +353,13 @@ void CSErrorHeatmap(uint3 id : SV_DispatchThreadID)
 // (error), .g = max (error), .b = mean (coverage flag), .a = min (covered base alpha).
 // Every output texel stays in [0,1], so the reduction is overflow-free at any resolution
 // and the CPU reads all stats from a single tiny RT.
+// PR #5: mean channels weight each child block by its raw-texel FOOTPRINT fraction
+// min(span, raw - idx*span)/span per axis, so the chain is a texel-weighted mean, not a
+// mean of block means. Unweighted, a partial edge block (e.g. the 1-texel corner of a
+// 257x257 source) voted like a full block and skewed the percentile gate on
+// non-power-of-8 dims. Weights stay in (0,1] so the [0,1] overflow-free property holds.
+// A span of 1 (first level) makes every weight exactly 1 — the previous per-texel
+// behavior; power-of-8 dims are all-full at every level, so they are unaffected.
 [numthreads(8,8,1)]
 void CSReduce(uint3 id : SV_DispatchThreadID)
 {
@@ -363,7 +372,7 @@ void CSReduce(uint3 id : SV_DispatchThreadID)
     float maxG = 0.0;
     float sumB = 0.0;
     float minA = 1.0;
-    float count = 0.0;
+    float weightSum = 0.0;
 
     for (uint y = 0; y < 8; ++y)
     {
@@ -372,19 +381,22 @@ void CSReduce(uint3 id : SV_DispatchThreadID)
             uint2 src = id.xy * uint2(8u, 8u) + uint2(x, y);
             if (src.x < _AvgSrcSize.x && src.y < _AvgSrcSize.y)
             {
+                uint ex = min(_ChildSpan, _RawSrcSize.x - src.x * _ChildSpan);
+                uint ey = min(_ChildSpan, _RawSrcSize.y - src.y * _ChildSpan);
+                float w = (float(ex) / (float)_ChildSpan) * ((float)ey / (float)_ChildSpan);
                 float4 s = _SrcAvg[src];
-                sumR += s.r;
+                sumR += s.r * w;
                 maxG = max(maxG, s.g);
-                sumB += s.b;
+                sumB += s.b * w;
                 minA = min(minA, s.a);
-                count += 1.0;
+                weightSum += w;
             }
         }
     }
 
     _DstAvg[id.xy] = float4(
-        count > 0.0 ? sumR / count : 0.0,
+        weightSum > 0.0 ? sumR / weightSum : 0.0,
         maxG,
-        count > 0.0 ? sumB / count : 0.0,
+        weightSum > 0.0 ? sumB / weightSum : 0.0,
         minA);
 }

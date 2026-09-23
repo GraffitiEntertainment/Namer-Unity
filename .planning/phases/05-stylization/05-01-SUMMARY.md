@@ -124,9 +124,17 @@ Each task was committed atomically:
 - **Verification:** Extract_TooFewReferences_ReturnsHonestFailure test
 - **Committed in:** c806698 / aa968b3
 
+**5. [Rule 1 - Bug] Weight-0 oracle control tripped the MinReferences gate (found post-wave)**
+- **Found during:** Post-wave regression gate (live EditMode run), not during execution — the Roslyn compile proof cannot catch a fixture/logic contradiction
+- **Issue:** The plan's literal A4 oracle ("two refs, weight 0 on the second → stats equal to a single-ref extract of the first", 05-01-PLAN.md:168) is internally contradictory: any control extract with fewer than 3 assigned refs legitimately fails the MinReferences gate the plan itself mandates (05-01-PLAN.md:175), returning the honest TooFewReferences result with null Anchors. The first adaptation kept a 2-ref control, so `Extract_ZeroWeightReference_ContributesNothing` failed at the IsNotNull assert. The test was the defective artifact; NamerStyleExtractor was correct throughout.
+- **Fix:** Content-independence construction — both sides carry 3 assigned refs with weights [1,1,0] and differ only in the weight-0 slot's texture (checker vs magenta). Element-wise equal anchors/stats prove the weight-0 reference's content contributes nothing: the same A4 claim in a stronger, gate-satisfiable form. ReferenceCount asserts updated to 3/3 (assigned refs are read and counted, weight-0 included).
+- **Files modified:** Tests/Editor/NamerStyleExtractionTests.cs (test-only; extractor untouched)
+- **Verification:** Roslyn compile proof green; full live EditMode suite re-run by the post-wave gate
+- **Committed in:** fix(05-01) atomic commit (post-wave correction)
+
 ---
 
-**Total deviations:** 4 auto-fixed (2 Rule 1 bugs, 1 Rule 2 missing critical, 1 Rule 3 blocking)
+**Total deviations:** 5 auto-fixed (3 Rule 1 bugs, 1 Rule 2 missing critical, 1 Rule 3 blocking)
 **Impact on plan:** All fixes were correctness/compilability requirements within the plan's own file scope. No scope creep; pipeline files untouched (byte-identical).
 
 ## Issues Encountered

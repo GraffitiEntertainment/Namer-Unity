@@ -200,25 +200,33 @@ namespace GraffitiEntertainment.Namer.Tests
             Texture2D first = CreateSolidTexture("WeightFirst", new Color(1f, 0f, 0f, 1f));
             Texture2D second = CreateHalfSplitTexture("WeightSecond", 32);
             Texture2D third = CreateCheckerTexture("WeightThird");
+            Texture2D ignored = CreateSolidTexture("WeightIgnored", new Color(1f, 0f, 1f, 1f));
             NamerStyleProfile weighted = ScriptableObject.CreateInstance<NamerStyleProfile>();
-            NamerStyleProfile withoutExcluded = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            NamerStyleProfile control = ScriptableObject.CreateInstance<NamerStyleProfile>();
             try
             {
-                // MinReferences is 3, so the weight-0 oracle runs three refs with
-                // weights [1, 1, 0] against a two-ref extract of the first two (A4).
+                // A4 as planned (a two-ref extract vs a single-ref control) is
+                // unsatisfiable: MinReferences = 3 honestly fails any extract with
+                // fewer than three assigned refs. Content-independence form instead:
+                // both sides carry three assigned refs with weights [1, 1, 0] and
+                // differ ONLY in the weight-0 slot's texture (checker vs magenta).
+                // Element-wise equal anchors and stats prove the weight-0 reference's
+                // content contributes nothing — the same A4 claim, stronger form.
                 weighted.References.Add(first);
                 weighted.References.Add(second);
                 weighted.References.Add(third);
                 weighted.ReferenceWeights.Add(1f);
                 weighted.ReferenceWeights.Add(1f);
                 weighted.ReferenceWeights.Add(0f);
-                withoutExcluded.References.Add(first);
-                withoutExcluded.References.Add(second);
-                withoutExcluded.ReferenceWeights.Add(1f);
-                withoutExcluded.ReferenceWeights.Add(1f);
+                control.References.Add(first);
+                control.References.Add(second);
+                control.References.Add(ignored);
+                control.ReferenceWeights.Add(1f);
+                control.ReferenceWeights.Add(1f);
+                control.ReferenceWeights.Add(0f);
 
                 NamerStyleExtractResult withZeroWeight = NamerStyleExtractor.Extract(weighted, shouldCancel: NeverCancel);
-                NamerStyleExtractResult without = NamerStyleExtractor.Extract(withoutExcluded, shouldCancel: NeverCancel);
+                NamerStyleExtractResult without = NamerStyleExtractor.Extract(control, shouldCancel: NeverCancel);
                 Assert.IsNotNull(withZeroWeight.Anchors);
                 Assert.IsNotNull(without.Anchors);
                 Assert.AreEqual(withZeroWeight.Anchors.Length, without.Anchors.Length);
@@ -248,13 +256,14 @@ namespace GraffitiEntertainment.Namer.Tests
                 Assert.AreEqual(without.Stats.WarmCoolBias, withZeroWeight.Stats.WarmCoolBias, kWeightOracleTolerance);
                 Assert.AreEqual(without.Stats.Contrast, withZeroWeight.Stats.Contrast, kWeightOracleTolerance);
                 Assert.AreEqual(without.Stats.PaletteDensity, withZeroWeight.Stats.PaletteDensity, kWeightOracleTolerance);
-                // ReferenceCount honestly reports how many references were read.
-                Assert.AreEqual(2, without.Stats.ReferenceCount);
+                // ReferenceCount honestly reports how many references were read —
+                // assigned refs are counted, weight-0 included, on both sides.
+                Assert.AreEqual(3, without.Stats.ReferenceCount);
                 Assert.AreEqual(3, withZeroWeight.Stats.ReferenceCount);
             }
             finally
             {
-                Destroy(weighted, withoutExcluded, first, second, third);
+                Destroy(weighted, control, first, second, third, ignored);
             }
         }
 

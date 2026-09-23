@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-09-23T22:41:51.858Z"
+stopped_at: Completed 05-02-PLAN.md
+last_updated: "2026-09-23T23:24:36.383Z"
 last_activity: 2026-09-23
 progress:
   total_phases: 9
   completed_phases: 8
   total_plans: 40
-  completed_plans: 38
+  completed_plans: 39
   percent: 89
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 ## Current Position
 
 Phase: 5 (stylization) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-09-23
 
-Progress: [██████████] 95%
+Progress: [██████████] 98%
 
 ## Performance Metrics
 
@@ -94,6 +94,7 @@ Progress: [██████████] 95%
 | Phase 04.3 P02 | 6min | 2 tasks | 8 files |
 | Phase 04.3 P03 | 4min | 2 tasks | 2 files |
 | Phase 05 P01 | 45min | 3 tasks | 6 files |
+| Phase 05 P02 | 85min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -201,6 +202,10 @@ Recent decisions affecting current work:
 - [Phase 05]: Extraction runs as deterministic serial CPU accumulation (fixed tables, total-order comparers, fixed Lloyd iterations) — plan-blessed Burst alternative, trivially auditable against the Bake_IsDeterministic bar
 - [Phase 05]: NamerStyleProfile is sealed partial: the Changed event raise helper lives in a partial declaration inside NamerStyleProfileEditor.cs (C# events are declaring-type-only; satisfies the plan's literal Changed?.Invoke gate)
 - [Phase 05]: NamerStyleExtractResult carries TooFewReferences for honest below-MinReferences API failure; the UI prevents the state via the disabled Extract button
+- [Phase 5]: 05-02: stylize anchors upload as ONE StructuredBuffer<float4> (hue, sat, luma, achromaticFlag); kernel consumes params only, colors stay CPU-side
+- [Phase 5]: 05-02: UV-edge island keys use LEXICOGRAPHIC endpoint ordering (component-wise min/max collides crossing edges and merges distinct islands)
+- [Phase 5]: 05-02: hue readback tolerance 0.002 (binary16 working target bounds circular hue error ~2e-3; oracles computed from readback input)
+- [Phase 5]: 05-02: stylize stage leases only when stylization.Active — null AND inactive contexts are byte-identical with zero extra dispatches (guarded by integration tests)
 
 ### Pending Todos
 
@@ -240,6 +245,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-23T22:41:51.824Z
-Stopped at: Completed 05-01-PLAN.md
+Last session: 2026-09-23T23:24:36.372Z
+Stopped at: Completed 05-02-PLAN.md
 Resume file: None

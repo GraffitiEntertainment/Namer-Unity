@@ -304,7 +304,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 05-02: Hue-aware palette mapping + edge-preserving smoothing compute kernels
+- [x] 05-02: Hue-aware palette mapping + edge-preserving smoothing compute kernels
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -323,4 +323,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 03.1. AO Extraction (INSERTED) | 3/3 | Complete | 2026-08-31 |
 | 4. Vertex-Color Decomposition + Residual | 5/5 | Complete   | 2026-09-01 |
 | 04.1. Roughness Extraction + One-Texture (INSERTED) | 7/7 | Complete   | 2026-09-16 |
-| 5. Stylization | 1/3 | In Progress|  |
+| 5. Stylization | 2/3 | In Progress|  |

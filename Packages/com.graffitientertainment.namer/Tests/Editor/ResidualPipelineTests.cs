@@ -538,6 +538,66 @@ namespace GraffitiEntertainment.Namer.Tests
             yield return null;
         }
 
+        // PR #5 review (Codex P2): ReduceToStats averaged block MEANS uniformly across
+        // levels, so on non-power-of-8 source dims a partial edge block voted with the
+        // weight of a full one. Fixture: 257x257 source (257 -> 33 -> 5 reduce chain,
+        // final 5x5 combine mixes blocks holding 4096, 64, and 1 texels) with a single
+        // failing corner texel — despiking cannot represent a 1x1 spike, so the extreme
+        // texel stays outside tolerance at rung 128. Block-mean weighting gave that ONE
+        // texel 1/25 of the vote (measured gate 0.9585), rejecting rung 128 under a
+        // 0.99 target; its true within-tolerance fraction is ~1 - 10/66049 ~= 0.9998.
+        // The reduce now weights every child block by its raw-texel footprint, making
+        // the gate a true texel percentile; the POT fixtures above are unchanged (all
+        // weights 1). A 4x4 corner tail does NOT discriminate here: its extreme corner
+        // reconstructs within tolerance and the failing smear annulus lands in the big
+        // blocks (measured gate 0.99707).
+        [UnityTest]
+        public IEnumerator GenerateResidual_PercentileGate_NpotSource_WeightsPartialBlocksByTexelFootprint()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU percentile-gate test (D-15: Metal is the verified target).");
+                yield break;
+            }
+
+            const int w = 257;
+            const int h = 257;
+            const float threshold = 0.05f;
+
+            NamerSplitResult split = CreateSplitQuad(0f, 1f);
+            Color32[] colors = ConstantColors(split.VertexCount, 128);
+            RenderTexture baseRt = CreateCornerPixelBase(w, h);
+
+            using (NamerDecompPipeline pipeline = new NamerDecompPipeline())
+            {
+                try
+                {
+                    NamerDecompOutput output = pipeline.GenerateResidual(
+                        split, colors, baseRt, w, h, threshold, 0,
+                        projectedOut: null, mode: NamerResidualMode.Gate, coverageTarget: 0.99f);
+                    try
+                    {
+                        Assert.Greater(output.Stats.MaxError, threshold,
+                            "the corner texel's error must be real — otherwise this fixture discriminates nothing");
+                        Assert.AreEqual(128, output.Stats.ChosenResolution,
+                            "one failing texel of 66049 is a 0.0015% shortfall — rung 128 must pass a 0.99 target (block-mean weighting rejected it at 0.9585)");
+                        Assert.AreEqual(128, output.Residual.width);
+                        Assert.GreaterOrEqual(output.Stats.AchievedCoverage, 0.99f, "the texel-weighted statistic passes the target");
+                    }
+                    finally
+                    {
+                        output.Dispose();
+                    }
+                }
+                finally
+                {
+                    Release(baseRt);
+                }
+            }
+
+            yield return null;
+        }
+
         [UnityTest]
         public IEnumerator GenerateResidual_TinyUvFootprint_StillDecomposes_AndZeroCoverageStillFallsBack()
         {
@@ -1562,6 +1622,21 @@ namespace GraffitiEntertainment.Namer.Tests
             return UploadBase(w, h, (x, y) =>
             {
                 bool inTail = x < kTailBlockSize && y < kTailBlockSize;
+                float v = inTail ? 1f : kTailBaseValue;
+                return new Color(v, v, v, 1f);
+            });
+        }
+
+        // PR #5 review fixture: a single white texel at the BOTTOM-RIGHT corner — the
+        // extreme partial-block texel in isolation (on a 257x257 source, level-1 block
+        // 32 covers texel 256 only; the final 5x5 combine mixes blocks holding 4096,
+        // 64, and 1 texels). Despiking cannot represent a 1x1 spike, so this texel
+        // stays outside tolerance even through the rung-128 round-trip.
+        private static RenderTexture CreateCornerPixelBase(int w, int h)
+        {
+            return UploadBase(w, h, (x, y) =>
+            {
+                bool inTail = x == w - 1 && y == h - 1;
                 float v = inTail ? 1f : kTailBaseValue;
                 return new Color(v, v, v, 1f);
             });

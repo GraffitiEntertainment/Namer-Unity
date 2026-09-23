@@ -618,6 +618,12 @@ namespace GraffitiEntertainment.Namer.Editor
             int curW = srcW;
             int curH = srcH;
             bool useAvgA = true;
+            // Raw texels per child block edge (1, then x8 per reduce level). CSReduce
+            // weights partial edge blocks by their raw-texel footprint (PR #5), so the
+            // chain is a texel percentile rather than a mean of block means on
+            // non-power-of-8 source dims. span = 1 on the first pass degenerates to the
+            // previous per-texel counts; power-of-8 sources are unaffected.
+            int span = 1;
 
             while (curW > 1 || curH > 1)
             {
@@ -627,6 +633,8 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 _compute.SetInts("_AvgSrcSize", new[] { curW, curH });
                 _compute.SetInts("_AvgDstSize", new[] { dstW, dstH });
+                _compute.SetInts("_RawSrcSize", new[] { srcW, srcH });
+                _compute.SetInt("_ChildSpan", span);
                 _compute.SetTexture(_kernelReduce, "_SrcAvg", current);
                 _compute.SetTexture(_kernelReduce, "_DstAvg", dst);
                 Dispatch(_kernelReduce, dstW, dstH);
@@ -635,6 +643,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 curW = dstW;
                 curH = dstH;
                 useAvgA = !useAvgA;
+                span *= ReduceDownsampleFactor;
             }
 
             return ReadBackStats(current, curW, curH);

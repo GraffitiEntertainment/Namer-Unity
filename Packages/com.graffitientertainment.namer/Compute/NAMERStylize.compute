@@ -1,0 +1,186 @@
+// NAMERStylize.compute
+// GPU stylization kernels (Phase 5, plan 02 — D-01/D-03).
+//
+// Two kernels build the island-gated bilateral smoothing stage that runs between the
+// normalize/encode stage and the fit/projection:
+//   CSRasterizeIslandIds  -> barycentric texel-space rasterize of the CPU union-find
+//                            per-triangle island ids (D-03): _IslandOut .r = island id,
+//                            .a = coverage (0 = uncovered atlas gutter). The dispatch
+//                            shape is the CSRasterizeVertexColors loop VERBATIM (first
+//                            hit wins with immediate return — Pitfall 11 forbids
+//                            "improving" it into a parallel write).
+//   CSIslandBilateral     -> island-gated bilateral smoothing: a neighbor contributes
+//                            only when it is covered AND carries the SAME island id
+//                            (coverage alone fails when the atlas gutter is narrower
+//                            than the bilateral radius, D-03), weighted by a spatial
+//                            gaussian exp(-d2/(2*sigmaS^2)) and a range gaussian
+//                            exp(-dluma2/(2*sigmaR^2)) on Rec.709 luma (the NAMERAO
+//                            gaussian form). Uncovered centers pass through unchanged;
+//                            the center texel always carries weight 1 so the average is
+//                            well-defined; alpha is preserved (Pitfall 5 discipline).
+//
+// The island id lives in the .r channel of a binary16 R16G16B16A16_SFloat target:
+// integers are exact only through 2048, so the CPU side clamps ids at
+// NamerUvIslands.kMaxIslandIdFloat16 and flags the clamp (Pitfall 3 / T-05-08) — the
+// same-island equality test below then compares exactly representable values only.
+//
+// All write targets are LINEAR R16G16B16A16_SFloat (compute never writes sRGB).
+
+#pragma kernel CSRasterizeIslandIds
+#pragma kernel CSIslandBilateral
+
+// Barycentric epsilons copied verbatim from NAMERDecomp.compute: the area epsilon is
+// compared against denom = (2*Area_texels)^2 in TEXEL units — the [0,1] UV form
+// silently discarded ~92% of real triangles at 2048^2 (Pitfall 4).
+static const float NAMER_STYLIZE_AREA_EPS = 1e-8;
+static const float NAMER_STYLIZE_INSIDE_EPS = 1e-4;
+
+// Coverage gate mirrors CSDilateResidual's _VcInterp.a >= 0.5 atlas-coverage test.
+static const float NAMER_STYLIZE_COVERAGE_GATE = 0.5;
+
+// Kernel-side radius bound (T-05-09): C# already clamps, this is defense in depth.
+static const int NAMER_STYLIZE_MAX_RADIUS = 4;
+
+// Rec.709 luma weights (the fitter/extractor luma definition).
+static const float NAMER_STYLIZE_LUMA_R = 0.2126;
+static const float NAMER_STYLIZE_LUMA_G = 0.7152;
+static const float NAMER_STYLIZE_LUMA_B = 0.0722;
+
+// Split-mesh vertex data (the NAMERDecomp upload contract, minus the unused streams).
+StructuredBuffer<float2> _Uvs;
+StructuredBuffer<int3> _Tris;
+StructuredBuffer<int> _TriIsland;   // CPU union-find island id per flattened triangle (D-03)
+
+// Uniforms.
+uint2 _Size;          // unsigned: compared against SV_DispatchThreadID (uint)
+uint _TriCount;
+int _Radius;          // bilateral window radius in texels (clamped below MAX_RADIUS)
+float _SigmaS;        // spatial sigma (texels)
+float _SigmaR;        // range sigma (Rec.709 luma units)
+
+// Kernel-written outputs (linear, random-access).
+RWTexture2D<float4> _IslandOut;  // R16G16B16A16_SFloat linear; r = island id, a = coverage
+RWTexture2D<float4> _Dst;        // bilateral write target (ping-pong; never _Src)
+
+// Kernel-read inputs.
+Texture2D<float4> _Src;          // bilateral read source (ping-pong; never _Dst)
+
+float NamerStylizeLuma(float3 c)
+{
+    return dot(c, float3(NAMER_STYLIZE_LUMA_R, NAMER_STYLIZE_LUMA_G, NAMER_STYLIZE_LUMA_B));
+}
+
+// Rasterize the per-triangle island ids into UV space. Verbatim CSRasterizeVertexColors
+// dispatch shape: one thread per texel walks every triangle, runs the texel-space
+// barycentric point-in-triangle test, writes the winning triangle's island id with full
+// coverage, and returns on first hit. Uncovered texels write (0,0,0,0) — the alpha-0
+// coverage mask the bilateral kernel gates on.
+[numthreads(8,8,1)]
+void CSRasterizeIslandIds(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    // Texel-space barycentric test: denom = (2*Area_texels)^2 (Pitfall 4).
+    float2 p = float2(id.xy) + 0.5;
+    float2 texels = float2(_Size);
+    for (uint t = 0; t < _TriCount; ++t)
+    {
+        int3 tri = _Tris[t];
+        float2 a = _Uvs[tri.x] * texels;
+        float2 b = _Uvs[tri.y] * texels;
+        float2 c = _Uvs[tri.z] * texels;
+
+        float2 v0 = b - a;
+        float2 v1 = c - a;
+        float2 v2 = p - a;
+        float d00 = dot(v0, v0);
+        float d01 = dot(v0, v1);
+        float d11 = dot(v1, v1);
+        float d20 = dot(v2, v0);
+        float d21 = dot(v2, v1);
+        float denom = d00 * d11 - d01 * d01;
+        if (abs(denom) < NAMER_STYLIZE_AREA_EPS)
+        {
+            continue;
+        }
+
+        float v = (d11 * d20 - d01 * d21) / denom;
+        float w = (d00 * d21 - d01 * d20) / denom;
+        float u = 1.0 - v - w;
+        if (u < -NAMER_STYLIZE_INSIDE_EPS || v < -NAMER_STYLIZE_INSIDE_EPS || w < -NAMER_STYLIZE_INSIDE_EPS)
+        {
+            continue;
+        }
+
+        float island = (float)_TriIsland[t];
+        _IslandOut[id.xy] = float4(island, 0.0, 0.0, 1.0);
+        return;
+    }
+
+    _IslandOut[id.xy] = float4(0.0, 0.0, 0.0, 0.0);
+}
+
+// Island-gated bilateral smoothing (D-03). The neighbor window extends the
+// CSDilateResidual Chebyshev loop: only covered neighbors carrying the SAME island id
+// as the center contribute, weighted by the spatial x range gaussians (the NAMERAO
+// gaussian form). The center texel is always a member of its own average (weight 1),
+// so wsum >= 1; the residual ternary shape (count > 0 ? ... : passthrough) is kept as
+// a defensive guard anyway. Uncovered centers (atlas gutter) pass through unchanged,
+// RGB and alpha; covered centers keep their source alpha (Pitfall 5 discipline).
+[numthreads(8,8,1)]
+void CSIslandBilateral(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Size.x || id.y >= _Size.y)
+    {
+        return;
+    }
+
+    float4 center = _Src[id.xy];
+    float4 centerIsland = _IslandOut[id.xy];
+    if (centerIsland.a < NAMER_STYLIZE_COVERAGE_GATE)
+    {
+        _Dst[id.xy] = center;
+        return;
+    }
+
+    int radius = min(_Radius, NAMER_STYLIZE_MAX_RADIUS);
+    float centerLuma = NamerStylizeLuma(center.rgb);
+    int sizeX = (int)_Size.x;
+    int sizeY = (int)_Size.y;
+    float3 sum = center.rgb;
+    float wsum = 1.0;
+    for (int dy = -radius; dy <= radius; dy++)
+    {
+        for (int dx = -radius; dx <= radius; dx++)
+        {
+            if (dx == 0 && dy == 0)
+            {
+                continue;
+            }
+
+            int2 p = int2(id.xy) + int2(dx, dy);
+            if (p.x < 0 || p.y < 0 || p.x >= sizeX || p.y >= sizeY)
+            {
+                continue;
+            }
+
+            float4 neighborIsland = _IslandOut[p];
+            if (neighborIsland.a < NAMER_STYLIZE_COVERAGE_GATE || neighborIsland.r != centerIsland.r)
+            {
+                continue;
+            }
+
+            float4 neighbor = _Src[p];
+            float d2 = (float)(dx * dx + dy * dy);
+            float dluma = NamerStylizeLuma(neighbor.rgb) - centerLuma;
+            float w = exp(-d2 / (2.0 * _SigmaS * _SigmaS)) * exp(-(dluma * dluma) / (2.0 * _SigmaR * _SigmaR));
+            sum += neighbor.rgb * w;
+            wsum += w;
+        }
+    }
+
+    _Dst[id.xy] = (wsum > 0.0) ? float4(sum / wsum, center.a) : center;
+}

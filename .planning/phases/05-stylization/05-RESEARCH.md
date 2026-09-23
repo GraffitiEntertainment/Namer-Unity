@@ -479,21 +479,27 @@ internal void RemapAuthored(RenderTexture src, RenderTexture dst, float strength
 | A7 | HSV-style hue/sat/luma decomposition (not OKLab/HLB) is sufficient for hue identity + anchor stats | Patterns 4/5 | OKLab would give perceptually better luma pull but adds conversion complexity; HSV is the CLAUDE.md "smallest change" reading |
 | A8 | W4 default 0 (NAMER) means the pre-stylization view stays the default after attaching a profile | UI constraints | Cosmetic default flip only |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> All four resolved during planning (2026-09-23) — rulings recorded in the plan `<decisions>` blocks (05-01-PLAN T2, 05-03-PLAN). Do not re-litigate.
 
 1. **Reference-texel acquisition: `GetPixels` vs GPU readback (OQ-1)**
    - What we know: `GetPixels` requires `Texture.isReadable == true` and throws otherwise [CITED: Unity docs]; the approved error copy ("Check the texture's Read/Write import setting") presumes this path. The house `Upload`+`AsyncGPUReadback` path reads any importable texture with the sRGB contract already solved.
    - What's unclear: whether the UI contract intended to REQUIRE Read/Write on refs (a real user constraint) or simply assumed the simplest read.
    - Recommendation: implement the GetPixels path WITH the pre-check + approved error copy (it is the approved contract, and extraction is explicit/rare); keep the GPU-readback alternative in the back pocket as a UX follow-up. If the planner flips to GPU readback, the P5 error copy becomes dead text — a UI-spec amendment would be needed.
+   - **RESOLVED:** GetPixels + `isReadable` pre-check + approved error copy — adopted in 05-01-PLAN `<decisions>`.
 2. **Profile-edit → window recompute notification mechanism**
    - What we know: UI-SPEC locks the behavior (debounced recompute on profile edits) but not the mechanism; `SetDirty` alone does not notify other windows.
    - Recommendation: static `Changed` event on `NamerStyleProfile` (Pattern 8) — editor-only, no persistence concerns. Alternative: window polls the profile's `EditSequence` int each `Tick` (zero events, one extra field).
+   - **RESOLVED:** static `Changed` event on `NamerStyleProfile` — adopted in 05-01-PLAN `<decisions>`.
 3. **Smoothing when no mesh resolves (bare-material selection with a profile attached)**
    - What we know: island IDs need the split mesh; palette transfer doesn't; bare materials have no mesh.
    - Recommendation: palette transfer runs; smoothing skips with an `MessageType.Info` HelpBox ("Smoothing unavailable — no mesh to derive UV islands") — never a hard failure (D-06 baker fallback discipline). Needs a plan-level decision because it shapes the guard code.
+   - **RESOLVED:** palette transfer runs, smoothing skips with `MessageType.Info` HelpBox — adopted in 05-03-PLAN `<decisions>`.
 4. **Fingerprint scope: refs only, or refs + weights?**
    - What we know: staleness copy says "Reference images changed since extraction"; weights change the merged aggregate only if applied at extract time (A4).
    - Recommendation: fingerprint = GUIDs + weights (any weight edit marks stale) — honest, zero extra machinery.
+   - **RESOLVED:** fingerprint = reference GUIDs + weights — adopted in 05-01-PLAN `<decisions>`.
 
 ## Environment Availability
 

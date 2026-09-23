@@ -298,8 +298,16 @@ Plans:
 
 Plans:
 
+**Wave 1**
+
 - [ ] 05-01: NAMERStyleProfile + palette/style-stat extraction
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 05-02: Hue-aware palette mapping + edge-preserving smoothing compute kernels
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 05-03: AO/normal/roughness controls + stylization pipeline integration
 
 ## Progress

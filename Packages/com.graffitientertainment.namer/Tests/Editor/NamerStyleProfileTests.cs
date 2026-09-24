@@ -25,6 +25,8 @@ namespace GraffitiEntertainment.Namer.Tests
                 Assert.AreEqual(0, profile.References.Count, "reference list must start empty (user-locked list model, UI-SPEC P2)");
                 Assert.AreEqual(0, profile.ReferenceWeights.Count);
                 Assert.AreEqual(NamerEditorConstants.DefaultStyleStrength, profile.StyleStrength);
+                Assert.AreEqual(NamerEditorConstants.DefaultToneMatch, profile.ToneMatch,
+                    "tone match must default to 0 (preserve source tonality — quick 260924-hk7's safe no-migration default)");
                 Assert.AreEqual(NamerEditorConstants.DefaultSmoothingStrength, profile.Smoothing);
                 Assert.AreEqual(NamerEditorConstants.DefaultCavityFloor, profile.CavityFloor);
                 Assert.AreEqual(NamerEditorConstants.DefaultNormalDetailReduction, profile.NormalDetailReduction);
@@ -116,6 +118,31 @@ namespace GraffitiEntertainment.Namer.Tests
                 Assert.AreEqual(1f, profile.ReferenceWeights[1], "weight 2 clamps to 1");
                 Assert.AreEqual(NamerEditorConstants.DefaultReferenceWeight, profile.ReferenceWeights[2],
                     "a non-numeric weight falls back to the default weight");
+            }
+            finally
+            {
+                DestroyImmediate(profile);
+            }
+        }
+
+        [Test]
+        public void Profile_ClampToCaps_ClampsToneMatch()
+        {
+            NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            try
+            {
+                profile.ToneMatch = -1f;
+                profile.ClampToCaps();
+                Assert.AreEqual(0f, profile.ToneMatch, "toneMatch -1 clamps to 0 (T-hk7-01)");
+
+                profile.ToneMatch = 2f;
+                profile.ClampToCaps();
+                Assert.AreEqual(1f, profile.ToneMatch, "toneMatch 2 clamps to 1 (T-hk7-01)");
+
+                profile.ToneMatch = float.NaN;
+                profile.ClampToCaps();
+                Assert.AreEqual(NamerEditorConstants.DefaultToneMatch, profile.ToneMatch,
+                    "a non-numeric toneMatch falls back to the default — Mathf.Clamp propagates NaN, so the fallback must run first (T-hk7-01)");
             }
             finally
             {

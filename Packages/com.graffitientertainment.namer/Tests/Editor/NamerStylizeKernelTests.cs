@@ -15,15 +15,20 @@ namespace GraffitiEntertainment.Namer.Tests
     /// Phase 05 plan 02 GPU stylize-kernel tests (D-01/D-03/D-05): island-gated
     /// bilateral (two islands across a 1-texel gutter narrower than the radius must not
     /// bleed; hash-noise grain variance must drop inside one island; a hard luma step
-    /// far beyond sigmaR must survive) and the hue-anchored palette transfer (hue
-    /// preservation at mid strength Preserve, full snap at strength 1 in both modes,
-    /// the f = strength ramp pinned at mid strength, achromatic texels matching
-    /// achromatic anchors by LUMA distance, alpha preservation). All oracles are
-    /// numeric readback (no screenshots, Pitfall 10) computed against the READBACK
-    /// source so half-float quantization cancels; aggregates are strip medians /
-    /// region maxima over deterministic constants, never single noisy texels (Pitfall 5).
-    /// Capability-gated per D-15: skipped-with-report when compute or async readback is
-    /// unavailable, never a silent pass.
+    /// far beyond sigmaR must survive) and the hue-anchored palette RAMP re-specced to
+    /// the quick 260924-hk7 operator: luma preserved at toneMatch 0 and snapped to the
+    /// anchor luma at toneMatch 1 (chromatic and achromatic texels), boost-only
+    /// saturation in both directions (higher anchor sat reached by lerp, lower anchor
+    /// sat refused by the max guard), hue preservation at mid strength Preserve, full
+    /// hue snap at strength 1 in both modes, the f = strength ramp pinned at mid
+    /// strength, achromatic texels matching achromatic anchors by LUMA distance and
+    /// never tinted by an all-chromatic anchor set (the black-eyes defect), alpha
+    /// preservation. All oracles are numeric readback (no screenshots, Pitfall 10)
+    /// computed against the READBACK source so half-float quantization cancels;
+    /// aggregates are strip medians / region maxima over deterministic constants,
+    /// never single noisy texels (Pitfall 5). Capability-gated per D-15:
+    /// skipped-with-report when compute or async readback is unavailable, never a
+    /// silent pass.
     /// </summary>
     public class NamerStylizeKernelTests
     {
@@ -241,38 +246,132 @@ namespace GraffitiEntertainment.Namer.Tests
         // ------------------------------------------------------------------
 
         [UnityTest]
-        public IEnumerator Palette_PreserveMidStrength_HuePreservedLumaPulled()
+        public IEnumerator Palette_PreserveMidStrength_HuePreservedLumaPreserved()
         {
             if (!ComputeAvailable)
             {
                 Assert.Ignore("[NAMER] compute/async-readback unavailable — D-15 gated skip");
             }
 
-            // Source: saturated half-exact orange (1, 0.5, 0) — hue 1/12, sat 1. Anchor
-            // sits at the SAME hue (nearest-by-hue) with a much darker luma: Preserve at
-            // 0.5 must keep hue bit-stable while pulling luma halfway to the anchor.
+            // Tonal-flattening regression pin (quick 260924-hk7): source is a saturated
+            // half-exact orange (1, 0.5, 0) — hue 1/12, sat 1, luma ~0.570 — and the
+            // anchor sits at the SAME hue with a much DARKER luma (0.2) and a LOWER sat
+            // (0.2). At strength 0.5 Preserve with toneMatch 0, strength must move
+            // NEITHER luma NOR sat: hue stays bit-stable, luma stays at the source's
+            // own, and the max() guard keeps sat 1. Semantics amendment: StyleStrength
+            // means hue-family shift + vibrance; tonality is the independent ToneMatch.
             RenderTexture src = UploadBase(kSize, kSize, (x, y) => new Color(1f, 0.5f, 0f, 1f));
             try
             {
                 Color[] input = ReadBackFloat(src);
-                float srcHue = Hue(input[kSize / 2 * kSize + kSize / 2]);
-                float srcLuma = Luma(input[kSize / 2 * kSize + kSize / 2]);
+                Color inColor = input[kSize / 2 * kSize + kSize / 2];
+                float srcHue = Hue(inColor);
+                float srcLuma = Luma(inColor);
+                float srcSat = Sat(inColor);
+                const float kAnchorSat = 0.2f;
                 const float kAnchorLuma = 0.2f;
 
-                NamerStyleStylization stylization = CreatePaletteContext(0.5f, 0, new Vector3(srcHue, 1f, kAnchorLuma));
+                NamerStyleStylization stylization = CreatePaletteContext(0.5f, 0, new Vector3(srcHue, kAnchorSat, kAnchorLuma));
                 Color[] output = RunStylize(src, stylization, null);
                 Color outColor = output[kSize / 2 * kSize + kSize / 2];
 
-                float outHue = Hue(outColor);
-                float outLuma = Luma(outColor);
-                float expectedLuma = Mathf.Lerp(srcLuma, kAnchorLuma, 0.5f);
-
-                Assert.LessOrEqual(CircularHueDelta(outHue, srcHue), kHueTolerance,
+                Assert.LessOrEqual(CircularHueDelta(Hue(outColor), srcHue), kHueTolerance,
                     "Preserve at mid strength with a hue-matched anchor keeps the source hue");
-                Assert.LessOrEqual(Mathf.Abs(outLuma - expectedLuma), kLumaTolerance,
-                    "luma lerps exactly halfway to the anchor");
-                Assert.Less(Mathf.Abs(outLuma - kAnchorLuma), Mathf.Abs(srcLuma - kAnchorLuma),
-                    "luma moved toward the anchor");
+                Assert.LessOrEqual(Mathf.Abs(Luma(outColor) - srcLuma), kLumaTolerance,
+                    "strength never moves luma — a dark anchor must not flatten the source tonality (toneMatch 0)");
+                Assert.LessOrEqual(Mathf.Abs(Sat(outColor) - srcSat), kHalfEpsilon,
+                    "boost-only sat: an anchor below the source sat can never desaturate (max guard)");
+            }
+            finally
+            {
+                Release(src);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Palette_MidStrength_BoostOnlySat_ReachesTowardHigherAnchorSat()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — D-15 gated skip");
+            }
+
+            // Boost-only pin (a): the anchor sat is ABOVE the source sat, so the pull
+            // reaches it by lerp. No-clip derivation: out = (hue 1/12, sat 0.6, srcLuma
+            // 0.5) -> luma(HsvUnit(1/12, 0.6)) = 0.748, so V = 0.5 / 0.748 = 0.67 < 1
+            // and the stored rgb carries the exact ramped values (no saturate() bend).
+            const float kSrcHue = 1f / 12f;
+            const float kSrcSat = 0.4f;
+            const float kSrcLuma = 0.5f;
+            const float kAnchorSat = 0.8f;
+            const float kAnchorLuma = 0.3f;
+
+            RenderTexture src = UploadBase(kSize, kSize, (x, y) => HsvColor(kSrcHue, kSrcSat, kSrcLuma));
+            try
+            {
+                Color[] input = ReadBackFloat(src);
+                Color inColor = input[kSize / 2 * kSize + kSize / 2];
+                float srcHue = Hue(inColor);
+                float srcSat = Sat(inColor);
+                float srcLuma = Luma(inColor);
+
+                NamerStyleStylization stylization = CreatePaletteContext(0.5f, 0, new Vector3(kSrcHue, kAnchorSat, kAnchorLuma));
+                Color[] output = RunStylize(src, stylization, null);
+                Color outColor = output[kSize / 2 * kSize + kSize / 2];
+
+                float expectedSat = Mathf.Lerp(srcSat, kAnchorSat, 0.5f);
+                Assert.LessOrEqual(Mathf.Abs(Sat(outColor) - expectedSat), kHalfEpsilon,
+                    "sat boosts exactly lerp(srcSat, anchorSat, strength) toward the higher anchor sat");
+                Assert.LessOrEqual(Mathf.Abs(Luma(outColor) - srcLuma), kLumaTolerance,
+                    "luma stays at the source's despite the darker anchor (toneMatch 0)");
+                Assert.LessOrEqual(CircularHueDelta(Hue(outColor), srcHue), kHueTolerance,
+                    "same-hue anchor keeps hue bit-stable");
+            }
+            finally
+            {
+                Release(src);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Palette_MidStrength_BoostOnlySat_NeverDesaturatesBelowSource()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — D-15 gated skip");
+            }
+
+            // Boost-only pin (b): the anchor is LESS saturated (0.3) and much BRIGHTER
+            // (0.9) than the source — both pulls must be refused. No-clip: out =
+            // (1/12, 0.8, 0.5) -> luma(HsvUnit(1/12, 0.8)) = 0.656, V = 0.5 / 0.656 =
+            // 0.76 < 1. (Trade-off acknowledged by the design: a pastel reference
+            // cannot soften a vivid source.)
+            const float kSrcHue = 1f / 12f;
+            const float kSrcSat = 0.8f;
+            const float kSrcLuma = 0.5f;
+            const float kAnchorSat = 0.3f;
+            const float kAnchorLuma = 0.9f;
+
+            RenderTexture src = UploadBase(kSize, kSize, (x, y) => HsvColor(kSrcHue, kSrcSat, kSrcLuma));
+            try
+            {
+                Color[] input = ReadBackFloat(src);
+                Color inColor = input[kSize / 2 * kSize + kSize / 2];
+                float srcSat = Sat(inColor);
+                float srcLuma = Luma(inColor);
+
+                NamerStyleStylization stylization = CreatePaletteContext(0.5f, 0, new Vector3(kSrcHue, kAnchorSat, kAnchorLuma));
+                Color[] output = RunStylize(src, stylization, null);
+                Color outColor = output[kSize / 2 * kSize + kSize / 2];
+
+                Assert.LessOrEqual(Mathf.Abs(Sat(outColor) - srcSat), kHalfEpsilon,
+                    "max() pin: outSat == srcSat exactly — the operator never desaturates below the source");
+                Assert.LessOrEqual(Mathf.Abs(Luma(outColor) - srcLuma), kLumaTolerance,
+                    "a bright anchor must not lift luma at toneMatch 0");
             }
             finally
             {
@@ -290,14 +389,23 @@ namespace GraffitiEntertainment.Namer.Tests
                 Assert.Ignore("[NAMER] compute/async-readback unavailable — D-15 gated skip");
             }
 
-            RenderTexture src = UploadBase(kSize, kSize, (x, y) => new Color(1f, 0.5f, 0f, 1f));
+            // Source sat 0.4 < anchor sat 0.8 so the boost-only pull reaches the anchor
+            // sat exactly. No-clip derivation: out = (0.2, 0.8, 0.5) -> luma(HsvUnit
+            // (0.2, 0.8)) = 0.908, V = 0.5 / 0.908 = 0.55 < 1 (the old 0.6 blue anchor
+            // sits in a low-K family; green/yellow families keep V < 1). Luma stays at
+            // the SOURCE (toneMatch 0) — the luma-snap pin moved to the toneMatch test.
+            const float kSrcHue = 1f / 12f;
+            const float kSrcSat = 0.4f;
+            const float kSrcLuma = 0.5f;
+            const float kAnchorHue = 0.2f;
+            const float kAnchorSat = 0.8f;
+            const float kAnchorLuma = 0.25f;
+
+            RenderTexture src = UploadBase(kSize, kSize, (x, y) => HsvColor(kSrcHue, kSrcSat, kSrcLuma));
             try
             {
-                // Anchor far from the source hue, moderate sat/luma so the rebuild never
-                // clips (a saturated anchor would saturate() B and bend the read-back hue).
-                const float kAnchorHue = 0.6f;
-                const float kAnchorSat = 0.6f;
-                const float kAnchorLuma = 0.4f;
+                Color[] input = ReadBackFloat(src);
+                float srcLuma = Luma(input[kSize / 2 * kSize + kSize / 2]);
 
                 NamerStyleStylization stylization = CreatePaletteContext(1f, 1, new Vector3(kAnchorHue, kAnchorSat, kAnchorLuma));
                 Color[] output = RunStylize(src, stylization, null);
@@ -305,8 +413,10 @@ namespace GraffitiEntertainment.Namer.Tests
 
                 Assert.LessOrEqual(CircularHueDelta(Hue(outColor), kAnchorHue), kHueTolerance,
                     "Replace at strength 1 snaps to the anchor hue (f = 1)");
-                Assert.LessOrEqual(Mathf.Abs(Luma(outColor) - kAnchorLuma), kLumaTolerance, "luma snaps to the anchor luma");
-                Assert.LessOrEqual(Mathf.Abs(Sat(outColor) - kAnchorSat), kLumaTolerance, "sat snaps to the anchor sat");
+                Assert.LessOrEqual(Mathf.Abs(Sat(outColor) - kAnchorSat), kHalfEpsilon,
+                    "sat reaches the (higher) anchor sat at strength 1");
+                Assert.LessOrEqual(Mathf.Abs(Luma(outColor) - srcLuma), kLumaTolerance,
+                    "luma stays at the source's at toneMatch 0 — full strength no longer flattens tonality");
             }
             finally
             {
@@ -324,12 +434,20 @@ namespace GraffitiEntertainment.Namer.Tests
                 Assert.Ignore("[NAMER] compute/async-readback unavailable — D-15 gated skip");
             }
 
-            RenderTexture src = UploadBase(kSize, kSize, (x, y) => new Color(1f, 0.5f, 0f, 1f));
+            // Same no-clip fixture as the Replace variant: at strength 1 Preserve ramps
+            // with f = strength = 1, so the hue still converges to the anchor.
+            const float kSrcHue = 1f / 12f;
+            const float kSrcSat = 0.4f;
+            const float kSrcLuma = 0.5f;
+            const float kAnchorHue = 0.2f;
+            const float kAnchorSat = 0.8f;
+            const float kAnchorLuma = 0.25f;
+
+            RenderTexture src = UploadBase(kSize, kSize, (x, y) => HsvColor(kSrcHue, kSrcSat, kSrcLuma));
             try
             {
-                const float kAnchorHue = 0.6f;
-                const float kAnchorSat = 0.6f;
-                const float kAnchorLuma = 0.4f;
+                Color[] input = ReadBackFloat(src);
+                float srcLuma = Luma(input[kSize / 2 * kSize + kSize / 2]);
 
                 NamerStyleStylization stylization = CreatePaletteContext(1f, 0, new Vector3(kAnchorHue, kAnchorSat, kAnchorLuma));
                 Color[] output = RunStylize(src, stylization, null);
@@ -337,7 +455,10 @@ namespace GraffitiEntertainment.Namer.Tests
 
                 Assert.LessOrEqual(CircularHueDelta(Hue(outColor), kAnchorHue), kHueTolerance,
                     "Preserve ramps with f = strength — at strength 1 the hue still converges to the anchor (STYL-03)");
-                Assert.LessOrEqual(Mathf.Abs(Luma(outColor) - kAnchorLuma), kLumaTolerance);
+                Assert.LessOrEqual(Mathf.Abs(Sat(outColor) - kAnchorSat), kHalfEpsilon,
+                    "sat reaches the (higher) anchor sat at strength 1");
+                Assert.LessOrEqual(Mathf.Abs(Luma(outColor) - srcLuma), kLumaTolerance,
+                    "luma stays at the source's at toneMatch 0");
             }
             finally
             {
@@ -358,22 +479,26 @@ namespace GraffitiEntertainment.Namer.Tests
             // Pins A5 directly: at strength 0.5 Preserve with a FAR anchor, outHue must
             // be the circular midpoint — Replace at the same strength would land on the
             // anchor hue instead.
-            RenderTexture src = UploadBase(kSize, kSize, (x, y) => new Color(1f, 0.5f, 0f, 1f));
+            //
+            // No-clip re-derivation (quick 260924-hk7): under boost-only the source sat
+            // can no longer drop, so out = (midpoint hue, srcSat, srcLuma). The old
+            // fixture (sat-1 orange + 0.6 anchor) lands on the wrap-around midpoint
+            // hue 0.84167 where luma(HsvUnit(0.84167, 1)) = 0.281 — V = 0.570 / 0.281
+            // ~ 2.0, a massive clip. This fixture uses a mid-sat source (0.5) and a
+            // green-family anchor: out = (0.24167, 0.5, 0.5) -> luma(HsvUnit(0.24167,
+            // 0.5)) = 0.916, V = 0.5 / 0.916 = 0.55 < 1.
+            const float kSrcHue = 1f / 12f;
+            const float kSrcSat = 0.5f;
+            const float kSrcLuma = 0.5f;
+            const float kAnchorHue = 0.4f;
+            const float kAnchorSat = 0.3f;   // below src sat -> outSat stays 0.5 (max guard)
+            const float kAnchorLuma = 0.85f; // bright anchor — must not lift luma
+
+            RenderTexture src = UploadBase(kSize, kSize, (x, y) => HsvColor(kSrcHue, kSrcSat, kSrcLuma));
             try
             {
                 Color[] input = ReadBackFloat(src);
                 float srcHue = Hue(input[kSize / 2 * kSize + kSize / 2]);
-                const float kAnchorHue = 0.6f;
-
-                // Anchor saturation 0.2, NOT 0.6: at strength 0.5 the midpoint hue is
-                // 0.84167 with sat lerped to 0.8 and luma to ~0.485 — a 0.6-sat anchor
-                // then demands V = 0.485 / luma(unit) ~ 1.14, saturate() clips R and B,
-                // and hue((1, 0.228, 1)) reads back 1/120 low (the 2026-09-23 gate
-                // failure of exactly 0.00833). Sat 0.2 keeps V ~ 0.85 < 1 so the stored
-                // rgb carries the ramped hue exactly, while the anchor stays chromatic
-                // (0.2 >= the 0.15 cutoff) so the hue-match path is unchanged.
-                const float kAnchorSat = 0.2f;
-                const float kAnchorLuma = 0.4f;
 
                 NamerStyleStylization stylization = CreatePaletteContext(0.5f, 0, new Vector3(kAnchorHue, kAnchorSat, kAnchorLuma));
                 Color[] output = RunStylize(src, stylization, null);
@@ -397,6 +522,64 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         [UnityTest]
+        public IEnumerator Palette_ToneMatchFull_LumaSnapsToAnchor()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — D-15 gated skip");
+            }
+
+            // The tone-match control: toneMatch 1 snaps output luma to the matched
+            // anchor's luma for chromatic texels. Run A does it alongside a full
+            // Replace ramp; run B isolates tone-only purity — strength 0 + Replace +
+            // toneMatch 1 must move ONLY luma (the kernel's strength > 0 hue gate: hue
+            // AND sat stay at the source's in both modes at strength 0).
+            //
+            // No-clip: run A out = (0.4, 0.8, 0.25) -> luma(HsvUnit(0.4, 0.8)) = 0.795,
+            // V = 0.31; run B out = (1/12, 0.5, 0.25) -> luma(HsvUnit(1/12, 0.5)) =
+            // 0.785, V = 0.32. Both < 1.
+            const float kSrcHue = 1f / 12f;
+            const float kSrcSat = 0.5f;
+            const float kSrcLuma = 0.5f;
+            const float kAnchorHue = 0.4f;
+            const float kAnchorSat = 0.8f;
+            const float kAnchorLuma = 0.25f;
+
+            RenderTexture src = UploadBase(kSize, kSize, (x, y) => HsvColor(kSrcHue, kSrcSat, kSrcLuma));
+            try
+            {
+                Color[] input = ReadBackFloat(src);
+                Color inColor = input[kSize / 2 * kSize + kSize / 2];
+                float srcHue = Hue(inColor);
+                float srcSat = Sat(inColor);
+
+                NamerStyleStylization fullRamp = CreatePaletteContext(1f, 1, 1f, new Vector3(kAnchorHue, kAnchorSat, kAnchorLuma));
+                Color[] ramped = RunStylize(src, fullRamp, null);
+                Color rampedColor = ramped[kSize / 2 * kSize + kSize / 2];
+                Assert.LessOrEqual(Mathf.Abs(Luma(rampedColor) - kAnchorLuma), kLumaTolerance,
+                    "toneMatch 1 snaps chromatic-texel luma to the anchor luma");
+                Assert.LessOrEqual(CircularHueDelta(Hue(rampedColor), kAnchorHue), kHueTolerance,
+                    "alongside the full Replace ramp the hue still snaps to the anchor");
+
+                NamerStyleStylization toneOnly = CreatePaletteContext(0f, 1, 1f, new Vector3(kAnchorHue, kAnchorSat, kAnchorLuma));
+                Color[] toned = RunStylize(src, toneOnly, null);
+                Color tonedColor = toned[kSize / 2 * kSize + kSize / 2];
+                Assert.LessOrEqual(Mathf.Abs(Luma(tonedColor) - kAnchorLuma), kLumaTolerance,
+                    "tone-only dispatch (strength 0, toneMatch 1) still snaps luma");
+                Assert.LessOrEqual(CircularHueDelta(Hue(tonedColor), srcHue), kHueTolerance,
+                    "strength 0 leaves hue untouched even under Replace (the strength > 0 hue gate)");
+                Assert.LessOrEqual(Mathf.Abs(Sat(tonedColor) - srcSat), kHalfEpsilon,
+                    "strength 0 leaves sat untouched (the lerp collapses to srcSat)");
+            }
+            finally
+            {
+                Release(src);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
         public IEnumerator Palette_AchromaticTexel_MatchesByLumaNotHue()
         {
             if (!ComputeAvailable)
@@ -406,28 +589,132 @@ namespace GraffitiEntertainment.Namer.Tests
 
             // Gray texel (sat 0 < cutoff, luma 0.6) + two achromatic anchors (luma 0.2 /
             // 0.8, garbage hues) + two chromatic anchors whose hue-noise match would pull
-            // luma elsewhere: the luma-nearest ACHROMATIC anchor (0.8) must win.
+            // luma elsewhere. At toneMatch 0 the achromatic texel is a FULL passthrough
+            // (the luma match is observable only through the toneMatch path under the
+            // new operator): luma preserved per channel, sat below the cutoff. At
+            // toneMatch 1 the luma-nearest ACHROMATIC anchor (0.8) wins the snap.
             RenderTexture src = UploadBase(kSize, kSize, (x, y) => new Color(0.6f, 0.6f, 0.6f, 1f));
             try
             {
                 Color[] input = ReadBackFloat(src);
-                float srcLuma = Luma(input[kSize / 2 * kSize + kSize / 2]);
+                Color inColor = input[kSize / 2 * kSize + kSize / 2];
 
-                NamerStyleStylization stylization = CreatePaletteContext(
+                NamerStyleStylization passthrough = CreatePaletteContext(
                     0.5f,
                     0,
                     new Vector3(0.5f, 0.9f, 0.9f),   // chromatic: hue-match decoy (would pull luma to 0.75)
                     new Vector3(0.55f, 0.9f, 0.1f),  // chromatic decoy
                     new Vector3(0.9f, 0.0f, 0.2f),   // achromatic (sat 0 < cutoff)
                     new Vector3(0.1f, 0.0f, 0.8f));  // achromatic — luma-nearest winner
+                Color[] output = RunStylize(src, passthrough, null);
+                Color outColor = output[kSize / 2 * kSize + kSize / 2];
+
+                Assert.LessOrEqual(Mathf.Abs(outColor.r - inColor.r), kExactTolerance,
+                    "achromatic passthrough at toneMatch 0: red preserved");
+                Assert.LessOrEqual(Mathf.Abs(outColor.g - inColor.g), kExactTolerance,
+                    "achromatic passthrough at toneMatch 0: green preserved");
+                Assert.LessOrEqual(Mathf.Abs(outColor.b - inColor.b), kExactTolerance,
+                    "achromatic passthrough at toneMatch 0: blue preserved");
+                Assert.LessOrEqual(Sat(outColor), kAchromaticCutoff,
+                    "a gray texel stays achromatic");
+
+                NamerStyleStylization toneMatched = CreatePaletteContext(
+                    0.5f,
+                    0,
+                    1f,
+                    new Vector3(0.5f, 0.9f, 0.9f),
+                    new Vector3(0.55f, 0.9f, 0.1f),
+                    new Vector3(0.9f, 0.0f, 0.2f),
+                    new Vector3(0.1f, 0.0f, 0.8f));
+                Color[] toned = RunStylize(src, toneMatched, null);
+                Color tonedColor = toned[kSize / 2 * kSize + kSize / 2];
+
+                Assert.LessOrEqual(Mathf.Abs(Luma(tonedColor) - 0.8f), kLumaTolerance,
+                    "toneMatch 1 snaps the achromatic texel to the luma-nearest ACHROMATIC anchor (0.8), never hue noise");
+                Assert.LessOrEqual(Sat(tonedColor), kAchromaticCutoff,
+                    "an achromatic texel snapped to an achromatic anchor luma stays achromatic");
+            }
+            finally
+            {
+                Release(src);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Palette_AchromaticTexel_AllChromaticAnchors_NeverTinted()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — D-15 gated skip");
+            }
+
+            // The black-eyes-turn-gray defect regression (quick 260924-hk7): this
+            // project's real extraction produced anchors whose k-means centroids ALL
+            // drifted above the 0.15 achromatic cutoff (sat >= 0.20), so an achromatic
+            // texel fell into the never-fail hue fallback and the old absolute pull
+            // lifted/tinted it. The redesigned operator keeps the fallback match
+            // pull-free for achromatic texels: output == input even at strength 1 +
+            // Replace (the fallback only feeds the toneMatch luma lerp, which is 0).
+            RenderTexture src = UploadBase(kSize, kSize, (x, y) => new Color(0.05f, 0.05f, 0.05f, 1f));
+            try
+            {
+                Color[] input = ReadBackFloat(src);
+                Color inColor = input[kSize / 2 * kSize + kSize / 2];
+
+                NamerStyleStylization stylization = CreatePaletteContext(
+                    1f,
+                    1,
+                    new Vector3(0.5f, 0.3f, 0.6f),   // chromatic, sat >= 0.20 (real-extraction shape)
+                    new Vector3(0.7f, 0.45f, 0.4f)); // chromatic
                 Color[] output = RunStylize(src, stylization, null);
                 Color outColor = output[kSize / 2 * kSize + kSize / 2];
 
-                float expectedLuma = Mathf.Lerp(srcLuma, 0.8f, 0.5f);
-                Assert.LessOrEqual(Mathf.Abs(Luma(outColor) - expectedLuma), kLumaTolerance,
-                    "achromatic texels match the luma-nearest ACHROMATIC anchor (0.8), never hue noise");
+                Assert.LessOrEqual(Mathf.Abs(outColor.r - inColor.r), kExactTolerance,
+                    "a black texel's red is untouched by an all-chromatic anchor set");
+                Assert.LessOrEqual(Mathf.Abs(outColor.g - inColor.g), kExactTolerance,
+                    "a black texel's green is untouched by an all-chromatic anchor set");
+                Assert.LessOrEqual(Mathf.Abs(outColor.b - inColor.b), kExactTolerance,
+                    "a black texel's blue is untouched by an all-chromatic anchor set");
                 Assert.LessOrEqual(Sat(outColor), kAchromaticCutoff,
-                    "a gray texel pulled toward a gray anchor stays achromatic");
+                    "black stays black — the chromatic fallback match never tints achromatic texels");
+                Assert.LessOrEqual(Mathf.Abs(Luma(outColor) - Luma(inColor)), kLumaTolerance,
+                    "a black texel's luma is not lifted at toneMatch 0");
+            }
+            finally
+            {
+                Release(src);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Palette_ZeroControls_PassthroughCopy()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — D-15 gated skip");
+            }
+
+            // Both zero-control guards in one case: anchors present with strength 0 +
+            // toneMatch 0, and no anchors at all with strength 1 — each dispatch must
+            // write a byte-exact copy of the source (dst always fully written).
+            RenderTexture src = UploadBase(kSize, kSize, (x, y) => new Color(1f, 0.5f, 0f, 1f));
+            try
+            {
+                Color[] input = ReadBackFloat(src);
+
+                NamerStyleStylization zeroControls = CreatePaletteContext(0f, 0, new Vector3(0.5f, 0.5f, 0.5f));
+                Color[] zeroed = RunStylize(src, zeroControls, null);
+                Assert.LessOrEqual(MaxAbsChannelDelta(input, zeroed), kExactTolerance,
+                    "strength 0 + toneMatch 0 with anchors present is a byte-exact passthrough");
+
+                NamerStyleStylization noAnchors = CreatePaletteContext(1f, 1);
+                Color[] anchorless = RunStylize(src, noAnchors, null);
+                Assert.LessOrEqual(MaxAbsChannelDelta(input, anchorless), kExactTolerance,
+                    "an empty anchor set is a byte-exact passthrough at any strength");
             }
             finally
             {
@@ -484,8 +771,10 @@ namespace GraffitiEntertainment.Namer.Tests
         [Test]
         public void Context_IdentitySettings_InactiveAndNoMeshFlagged()
         {
-            // The zero-dispatch contract starts CPU-side: strength 0 + smoothing 0 (or
-            // smoothing with no mesh) must leave Active false so the caller skips Run.
+            // The zero-dispatch contract starts CPU-side: strength 0 + toneMatch 0 +
+            // smoothing 0 (or smoothing with no mesh) must leave Active false so the
+            // caller skips Run. Tone-only contexts (quick 260924-hk7): an extracted
+            // profile with toneMatch > 0 dispatches even at strength 0 / smoothing 0.
             NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
             try
             {
@@ -498,6 +787,21 @@ namespace GraffitiEntertainment.Namer.Tests
                 NamerStyleStylization noMesh = NamerStyleStylization.Create(profile, null);
                 Assert.IsFalse(noMesh.Active, "smoothing with no mesh has no runnable effect");
                 Assert.IsTrue(noMesh.SmoothingSkippedNoMesh, "the no-mesh skip is flagged for the 05-03 Info note (OQ-3)");
+
+                profile.Smoothing = 0f;
+                profile.ToneMatch = 0.5f;
+                profile.ReferenceFingerprint = "tone-only";
+                profile.PaletteAnchors.Add(new NamerStyleAnchor { Hue = 0.5f, Saturation = 0.5f, Luma = 0.5f, Weight = 1f });
+                NamerStyleStylization toneOnly = NamerStyleStylization.Create(profile, null);
+                Assert.IsTrue(toneOnly.Active,
+                    "tone-only (strength 0, toneMatch > 0, palette available) must dispatch");
+                Assert.AreEqual(0.5f, toneOnly.ToneMatch,
+                    "Create() wires the clamped profile ToneMatch into the context");
+
+                profile.ToneMatch = 0f;
+                NamerStyleStylization allControlsZero = NamerStyleStylization.Create(profile, null);
+                Assert.IsFalse(allControlsZero.Active,
+                    "strength 0 + toneMatch 0 + smoothing 0 with valid anchors is still the identity context");
             }
             finally
             {
@@ -578,6 +882,11 @@ namespace GraffitiEntertainment.Namer.Tests
 
         private static NamerStyleStylization CreatePaletteContext(float strength, int hueMode, params Vector3[] anchorsHsl)
         {
+            return CreatePaletteContext(strength, hueMode, 0f, anchorsHsl);
+        }
+
+        private static NamerStyleStylization CreatePaletteContext(float strength, int hueMode, float toneMatch, params Vector3[] anchorsHsl)
+        {
             var anchors = new NamerStyleAnchor[anchorsHsl.Length];
             for (int i = 0; i < anchorsHsl.Length; i++)
             {
@@ -597,6 +906,7 @@ namespace GraffitiEntertainment.Namer.Tests
                 AnchorCount = anchors.Length,
                 PaletteAvailable = anchors.Length > 0,
                 StyleStrength = Mathf.Clamp01(strength),
+                ToneMatch = Mathf.Clamp01(toneMatch),
                 HueReplaceMode = hueMode,
                 Smoothing = 0f,
             };
@@ -755,6 +1065,54 @@ namespace GraffitiEntertainment.Namer.Tests
         {
             float d = Mathf.Abs(a - b);
             return Mathf.Min(d, 1f - d);
+        }
+
+        /// <summary>The V=1 sector table for (hue, saturation) — the kernel's NamerStylizeHsvUnit (C# mirror).</summary>
+        private static Color HsvUnit(float h, float s)
+        {
+            h = Mathf.Repeat(h, 1f) * 6f;
+            int i = Mathf.FloorToInt(h);
+            float f = h - i;
+            float p = 1f - s;
+            float q = 1f - s * f;
+            float t = p + s * f;
+            switch (i)
+            {
+                case 0: return new Color(1f, t, p, 1f);
+                case 1: return new Color(q, 1f, p, 1f);
+                case 2: return new Color(p, 1f, t, 1f);
+                case 3: return new Color(p, q, 1f, 1f);
+                case 4: return new Color(t, p, 1f, 1f);
+                default: return new Color(1f, p, q, 1f);
+            }
+        }
+
+        /// <summary>
+        /// Authors a linear color with the exact target hue/sat/luma via the kernel's
+        /// own rebuild math (unit * luma / luma(unit)) — fixture authoring helper for
+        /// the no-clip regime; oracles still derive from the READBACK input.
+        /// </summary>
+        private static Color HsvColor(float h, float s, float luma)
+        {
+            Color unit = HsvUnit(h, s);
+            float unitLuma = unit.r * kLumaWeightR + unit.g * kLumaWeightG + unit.b * kLumaWeightB;
+            Color c = unit * (luma / unitLuma);
+            c.a = 1f;
+            return c;
+        }
+
+        /// <summary>Max absolute per-channel RGB delta between two same-size readbacks.</summary>
+        private static float MaxAbsChannelDelta(Color[] a, Color[] b)
+        {
+            float max = 0f;
+            for (int i = 0; i < a.Length; i++)
+            {
+                max = Mathf.Max(max, Mathf.Abs(a[i].r - b[i].r));
+                max = Mathf.Max(max, Mathf.Abs(a[i].g - b[i].g));
+                max = Mathf.Max(max, Mathf.Abs(a[i].b - b[i].b));
+            }
+
+            return max;
         }
 
         private static RenderTexture UploadBase(int w, int h, System.Func<int, int, Color> pixel)

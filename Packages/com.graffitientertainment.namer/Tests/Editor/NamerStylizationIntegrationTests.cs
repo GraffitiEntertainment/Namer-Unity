@@ -43,10 +43,13 @@ namespace GraffitiEntertainment.Namer.Tests
         private const int ResidualResolution = 0;
         private const float DefaultDipDepth = 0.25f;
 
-        // Anchor fixture: hue 0.6 / sat 0.6 / luma 0.4 — the rebuild unit color peaks at
-        // V = luma / luma(unit) ~ 0.65, so saturate() never clips and the readback hue is
-        // exact to binary16 storage.
-        private const float kAnchorHue = 0.6f;
+        // Anchor fixture (quick 260924-hk7 no-clip re-derivation): hue 0.2 / sat 0.6 /
+        // luma 0.4 — the green-yellow family has a high unit luma (K(0.2, 1) = 0.885),
+        // so the boost-only rebuild of the sat-1 grain orange peaks at V = srcLuma /
+        // K < 0.570 / 0.885 = 0.65: saturate() never clips and the readback hue/sat are
+        // exact to binary16 storage. (The old 0.6 blue anchor's low K clipped the
+        // boost-only rebuild — V = srcLuma / K(0.6, 1) ~ 1.6.)
+        private const float kAnchorHue = 0.2f;
         private const float kAnchorSaturation = 0.6f;
         private const float kAnchorLuma = 0.4f;
 
@@ -58,11 +61,21 @@ namespace GraffitiEntertainment.Namer.Tests
         private const float kGrainAmplitude = 0.1f;
         private const float kGrainCenter = 0.9f;
 
+        // Two-half luma-structure fixture (quick 260924-hk7): hue 1/12 at moderate
+        // saturation 0.5, bright left half / dark right half — authored on the kernel's
+        // own HSV unit line so the toneMatch-0 luma oracle is exact (K(1/12, 0.5) =
+        // 0.785, so even the bright half's source V = 0.7 / 0.785 = 0.89 does not clip).
+        private const float kTwoHalfHue = 1f / 12f;
+        private const float kTwoHalfSaturation = 0.5f;
+        private const float kTwoHalfBrightLuma = 0.7f;
+        private const float kTwoHalfDarkLuma = 0.25f;
+
         // Binary16 (RGBA16F) storage bounds the hue readback error at ~2e-3; sat/luma
         // sit comfortably under 1e-3. VC/projection colors pass through Color32, so the
         // anchor-propagation bound is the 8-bit quantization step.
         private const float kHueTolerance = 0.002f;
         private const float kHalfEpsilon = 0.001f;
+        private const float kLumaTolerance = 0.002f;
         private const float kColor32Tolerance = 0.01f;
 
         // Residual identity bound: residual x projected == styled up to float16 rounding
@@ -276,6 +289,10 @@ namespace GraffitiEntertainment.Namer.Tests
         // --------------------------------------------------------------------
         // D-01 propagation: Replace at strength 1 styles the source BEFORE the fit —
         // the styled hue reaches the result base AND the fitted vertex colors.
+        // Re-specced to the quick 260924-hk7 operator: hue still snaps to the anchor,
+        // but saturation is boost-only (the grain-orange fixture's constant sat 1
+        // stays 1, NOT the anchor's 0.6) and luma is preserved at the default
+        // toneMatch 0 (median equals the unstyled control run's).
         // --------------------------------------------------------------------
 
         [UnityTest]
@@ -298,41 +315,68 @@ namespace GraffitiEntertainment.Namer.Tests
                 NamerStyleStylization stylization = NamerStyleStylization.Create(profile, split);
                 Assert.IsTrue(stylization.Active, "Replace at strength 1 with valid anchors must be active");
 
-                using (var decomp = new NamerDecompPipeline())
                 using (var pipeline = new NamerComputePipeline())
                 {
-                    NamerProjectionContext context = BuildProjectionContext(split, decomp, true);
-                    NamerComputeResult result = pipeline.Process(inspection, context, stylization);
-                    try
+                    // Null-stylization control (with its own projection context —
+                    // SourceBaseColor only exists when projection ran): supplies the
+                    // unstyled source luma the styled run must preserve.
+                    Color[] controlSource;
+                    using (var controlDecomp = new NamerDecompPipeline())
                     {
-                        // The styled base is the pre-projection source: hue/sat/luma snap to
-                        // the anchor (D-04/D-05) while the pipeline stays in linear space.
-                        Color[] styled = ReadBackFloat(result.SourceBaseColor);
-                        float hue = MedianOf(styled, c => HueOf(c));
-                        float saturation = MedianOf(styled, c => SaturationOf(c));
-                        float luma = MedianOf(styled, c => LumaOf(c));
-                        Assert.AreEqual(kAnchorHue, hue, kHueTolerance,
-                            "Replace at strength 1: styled base hue must snap to the anchor hue");
-                        Assert.AreEqual(kAnchorSaturation, saturation, kHalfEpsilon,
-                            "Replace at strength 1: styled base saturation must snap to the anchor saturation");
-                        Assert.AreEqual(kAnchorLuma, luma, kHalfEpsilon,
-                            "Replace at strength 1: styled base luma must snap to the anchor luma");
-
-                        // The vertex-color fit ran against the STYLED source: every fitted
-                        // color is the anchor color up to Color32 quantization.
-                        Assert.IsNotNull(context.Colors, "projection context must carry the fitted colors");
-                        Color32 expected = ToColor32(AnchorLinearColor);
-                        foreach (Color32 fitted in context.Colors)
+                        NamerProjectionContext controlContext = BuildProjectionContext(split, controlDecomp, false);
+                        NamerComputeResult controlRun = pipeline.Process(inspection, controlContext, null);
+                        try
                         {
-                            Assert.AreEqual(expected.r, fitted.r, kColor32Tolerance, "fitted VC red carries the anchor");
-                            Assert.AreEqual(expected.g, fitted.g, kColor32Tolerance, "fitted VC green carries the anchor");
-                            Assert.AreEqual(expected.b, fitted.b, kColor32Tolerance, "fitted VC blue carries the anchor");
+                            controlSource = ReadBackFloat(controlRun.SourceBaseColor);
+                        }
+                        finally
+                        {
+                            controlContext.Decomp?.Dispose();
+                            pipeline.ReleaseResult(controlRun);
                         }
                     }
-                    finally
+
+                    using (var decomp = new NamerDecompPipeline())
                     {
-                        context.Decomp?.Dispose();
-                        pipeline.ReleaseResult(result);
+                        NamerProjectionContext context = BuildProjectionContext(split, decomp, true);
+                        NamerComputeResult result = pipeline.Process(inspection, context, stylization);
+                        try
+                        {
+                            // The styled base is the pre-projection source: hue snaps to the
+                            // anchor (D-04/D-05) while the pipeline stays in linear space.
+                            // Sat is boost-only and luma is keyed to the (default 0) tone
+                            // match — the grain fixture's constant sat 1 and grain luma
+                            // must both survive (quick 260924-hk7).
+                            Color[] styled = ReadBackFloat(result.SourceBaseColor);
+                            float hue = MedianOf(styled, c => HueOf(c));
+                            float saturation = MedianOf(styled, c => SaturationOf(c));
+                            float luma = MedianOf(styled, c => LumaOf(c));
+                            float controlLuma = MedianOf(controlSource, c => LumaOf(c));
+                            Assert.AreEqual(kAnchorHue, hue, kHueTolerance,
+                                "Replace at strength 1: styled base hue must snap to the anchor hue");
+                            Assert.AreEqual(1f, saturation, kHalfEpsilon,
+                                "boost-only saturation: the fixture's constant sat 1 stays 1, never pulled down to the anchor's 0.6");
+                            Assert.AreEqual(controlLuma, luma, kLumaTolerance,
+                                "toneMatch 0 (profile default): styled base luma median equals the unstyled control's — tonality survives");
+
+                            // The vertex-color fit ran against the STYLED source: the styled
+                            // base varies only in luma (hue/sat constant at the anchor
+                            // family), so every fitted color lies on the anchor's chroma
+                            // line — its hue IS the anchor hue up to Color32 quantization
+                            // (the old uniform-base exact-anchor-color equality no longer
+                            // holds now that luma survives).
+                            Assert.IsNotNull(context.Colors, "projection context must carry the fitted colors");
+                            foreach (Color32 fitted in context.Colors)
+                            {
+                                Assert.AreEqual(kAnchorHue, HueOf(fitted), kColor32Tolerance,
+                                    "fitted VC hue family carries the anchor hue (styling flows into the fit)");
+                            }
+                        }
+                        finally
+                        {
+                            context.Decomp?.Dispose();
+                            pipeline.ReleaseResult(result);
+                        }
                     }
                 }
             }
@@ -402,6 +446,120 @@ namespace GraffitiEntertainment.Namer.Tests
                     {
                         context.Decomp?.Dispose();
                         pipeline.ReleaseResult(result);
+                    }
+                }
+            }
+            finally
+            {
+                Destroy(profile, baseMap, occlusion, mesh);
+            }
+
+            yield return null;
+        }
+
+        // --------------------------------------------------------------------
+        // Quick 260924-hk7 constraint: "Process output with a stylization context
+        // preserves albedo luma structure at toneMatch 0". No-clip fixture: the styled
+        // bright half needs V = luma / K(anchorHue, anchorSat) = 0.7 / 0.931 = 0.75 < 1
+        // against the (0.2, 0.6, 0.4) anchor — hue and luma readbacks stay exact.
+        // --------------------------------------------------------------------
+
+        [UnityTest]
+        public IEnumerator Stylization_ToneMatchZero_PreservesAlbedoLumaStructure()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU luma-structure test (D-15).");
+                yield break;
+            }
+
+            Mesh mesh = CreateQuadMesh();
+            Texture2D baseMap = CreateTwoHalvesBaseMap();
+            Texture2D occlusion = CreateWhiteOcclusion();
+            NamerStyleProfile profile = CreateExtractedProfile(1f, 0f, kHueModeReplace);
+            try
+            {
+                var inspection = BuildInspection(baseMap, mesh, occlusion);
+                NamerSplitResult split = MeshVertexSplitter.Split(mesh);
+                NamerStyleStylization stylization = NamerStyleStylization.Create(profile, split);
+                Assert.AreEqual(0f, stylization.ToneMatch,
+                    "the profile fixture must run at the default toneMatch 0 (the Create() wiring pin)");
+                Assert.IsTrue(stylization.Active, "Replace at strength 1 with valid anchors must be active");
+
+                using (var pipeline = new NamerComputePipeline())
+                {
+                    // Derivation: every styled texel is unit(anchorHue, outSat) * (luma /
+                    // K_anchor) while every source texel is unit(srcHue, srcSat) * (luma /
+                    // K_src) — the SAME scalar luma field on two chroma lines. The
+                    // per-texel styled luma equals the source luma exactly, and the
+                    // least-squares fit is linear, so the projected (Gouraud) luma carries
+                    // over to Color32 quantization precision.
+                    Color[] controlSource;
+                    Color[] controlProjected;
+                    using (var controlDecomp = new NamerDecompPipeline())
+                    {
+                        NamerProjectionContext controlContext = BuildProjectionContext(split, controlDecomp, false);
+                        NamerComputeResult controlRun = pipeline.Process(inspection, controlContext, null);
+                        try
+                        {
+                            controlSource = ReadBackFloat(controlRun.SourceBaseColor);
+                            controlProjected = ReadBackFloat(controlRun.NormalizedBaseColor);
+                        }
+                        finally
+                        {
+                            controlContext.Decomp?.Dispose();
+                            pipeline.ReleaseResult(controlRun);
+                        }
+                    }
+
+                    using (var decomp = new NamerDecompPipeline())
+                    {
+                        NamerProjectionContext context = BuildProjectionContext(split, decomp, false);
+                        NamerComputeResult result = pipeline.Process(inspection, context, stylization);
+                        try
+                        {
+                            Color[] styled = ReadBackFloat(result.SourceBaseColor);
+                            Color[] projected = ReadBackFloat(result.NormalizedBaseColor);
+
+                            // Styled source base: per-texel luma survives (interior max).
+                            float maxSourceDelta = 0f;
+                            for (int y = kSampleInset; y < WorkingSize - kSampleInset; y++)
+                            {
+                                for (int x = kSampleInset; x < WorkingSize - kSampleInset; x++)
+                                {
+                                    int i = y * WorkingSize + x;
+                                    maxSourceDelta = Mathf.Max(maxSourceDelta,
+                                        Mathf.Abs(LumaOf(styled[i]) - LumaOf(controlSource[i])));
+                                }
+                            }
+
+                            Assert.LessOrEqual(maxSourceDelta, kLumaTolerance,
+                                "styled SourceBaseColor preserves the albedo luma per texel at toneMatch 0 (max interior delta "
+                                + maxSourceDelta.ToString("0.0000") + ")");
+
+                            // Projected base: the bright/dark half ORDERING survives and the
+                            // strip luma values match the control's (Color32 Gouraud
+                            // quantization bounds the projected comparison).
+                            float styledBright = HalfMedian(styled, true);
+                            float styledDark = HalfMedian(styled, false);
+                            float controlBright = HalfMedian(controlProjected, true);
+                            float controlDark = HalfMedian(controlProjected, false);
+                            float projectedBright = HalfMedian(projected, true);
+                            float projectedDark = HalfMedian(projected, false);
+                            Assert.Greater(styledBright, styledDark,
+                                "the styled source base keeps the bright/dark half ordering");
+                            Assert.Greater(projectedBright, projectedDark,
+                                "the styled projected base keeps the bright/dark half ordering");
+                            Assert.AreEqual(controlBright, projectedBright, kColor32Tolerance,
+                                "styled projected bright-half luma median matches the control's");
+                            Assert.AreEqual(controlDark, projectedDark, kColor32Tolerance,
+                                "styled projected dark-half luma median matches the control's");
+                        }
+                        finally
+                        {
+                            context.Decomp?.Dispose();
+                            pipeline.ReleaseResult(result);
+                        }
                     }
                 }
             }
@@ -972,22 +1130,17 @@ namespace GraffitiEntertainment.Namer.Tests
                 Assert.AreEqual(anchorHue, medianHue, kE2EHueTolerance,
                     "Replace at strength 1: the BAKED base hue must snap to the anchor hue (orange 1/12 is the unstyled control)");
 
-                // DERIVED saturation bound (round 2): a 0.9 floor is unattainable. The
-                // extractor's 16-bin/channel histogram reconstructs every occupied bin
-                // at its bin CENTER, so a pure (x, 0, x) magenta ref extracts as
-                // (x', 0.5/16, x') — anchor saturation is structurally < 1. All three
-                // anchors tie at the family hue, so CSPaletteTransfer's strict-less
-                // -than scan picks the FIRST chromatic anchor (slot 0 = the darkest
-                // equal-mass bin, (0.59375, 0.5/16, 0.59375)), and at strength 1 +
-                // Replace NamerStylizeRebuild inverts the extraction exactly: the
-                // styled base IS that uniform color. The base PNG then sRGB-encodes it
-                // to bytes (202, 49, 202), and the byte-space saturation reads
-                // (202 - 49) / 202 = 0.7574 — the sRGB curve amplifies the dark G
-                // (byte ratio 49/202 = 0.243 vs linear 0.03125/0.59375 = 0.0526).
-                // Derive the oracle from the same anchor instead of assuming 1.0.
-                float expectedSaturation = ExpectedByteSaturation(TieWinningChromaticAnchor(resolved).LinearColor);
+                // DERIVED saturation (quick 260924-hk7 re-derivation): the operator is
+                // boost-only at toneMatch 0 (the profile default), so the grain's own
+                // sat 1 survives (max(1, anchorSat) = 1 — no anchor can pull it down)
+                // and its own luma survives (0.5702 * grain in [0.456, 0.570]).
+                // Rebuilding hue 5/6 at sat 1 needs V = luma / K(5/6, 1) = luma /
+                // 0.2848 >= 1.6, so EVERY texel clips to linear (1, 0, 1); the sRGB
+                // bytes are (255, 0, 255) and the byte-space saturation reads exactly
+                // 1 — independent of which tied chromatic anchor wins the scan.
+                float expectedSaturation = ExpectedByteSaturation(new Color(1f, 0f, 1f, 1f));
                 Assert.AreEqual(expectedSaturation, medianSaturation, kE2ESaturationTolerance,
-                    "Replace at strength 1: the baked base must carry the tie-winning anchor's byte-round-tripped saturation");
+                    "Replace at strength 1 + toneMatch 0: the clipped magenta rebuild bakes as (255, 0, 255) — byte saturation exactly 1");
             }
             finally
             {
@@ -1397,6 +1550,32 @@ namespace GraffitiEntertainment.Namer.Tests
             return texture;
         }
 
+        /// <summary>Two-half luma-structure base (quick 260924-hk7): bright left half /
+        /// dark right half, both on the kernel's own HSV unit line at (hue 1/12, sat 0.5)
+        /// so the toneMatch-0 luma oracle is exact per texel.</summary>
+        private static Texture2D CreateTwoHalvesBaseMap()
+        {
+            var texture = new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, false, true)
+            {
+                name = "TwoHalvesBase",
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+            Color unit = HsvUnit(kTwoHalfHue, kTwoHalfSaturation);
+            float unitLuma = unit.r * kLumaR + unit.g * kLumaG + unit.b * kLumaB;
+            Color bright = unit * (kTwoHalfBrightLuma / unitLuma);
+            Color dark = unit * (kTwoHalfDarkLuma / unitLuma);
+            for (int y = 0; y < WorkingSize; y++)
+            {
+                for (int x = 0; x < WorkingSize; x++)
+                {
+                    texture.SetPixel(x, y, x < WorkingSize / 2 ? bright : dark);
+                }
+            }
+
+            texture.Apply(false, false);
+            return texture;
+        }
+
         private static Texture2D CreateWhiteOcclusion()
         {
             var texture = new Texture2D(1, 1, TextureFormat.RGBA32, false, true)
@@ -1640,27 +1819,6 @@ namespace GraffitiEntertainment.Namer.Tests
 
             Assert.IsTrue(found, "the magenta-family refs must extract at least one chromatic anchor");
             return dominant.Hue;
-        }
-
-        /// <summary>The anchor CSPaletteTransfer actually matches for this fixture:
-        /// every extracted anchor ties at the family hue (R == B refs), and the
-        /// kernel's chromatic scan keeps the FIRST anchor on a tie (strict
-        /// less-than), so the winner is the first anchor above the achromatic
-        /// cutoff (0.15 mirrors NAMER_STYLIZE_ACHROMATIC_CUTOFF; the extractor
-        /// reserves the flagged slots LAST, so chromatic slots come first).</summary>
-        private static NamerStyleAnchor TieWinningChromaticAnchor(NamerStyleProfile profile)
-        {
-            const float kAchromaticCutoff = 0.15f;
-            foreach (NamerStyleAnchor anchor in profile.PaletteAnchors)
-            {
-                if (anchor.Saturation >= kAchromaticCutoff)
-                {
-                    return anchor;
-                }
-            }
-
-            Assert.Fail("the extracted profile must carry at least one chromatic anchor");
-            return default;
         }
 
         /// <summary>The saturation the baked-base readback measures for a uniform
@@ -1994,6 +2152,26 @@ namespace GraffitiEntertainment.Namer.Tests
             }
         }
 
+        /// <summary>Median luma over one horizontal half of a square readback (edge texels
+        /// excluded; bright = left half, dark = right half — the two-half fixture's
+        /// layout, quick 260924-hk7).</summary>
+        private static float HalfMedian(Color[] texels, bool brightHalf)
+        {
+            int xBegin = brightHalf ? kSampleInset : WorkingSize / 2;
+            int xEnd = brightHalf ? WorkingSize / 2 : WorkingSize - kSampleInset;
+            var values = new List<float>();
+            for (int y = kSampleInset; y < WorkingSize - kSampleInset; y++)
+            {
+                for (int x = xBegin; x < xEnd; x++)
+                {
+                    values.Add(LumaOf(texels[y * WorkingSize + x]));
+                }
+            }
+
+            values.Sort();
+            return values[values.Count / 2];
+        }
+
         private static float MedianOf(Color[] texels, Func<Color, float> selector)
         {
             var values = new float[texels.Length];
@@ -2079,15 +2257,6 @@ namespace GraffitiEntertainment.Namer.Tests
             }
 
             return spread;
-        }
-
-        private static Color32 ToColor32(Color c)
-        {
-            return new Color32(
-                (byte)Mathf.RoundToInt(Mathf.Clamp01(c.r) * 255f),
-                (byte)Mathf.RoundToInt(Mathf.Clamp01(c.g) * 255f),
-                (byte)Mathf.RoundToInt(Mathf.Clamp01(c.b) * 255f),
-                (byte)Mathf.RoundToInt(Mathf.Clamp01(c.a) * 255f));
         }
 
         // -- teardown helpers ---------------------------------------------------

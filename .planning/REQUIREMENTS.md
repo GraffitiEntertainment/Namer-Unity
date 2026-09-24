@@ -50,8 +50,8 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **STYL-02**: Processor extracts palette/style statistics (dominant colors, hue families, saturation, luminance distribution, shadow/midtone/highlight colors, warm/cool bias, contrast, palette density) from reference images
 - [x] **STYL-03**: Palette mapping preserves source hue identity (dark brown → styled dark brown, green stays green) unless stronger replacement is chosen
 - [x] **STYL-04**: GPU edge-preserving smoothing (bilateral/Kuwahara/guided class) reduces photographic noise while preserving UV island boundaries, seams, decals, and large transitions
-- [ ] **STYL-05**: Runtime AO and Painted AO are exposed as separate controls; cavity strength and "avoid crushing cavities to black" behavior provided
-- [ ] **STYL-06**: Normal detail reduction and roughness simplification controls are available before quantization
+- [x] **STYL-05**: Runtime AO and Painted AO are exposed as separate controls; cavity strength and "avoid crushing cavities to black" behavior provided
+- [x] **STYL-06**: Normal detail reduction and roughness simplification controls are available before quantization
 
 ### Asset Generation & Safety
 
@@ -139,8 +139,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STYL-02 | Phase 5 | Complete |
 | STYL-03 | Phase 5 | Complete |
 | STYL-04 | Phase 5 | Complete |
-| STYL-05 | Phase 5 | Pending |
-| STYL-06 | Phase 5 | Pending |
+| STYL-05 | Phase 5 | Complete |
+| STYL-06 | Phase 5 | Complete |
 | GEN-01 | Phase 3 | Complete |
 | GEN-02 | Phase 3 | Complete |
 | GEN-03 | Phase 3 | Complete |

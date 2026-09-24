@@ -15,7 +15,7 @@ The journey moves from the format contract outward. First we lock the NAMER pack
 - [x] **Phase 2: Source Inspection + GPU Compute Pipeline** - Read source materials and produce normalized + packed textures in GPU compute (completed 2026-08-27)
 - [x] **Phase 3: Asset Generation + Editor Workflow + Preview** - Generate NAMER assets non-destructively from an editor window with preview (completed 2026-08-27)
 - [x] **Phase 4: Vertex-Color Decomposition + Residual** - Fit low-frequency color into vertex colors with an adaptive residual texture (gap closure in progress; verification found 3 gaps) (completed 2026-09-01)
-- [ ] **Phase 5: Stylization** - Apply reference-image-driven, hue-preserving stylization via NAMERStyleProfile
+- [x] **Phase 5: Stylization** - Apply reference-image-driven, hue-preserving stylization via NAMERStyleProfile (completed 2026-09-24)
 
 ## Phase Details
 
@@ -308,7 +308,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 05-03: AO/normal/roughness controls + stylization pipeline integration
+- [x] 05-03: AO/normal/roughness controls + stylization pipeline integration
 
 ## Progress
 
@@ -323,4 +323,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 03.1. AO Extraction (INSERTED) | 3/3 | Complete | 2026-08-31 |
 | 4. Vertex-Color Decomposition + Residual | 5/5 | Complete   | 2026-09-01 |
 | 04.1. Roughness Extraction + One-Texture (INSERTED) | 7/7 | Complete   | 2026-09-16 |
-| 5. Stylization | 2/3 | In Progress|  |
+| 5. Stylization | 3/3 | Complete   | 2026-09-24 |

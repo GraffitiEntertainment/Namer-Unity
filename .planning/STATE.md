@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 05-02-PLAN.md
-last_updated: "2026-09-23T23:24:36.383Z"
-last_activity: 2026-09-23
+status: verifying
+stopped_at: Completed 05-03-PLAN.md
+last_updated: "2026-09-24T00:41:37.236Z"
+last_activity: 2026-09-24
 progress:
   total_phases: 9
-  completed_phases: 8
+  completed_phases: 9
   total_plans: 40
-  completed_plans: 39
-  percent: 89
+  completed_plans: 40
+  percent: 100
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 
 Phase: 5 (stylization) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
-Last activity: 2026-09-23
+Status: Phase complete — ready for verification
+Last activity: 2026-09-24
 
-Progress: [██████████] 98%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -95,6 +95,7 @@ Progress: [██████████] 98%
 | Phase 04.3 P03 | 4min | 2 tasks | 2 files |
 | Phase 05 P01 | 45min | 3 tasks | 6 files |
 | Phase 05 P02 | 85min | 3 tasks | 12 files |
+| Phase 05 P03 | 26min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -206,6 +207,9 @@ Recent decisions affecting current work:
 - [Phase 5]: 05-02: UV-edge island keys use LEXICOGRAPHIC endpoint ordering (component-wise min/max collides crossing edges and merges distinct islands)
 - [Phase 5]: 05-02: hue readback tolerance 0.002 (binary16 working target bounds circular hue error ~2e-3; oracles computed from readback input)
 - [Phase 5]: 05-02: stylize stage leases only when stylization.Active — null AND inactive contexts are byte-identical with zero extra dispatches (guarded by integration tests)
+- [Phase 05]: Preview/bake parity via shared NamerProcessor.ApplyStyleControls — window preview and Process bake apply identical clamped scalars from the same profile (05-03)
+- [Phase 05]: After View is a preview-only lens; the bake composes the attached profile unconditionally (05-03 W4)
+- [Phase 05]: Kernel-direct tests left untouched on bare-global-float Metal evidence; all new production dispatch sites bind full argument tables (05-03)
 
 ### Pending Todos
 
@@ -245,6 +249,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-23T23:24:36.372Z
-Stopped at: Completed 05-02-PLAN.md
+Last session: 2026-09-24T00:41:37.226Z
+Stopped at: Completed 05-03-PLAN.md
 Resume file: None

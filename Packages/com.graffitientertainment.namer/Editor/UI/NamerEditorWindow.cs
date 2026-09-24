@@ -130,6 +130,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private Mesh _generatedMesh;
         private NamerComputeResult _liveResult;
         private RenderTexture _previewBaseRt;
+        private RenderTexture _stylizePreviewBaseRt;
         private Material _channelViewMaterial;
         private Material _wireMaterial;
         private Mesh _previewWireSource;
@@ -527,6 +528,17 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 RenderTexture previewBaseMap = ResolvePreviewBaseMap();
 
+                // Stylize albedo preview source (Task 6): the styled SOURCE base
+                // (pre-projection), not the projected/packed texture the After material
+                // samples. Gamma projects need the same re-encode as the before pane;
+                // Linear projects bind the pool target directly (no work here — and never
+                // a Blit in OnGUI).
+                if (QualitySettings.activeColorSpace == ColorSpace.Gamma)
+                {
+                    Texture stylizeBase = ResolveStylizePreviewBase(_liveResult);
+                    ReencodeForGammaPreview((RenderTexture)stylizeBase, ref _stylizePreviewBaseRt);
+                }
+
                 // D-08/D-12: run the in-memory fit + residual when decomposition is enabled
                 // and bind the decomposed representation (residual at _BaseResidualMap, split
                 // mesh in the after pane). Never writes to disk. Gated on decompWillRun so a
@@ -676,14 +688,31 @@ namespace GraffitiEntertainment.Namer.Editor
                 return _liveResult.NormalizedBaseColor;
             }
 
-            if (_previewBaseRt == null
-                || _previewBaseRt.width != _liveResult.Width
-                || _previewBaseRt.height != _liveResult.Height)
+            return ReencodeForGammaPreview(_liveResult.NormalizedBaseColor, ref _previewBaseRt);
+        }
+
+        /// <summary>
+        /// Re-encodes a linear float16 pipeline target into the sRGB 8-bit
+        /// <paramref name="cache"/> for Gamma-project preview sampling — shared by the
+        /// before-pane base map (<see cref="ResolvePreviewBaseMap"/>) and the stylize
+        /// albedo preview's source base. A Gamma project performs no decode anywhere, so
+        /// the raw linear values would shade darker than the before pane (and darker than
+        /// the correctly saved material). The blit runs through the raw-copy material with
+        /// <c>_REENCODE_SRGB</c> — the same exact IEC 61966-2-1 primitive the save path
+        /// uses — so the previews match the saved assets in both color spaces. The cache
+        /// is sized to the live result and released/recreated on size change. NEVER call
+        /// from OnGUI (Graphics.Blit) — RecomputePreview only.
+        /// </summary>
+        private RenderTexture ReencodeForGammaPreview(RenderTexture source, ref RenderTexture cache)
+        {
+            if (cache == null
+                || cache.width != _liveResult.Width
+                || cache.height != _liveResult.Height)
             {
-                if (_previewBaseRt != null)
+                if (cache != null)
                 {
-                    _previewBaseRt.Release();
-                    DestroyImmediate(_previewBaseRt);
+                    cache.Release();
+                    DestroyImmediate(cache);
                 }
 
                 var descriptor = new RenderTextureDescriptor(
@@ -691,20 +720,20 @@ namespace GraffitiEntertainment.Namer.Editor
                 {
                     sRGB = false,
                 };
-                _previewBaseRt = new RenderTexture(descriptor)
+                cache = new RenderTexture(descriptor)
                 {
                     // Same sweep protection as the pool: without DontSave the editor's
                     // unused-asset sweeps destroy this RT between repaints.
                     hideFlags = HideFlags.HideAndDontSave,
                 };
-                _previewBaseRt.Create();
+                cache.Create();
             }
 
             Material rawCopy = NamerComputePipeline.RawCopyMaterial();
             rawCopy.EnableKeyword(NamerComputePipeline.ReencodeSrgbKeyword);
-            Graphics.Blit(_liveResult.NormalizedBaseColor, _previewBaseRt, rawCopy);
+            Graphics.Blit(source, cache, rawCopy);
             rawCopy.DisableKeyword(NamerComputePipeline.ReencodeSrgbKeyword);
-            return _previewBaseRt;
+            return cache;
         }
 
         private void ReleaseLiveResult()
@@ -714,6 +743,13 @@ namespace GraffitiEntertainment.Namer.Editor
                 _previewBaseRt.Release();
                 DestroyImmediate(_previewBaseRt);
                 _previewBaseRt = null;
+            }
+
+            if (_stylizePreviewBaseRt != null)
+            {
+                _stylizePreviewBaseRt.Release();
+                DestroyImmediate(_stylizePreviewBaseRt);
+                _stylizePreviewBaseRt = null;
             }
 
             if (_liveResult == null)
@@ -1858,12 +1894,16 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// The 2D albedo preview (stylization fix 3): a full-width Base-channel view of
-        /// the LIVE <c>_namerMaterial</c>'s textures — the stylized result only exists
-        /// there — drawn through the shared <c>NamerChannelView</c> material. Read-only
-        /// view of the last preview recompute: no new GPU compute, no readback, no disk
-        /// I/O. The caption states honestly which lens produced the image (stylized vs
-        /// un-stylized), with a one-click View Stylized flip when the lens is NAMER.
+        /// The 2D albedo preview (stylization fix 3, Task 6 corrected): a full-width
+        /// Base-channel view of the styled SOURCE base (pre-projection — see
+        /// <see cref="ResolveStylizePreviewBase"/>), never the post-processed texture the
+        /// After material samples at <c>_BaseResidualMap</c> (the removed-detail residual,
+        /// or the Gouraud-projected base). The packed surface map and occlusion strength
+        /// still come from the live <c>_namerMaterial</c>. Drawn through the shared
+        /// <c>NamerChannelView</c> material. Read-only view of the last preview recompute:
+        /// no new GPU compute, no readback, no disk I/O. The caption states honestly which
+        /// lens produced the image (stylized vs un-stylized), with a one-click View
+        /// Stylized flip when the lens is NAMER.
         /// </summary>
         private void DrawAlbedoPreview()
         {
@@ -1872,7 +1912,13 @@ namespace GraffitiEntertainment.Namer.Editor
             float rowWidth = Mathf.Max(EditorGUIUtility.currentViewWidth - GUI.skin.verticalScrollbar.fixedWidth, 256f);
             Rect rect = GUILayoutUtility.GetRect(rowWidth, kAlbedoPreviewHeight);
 
-            if (_namerMaterial == null || _namerMaterial.GetTexture(SurfaceMapId) == null)
+            // Gamma projects sample the re-encoded cache built in RecomputePreview; Linear
+            // projects bind the pool target directly. Null (no live result / no recompute
+            // yet) falls into the neutral case below.
+            Texture stylizeBase = QualitySettings.activeColorSpace == ColorSpace.Gamma
+                ? _stylizePreviewBaseRt
+                : ResolveStylizePreviewBase(_liveResult);
+            if (_namerMaterial == null || _namerMaterial.GetTexture(SurfaceMapId) == null || stylizeBase == null)
             {
                 GUI.Box(rect, GUIContent.none);
                 EditorGUILayout.LabelField(AlbedoPreviewEmptyCaption, EditorStyles.miniLabel);
@@ -1885,7 +1931,7 @@ namespace GraffitiEntertainment.Namer.Editor
             // properties before every draw.
             EnsureChannelViewMaterial();
             _channelViewMaterial.SetTexture(SurfaceMapId, _namerMaterial.GetTexture(SurfaceMapId));
-            _channelViewMaterial.SetTexture(BaseResidualMapId, _namerMaterial.GetTexture(BaseResidualMapId));
+            _channelViewMaterial.SetTexture(BaseResidualMapId, stylizeBase);
             _channelViewMaterial.SetFloat(OcclusionStrengthId, _namerMaterial.GetFloat(OcclusionStrengthId));
             _channelViewMaterial.SetFloat(ChannelId, 0);
             if (Event.current.type == EventType.Repaint)
@@ -1975,6 +2021,24 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             return NamerStyleStylization.Create(profile, split);
+        }
+
+        /// <summary>
+        /// The stylize albedo preview's base texture: the styled SOURCE base
+        /// (<see cref="NamerComputeResult.SourceBaseColor"/> — pre-projection, Phase 5
+        /// D-02: the styled source) when the 04.2 projection ran, else
+        /// <see cref="NamerComputeResult.NormalizedBaseColor"/> (which IS the styled base
+        /// when no projection ran). Internal static pure seam mirroring
+        /// <see cref="ComposePreviewStylization"/> — headless-testable reference selection.
+        /// </summary>
+        internal static Texture ResolveStylizePreviewBase(NamerComputeResult result)
+        {
+            if (result == null)
+            {
+                return null;
+            }
+
+            return result.SourceBaseColor != null ? result.SourceBaseColor : result.NormalizedBaseColor;
         }
 
         private void DrawDecompositionSection(NamerMaterialInspection inspection)

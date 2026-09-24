@@ -12,11 +12,12 @@ namespace GraffitiEntertainment.Namer.Tests
     /// and the <see cref="NamerEditorWindow.ShaderInputToggleLabels"/> contents/order (the seven
     /// neutral-default shaded-view toggles, read via reflection). Also pins the persistent
     /// Source pick (a global editor selection change must not clobber the window's explicit
-    /// pick), the albedo preview caption copy (locked, em-dashes verbatim), and the embedded
+    /// pick), the albedo preview caption copy (locked, em-dashes verbatim), the embedded
     /// profile-inspector cache contract (created for the attached profile, reused, null when
-    /// detached). The render-only claims (window fits a small screen with all sections
-    /// collapsed; every control reachable by scrolling) are manual-verification checklist
-    /// items, not automated tests.
+    /// detached), and the stylize preview base selection (the styled SOURCE base wins over
+    /// the projected base). The render-only claims (window fits a small screen with all
+    /// sections collapsed; every control reachable by scrolling) are manual-verification
+    /// checklist items, not automated tests.
     /// </summary>
     public class NamerEditorWindowSmokeTests
     {
@@ -170,6 +171,50 @@ namespace GraffitiEntertainment.Namer.Tests
             {
                 Object.DestroyImmediate(window);
                 Object.DestroyImmediate(profile);
+            }
+        }
+
+        /// <summary>
+        /// The stylize albedo preview binds the styled SOURCE base (pre-projection), never
+        /// the projected/packed texture the After material samples: SourceBaseColor wins when
+        /// set, NormalizedBaseColor is the fallback (it IS the styled base when no projection
+        /// ran), and a null result resolves null. Pure reference-selection seam — the throwaway
+        /// render targets are never bound, so no GPU work happens.
+        /// </summary>
+        [Test]
+        public void StylizePreviewBase_PrefersSourceOverProjected()
+        {
+            RenderTexture sourceBase = new RenderTexture(1, 1, 0);
+            RenderTexture projectedBase = new RenderTexture(1, 1, 0);
+            try
+            {
+                MethodInfo resolve = typeof(NamerEditorWindow).GetMethod(
+                    "ResolveStylizePreviewBase", BindingFlags.NonPublic | BindingFlags.Static);
+                Assert.IsNotNull(resolve, "ResolveStylizePreviewBase method must exist on NamerEditorWindow");
+
+                var withSource = new NamerComputeResult
+                {
+                    SourceBaseColor = sourceBase,
+                    NormalizedBaseColor = projectedBase,
+                };
+                Assert.AreSame(sourceBase, resolve.Invoke(null, new object[] { withSource }),
+                    "The stylize preview must prefer the styled SOURCE base (pre-projection) when the projection ran");
+
+                var withoutSource = new NamerComputeResult
+                {
+                    SourceBaseColor = null,
+                    NormalizedBaseColor = projectedBase,
+                };
+                Assert.AreSame(projectedBase, resolve.Invoke(null, new object[] { withoutSource }),
+                    "Without a projection the styled base IS NormalizedBaseColor — it must be the fallback");
+
+                Assert.IsNull(resolve.Invoke(null, new object[] { null }),
+                    "A null result must resolve a null preview base");
+            }
+            finally
+            {
+                Object.DestroyImmediate(sourceBase);
+                Object.DestroyImmediate(projectedBase);
             }
         }
 

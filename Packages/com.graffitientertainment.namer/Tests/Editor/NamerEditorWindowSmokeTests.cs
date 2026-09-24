@@ -119,9 +119,8 @@ namespace GraffitiEntertainment.Namer.Tests
         /// <summary>
         /// The albedo preview caption/button strings are locked copy — the caption must state
         /// honestly which lens produced the image, and the neutral-state reason lines must name
-        /// the missing prerequisite. The stylized-preview toggle label/tooltip are locked copy
-        /// too. Pinned verbatim (em-dashes included) via the same reflection seam as the other
-        /// label fields.
+        /// the missing prerequisite. Pinned verbatim (em-dashes included) via the same
+        /// reflection seam as the other label fields.
         /// </summary>
         [Test]
         public void AlbedoPreviewCaptions_ExactLockedCopy()
@@ -131,11 +130,6 @@ namespace GraffitiEntertainment.Namer.Tests
             AssertLockedConstString("AlbedoPreviewNoSourceCaption", "select a Source above to preview");
             AssertLockedConstString("AlbedoPreviewNoResultCaption", "no preview yet — waiting for recompute");
             AssertLockedConstString("AlbedoPreviewViewStylizedButton", "View Stylized");
-            AssertLockedConstString("StylizedPreviewToggleLabel", "Stylized preview");
-            AssertLockedConstString("StylizedPreviewToggleTooltip",
-                "Show the stylized albedo in the preview. Uncheck to compare against the un-stylized "
-                + "NAMER base without detaching the Style Profile. The attached profile still applies "
-                + "to Process runs.");
         }
 
         /// <summary>

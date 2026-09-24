@@ -94,23 +94,6 @@ namespace GraffitiEntertainment.Namer.Editor
         /// </summary>
         internal const string AlbedoPreviewViewStylizedButton = "View Stylized";
 
-        /// <summary>
-        /// Stylization-section checkbox label: toggles the preview lens between the
-        /// un-stylized NAMER base and the stylized one — the same persisted state as
-        /// the After View popup and the View Stylized button, without detaching the
-        /// Style Profile. Locked copy, pinned by the smoke tests.
-        /// </summary>
-        internal const string StylizedPreviewToggleLabel = "Stylized preview";
-
-        /// <summary>
-        /// Tooltip for <see cref="StylizedPreviewToggleLabel"/>. Locked copy, pinned by
-        /// the smoke tests.
-        /// </summary>
-        internal const string StylizedPreviewToggleTooltip =
-            "Show the stylized albedo in the preview. Uncheck to compare against the un-stylized "
-            + "NAMER base without detaching the Style Profile. The attached profile still applies "
-            + "to Process runs.";
-
         private static readonly int SurfaceMapId = Shader.PropertyToID("_SurfaceMap");
         private static readonly int BaseResidualMapId = Shader.PropertyToID("_BaseResidualMap");
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
@@ -1865,21 +1848,6 @@ namespace GraffitiEntertainment.Namer.Editor
             if (attached != null)
             {
                 EditorGUILayout.LabelField(DescribeProfileState(attached), EditorStyles.miniLabel);
-
-                // Preview-lens checkbox (Task 8): deselect stylization in the preview
-                // without detaching the profile — same persisted state as the After View
-                // popup and the View Stylized button, so all three stay in sync.
-                bool stylizedLens = _afterView == kAfterViewStylized;
-                bool newStylizedLens = EditorGUILayout.Toggle(
-                    new GUIContent(StylizedPreviewToggleLabel, StylizedPreviewToggleTooltip),
-                    stylizedLens);
-                if (newStylizedLens != stylizedLens)
-                {
-                    _afterView = newStylizedLens ? kAfterViewStylized : kAfterViewNamer;
-                    _settings.AfterView = _afterView;
-                    _afterPanelState.MarkTweaking();
-                    MarkDirty();
-                }
 
                 // Embedded profile editor: the profile's full editing UI (reference
                 // slots, +/– footer, Extract, sliders, Statistics, Advanced) drawn in

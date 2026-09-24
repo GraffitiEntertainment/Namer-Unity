@@ -153,6 +153,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 _compute.SetFloat("_AoDirect", 0f);
                 _compute.SetFloat("_AoStrength", inspection.AoStrength);
                 _compute.SetFloat("_AoContrast", inspection.AoContrast);
+                _compute.SetFloat("_CavityFloor", inspection.CavityFloor);
                 _compute.SetTexture(_kernelAoRemap, "_Dst", blurB);
                 _compute.SetTexture(_kernelAoRemap, "_AoOut", aoOut);
                 Dispatch(_kernelAoRemap, w, h);
@@ -387,13 +388,16 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>
         /// Applies the user's strength/contrast to a green-channel AO target via the
-        /// <c>CSAoRemap</c> direct mode (D-11). When strength and contrast are identity
-        /// (1/1) this returns <paramref name="aoIn"/> unchanged; otherwise it returns a new
-        /// pool-leased remapped target and releases <paramref name="aoIn"/> back to the pool.
+        /// <c>CSAoRemap</c> direct mode (D-11). When strength, contrast, AND the cavity
+        /// floor are identity (1/1/0 — 05-03 D-08 extends the short-circuit so a floor
+        /// still applies with otherwise-identity sliders) this returns
+        /// <paramref name="aoIn"/> unchanged; otherwise it returns a new pool-leased
+        /// remapped target and releases <paramref name="aoIn"/> back to the pool.
         /// </summary>
         private RenderTexture ApplyStrengthContrastDirect(RenderTexture aoIn, NamerMaterialInspection inspection, int w, int h)
         {
-            if (Mathf.Approximately(inspection.AoStrength, 1f) && Mathf.Approximately(inspection.AoContrast, 1f))
+            if (Mathf.Approximately(inspection.AoStrength, 1f) && Mathf.Approximately(inspection.AoContrast, 1f)
+                && Mathf.Approximately(inspection.CavityFloor, 0f))
             {
                 return aoIn;
             }
@@ -403,11 +407,39 @@ namespace GraffitiEntertainment.Namer.Editor
             _compute.SetFloat("_AoDirect", 1f);
             _compute.SetFloat("_AoStrength", inspection.AoStrength);
             _compute.SetFloat("_AoContrast", inspection.AoContrast);
+            _compute.SetFloat("_CavityFloor", inspection.CavityFloor);
             _compute.SetTexture(_kernelAoRemap, "_Dst", aoIn);
             _compute.SetTexture(_kernelAoRemap, "_AoOut", remapped);
             Dispatch(_kernelAoRemap, w, h);
             Release(aoIn);
             return remapped;
+        }
+
+        /// <summary>
+        /// Caller-owned authored-AO remap (05-03 D-08, STYL-05): applies the user's
+        /// strength/contrast/cavity-floor to an AUTHORED green-channel AO texture via
+        /// <c>CSAoRemap</c> direct mode, src → dst. Cross-pool law (Pitfall 1): this
+        /// method performs ZERO pool operations — both textures are caller-owned; the
+        /// caller (NamerComputePipeline) leases/releases its own pool and calls this
+        /// only on the non-identity path.
+        /// </summary>
+        internal void RemapAuthored(
+            RenderTexture src,
+            RenderTexture dst,
+            float strength,
+            float contrast,
+            float cavityFloor,
+            int w,
+            int h)
+        {
+            _compute.SetInts("_Size", new[] { w, h });
+            _compute.SetFloat("_AoDirect", 1f);
+            _compute.SetFloat("_AoStrength", strength);
+            _compute.SetFloat("_AoContrast", contrast);
+            _compute.SetFloat("_CavityFloor", cavityFloor);
+            _compute.SetTexture(_kernelAoRemap, "_Dst", src);
+            _compute.SetTexture(_kernelAoRemap, "_AoOut", dst);
+            Dispatch(_kernelAoRemap, w, h);
         }
 
         /// <summary>

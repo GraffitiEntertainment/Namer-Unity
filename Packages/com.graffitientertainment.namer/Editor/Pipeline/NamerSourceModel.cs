@@ -84,6 +84,13 @@ namespace GraffitiEntertainment.Namer.Editor
         public float AoStrength = 1f;   // 1 = full AO, 0 = white/no AO
         public float AoContrast = 1f;   // 1 = identity, pivot 0.5
 
+        // 05-03 bake-side stylization controls (D-07/D-08, STYL-05/STYL-06). Identity 0
+        // inline defaults keep every construction path byte-identical until a caller
+        // (NamerProcessor plumbing a NamerStyleProfile, or a test) overrides them.
+        public float CavityFloor = 0f;           // remap output floor: max(ao, floor) — keeps cavities from crushing (D-08)
+        public float NormalDetailReduction = 0f; // lerp the rebuilt normal toward +Z before octahedral encode (D-07)
+        public float RoughnessSimplify = 0f;     // radius-2 neighborhood mean before 6-bit roughness quantization (D-07)
+
         // AO stage gate (2026-09-21 contract). Gates SYNTHESIS only: false (the inline
         // default, matching AoUnmultiplyStrength's no-default convention so direct
         // NamerComputePipeline.Process callers and fixtures keep the identity path)

@@ -159,6 +159,21 @@ namespace GraffitiEntertainment.Namer.Editor
                     // checkbox (the checkbox gates synthesis only).
                     aoIn = _pool.Lease(unorm8);
                     Upload(inspection.OcclusionMap, aoIn, WhiteFill());
+
+                    // 05-03 D-08 (STYL-05): authored AO now honors the strength/contrast
+                    // remap with the cavity floor, exactly like the extracted/baked paths.
+                    // Identity settings (1/1/0) stay byte-identical — raw passthrough. The
+                    // remap is caller-owned from here: lease/release THIS pool only
+                    // (RemapAuthored itself performs zero pool ops, Pitfall 1).
+                    if (!AuthoredAoRemapIsIdentity(inspection))
+                    {
+                        RenderTexture remappedAuthoredAo = _pool.Lease(unorm8);
+                        EnsureAoPipeline().RemapAuthored(
+                            aoIn, remappedAuthoredAo, inspection.AoStrength, inspection.AoContrast,
+                            inspection.CavityFloor, w, h);
+                        Release(aoIn);
+                        aoIn = remappedAuthoredAo;
+                    }
                 }
                 else if (inspection.AoStageEnabled)
                 {
@@ -429,6 +444,15 @@ namespace GraffitiEntertainment.Namer.Editor
             _compute.SetFloat("_SmoothnessTextureChannel", inspection.SmoothnessTextureChannel);
             _compute.SetFloat("_HasMetallicGlossMap", inspection.MetallicGlossMap != null ? 1f : 0f);
 
+            // 05-03 D-07 bake-side stylization uniforms (STYL-06), clamped [0,1] so a
+            // rogue value can never overshoot. Metal argument-table discipline: these
+            // live on the shared pack-compute table and are bound BEFORE the
+            // CSOctahedralEncode dispatch here AND the later CSSurfacePack dispatch in
+            // Process — every dispatch of those kernels sees them bound, identity 0 by
+            // default.
+            _compute.SetFloat("_RoughnessSimplify", Mathf.Clamp01(inspection.RoughnessSimplify));
+            _compute.SetFloat("_NormalDetailReduction", Mathf.Clamp01(inspection.NormalDetailReduction));
+
             _compute.SetTexture(_kernelNormalize, "_BaseColorIn", baseColorIn);
             _compute.SetTexture(_kernelNormalize, "_AoIn", aoIn);
             _compute.SetTexture(_kernelNormalize, "_MetallicGlossIn", metallicGlossIn);
@@ -473,6 +497,18 @@ namespace GraffitiEntertainment.Namer.Editor
         private void Release(RenderTexture rt)
         {
             _pool.Release(rt);
+        }
+
+        /// <summary>
+        /// True when the D-08 authored-AO remap would be a no-op (strength 1, contrast 1,
+        /// cavity floor 0 — 05-03): the authored occlusion map transfers RAW exactly as
+        /// before 05-03, byte-identical, with zero extra leases/dispatches.
+        /// </summary>
+        private static bool AuthoredAoRemapIsIdentity(NamerMaterialInspection inspection)
+        {
+            return Mathf.Approximately(inspection.AoStrength, 1f)
+                && Mathf.Approximately(inspection.AoContrast, 1f)
+                && Mathf.Approximately(inspection.CavityFloor, 0f);
         }
 
         internal static void Upload(Texture source, RenderTexture target, Texture2D fallback)

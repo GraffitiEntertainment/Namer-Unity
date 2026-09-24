@@ -58,6 +58,7 @@ float _Sigma;
 float _AoStrength;
 float _AoContrast;
 float _AoDirect;    // 0 = luminance-relative extract remap; 1 = direct green-AO remap (bake)
+float _CavityFloor; // remap output floor (05-03 D-08, STYL-05); 0 = no clamp (identity)
 float _BlurChannel; // 0 = red (luminance low-pass); 1 = green (AO user blur)
 float _LumaAverage;
 uint2 _AvgSrcSize;
@@ -176,7 +177,7 @@ void CSAoRemap(uint3 id : SV_DispatchThreadID)
         ao = saturate(_Dst[id.xy].r / max(_LumaAverage, 1e-4));
     }
 
-    ao = NamerAoRemap(ao, _AoStrength, _AoContrast);
+    ao = NamerAoRemap(ao, _AoStrength, _AoContrast, _CavityFloor);
 
     // AO in the GREEN channel — the _AoIn.g contract (Pitfall 1).
     _AoOut[id.xy] = float4(0.0, ao, 0.0, 1.0);

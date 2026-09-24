@@ -24,12 +24,16 @@ static const float NAMER_LUMA_B = 0.0722;
 // ------------------------------------------------------------------
 // Source-agnostic AO tweak remap (D-11). strength = 1 is full AO,
 // strength = 0 is white (no AO); contrast = 1 is identity (pivot 0.5).
+// cavityFloor (05-03 D-08, STYL-05) clamps the REMAPPED AO so no texel
+// crushes below the floor — applies to every remapped path (extracted,
+// baked, authored). floor = 0 keeps the remap byte-identical (saturate
+// already bounds ao to [0,1], so max(ao, 0) is a no-op).
 // ------------------------------------------------------------------
-float NamerAoRemap(float ao, float strength, float contrast)
+float NamerAoRemap(float ao, float strength, float contrast, float cavityFloor)
 {
     ao = saturate(lerp(1.0, ao, strength));
     ao = saturate((ao - 0.5) * contrast + 0.5);
-    return ao;
+    return max(ao, cavityFloor);
 }
 
 // ------------------------------------------------------------------

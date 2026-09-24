@@ -1,8 +1,11 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
+using GraffitiEntertainment.Namer.Core;
 using GraffitiEntertainment.Namer.Editor;
 using NUnit.Framework;
 using Unity.Collections;
+using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -19,6 +22,11 @@ namespace GraffitiEntertainment.Namer.Tests
     ///   styled base flows into fit/result -> <see cref="Stylization_ActiveReplace_StylingFlowsIntoProjectionAndResult"/>
     ///   residual dividends the STYLED base-> <see cref="Stylization_ActiveReplace_ResidualDividendIsStyledSource"/>
     ///   mid-stage throw leaks nothing     -> <see cref="Stylization_ActiveContext_ThrowInProjection_RunPropagatesAndPoolReturnsToBaseline"/>
+    ///
+    /// Phase 05 plan 03 additions — the D-07/D-08 bake-side controls through the same
+    /// Process surface: identity defaults stay byte-identical, authored AO honors the
+    /// strength/contrast remap with a cavity floor (STYL-05), and roughness simplify /
+    /// normal flatten run before quantization / octahedral encode (STYL-06).
     ///
     /// The fixture mirrors <see cref="NamerProjectionAcceptanceTests"/>: a quad mesh, an
     /// authored white occlusion (D-07 gate stays on the authored branch), and a chromatic
@@ -77,6 +85,28 @@ namespace GraffitiEntertainment.Namer.Tests
 
         // Edge inset for per-texel sampling (avoid rasterization boundary rounding).
         private const int kSampleInset = 4;
+
+        // 05-03 D-07/D-08 fixture + oracle constants. The packed alpha carries the
+        // 6-bit roughness in the low bits (Core/NamerFormat NamerPackAlphaBits).
+        private const int kRoughnessAlphaMask = 0x3F;
+        private const float kRoughnessQuantLevels = 63f;
+        private const float kNormalDotTolerance = 1e-3f;
+
+        // Authored-AO grain fixture: occlusion texels in [0.25, 0.75] (center 0.5,
+        // amplitude 0.25) — wide enough that contrast 2 crushes texels to black
+        // without a floor and strength 0.5 lands at a predictable median.
+        private const float kOcclusionGrainAmplitude = 0.25f;
+        private const float kOcclusionGrainCenter = 0.5f;
+
+        // Row-alternating gloss fixture: smoothness centers alternate 0.5 / 0.75 per
+        // row (period 2, smaller than the radius-2 5-tap window) with x-grain.
+        private const float kSmoothnessRowEven = 0.5f;
+        private const float kSmoothnessRowOdd = 0.75f;
+        private const float kSmoothnessGrainAmplitude = 0.1f;
+
+        // Grain normal fixture amplitude: signed xy spans [-0.8, 0.8] — genuinely
+        // tilted normals (median +Z dot far below 1) that flatten must collapse.
+        private const float kNormalGrainAmplitude = 0.4f;
 
         private static bool ComputeAvailable =>
             SystemInfo.supportsComputeShaders && SystemInfo.supportsAsyncGPUReadback;
@@ -400,6 +430,436 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         // --------------------------------------------------------------------
+        // 05-03 D-08 identity guard: the new bake controls default to identity —
+        // explicitly-zeroed fields must match the pristine-default path byte for byte.
+        // --------------------------------------------------------------------
+
+        [UnityTest]
+        public IEnumerator BakeControls_AllIdentity_ByteIdenticalToDefaultPath()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU bake-controls identity test (D-15).");
+                yield break;
+            }
+
+            Mesh mesh = CreateQuadMesh();
+            Texture2D baseMap = CreateGrainBaseMap();
+            Texture2D occlusion = CreateGrainOcclusion();
+            Texture2D normalMap = CreateGrainNormalMap();
+            try
+            {
+                var pristine = BuildInspection(baseMap, mesh, occlusion);
+                pristine.NormalMap = normalMap;
+
+                var explicitIdentity = BuildInspection(baseMap, mesh, occlusion);
+                explicitIdentity.NormalMap = normalMap;
+                explicitIdentity.AoStrength = 1f;
+                explicitIdentity.AoContrast = 1f;
+                explicitIdentity.CavityFloor = 0f;
+                explicitIdentity.NormalDetailReduction = 0f;
+                explicitIdentity.RoughnessSimplify = 0f;
+
+                using (var pipeline = new NamerComputePipeline())
+                {
+                    NamerComputeResult pristineRun = pipeline.Process(pristine);
+                    Color32[] pristineBase;
+                    Color32[] pristineSurface;
+                    try
+                    {
+                        pristineBase = ReadBackColor32(pristineRun.NormalizedBaseColor);
+                        pristineSurface = ReadBackColor32(pristineRun.PackedSurface);
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(pristineRun);
+                    }
+
+                    NamerComputeResult identityRun = pipeline.Process(explicitIdentity);
+                    try
+                    {
+                        Assert.AreEqual(0, CountByteDifferences(pristineBase, ReadBackColor32(identityRun.NormalizedBaseColor)),
+                            "D-07/D-08 identity fields: NormalizedBaseColor must match the pristine-default path byte for byte");
+                        Assert.AreEqual(0, CountByteDifferences(pristineSurface, ReadBackColor32(identityRun.PackedSurface)),
+                            "D-07/D-08 identity fields: PackedSurface must match the pristine-default path byte for byte");
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(identityRun);
+                    }
+                }
+            }
+            finally
+            {
+                Destroy(normalMap, occlusion, baseMap, mesh);
+            }
+
+            yield return null;
+        }
+
+        // --------------------------------------------------------------------
+        // D-08: authored AO honors the strength remap — strength 0 whitens ANY
+        // authored occlusion; strength 0.5 lands halfway to white.
+        // --------------------------------------------------------------------
+
+        [UnityTest]
+        public IEnumerator AuthoredAoRemap_StrengthControlsAuthoredOcclusion()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU authored-AO remap test (D-15).");
+                yield break;
+            }
+
+            Mesh mesh = CreateQuadMesh();
+            Texture2D baseMap = CreateGrainBaseMap();
+            Texture2D occlusion = CreateGrainOcclusion();
+            try
+            {
+                var inspection = BuildInspection(baseMap, mesh, occlusion);
+                inspection.AoStrength = 0f;
+                inspection.AoContrast = 1f;
+
+                using (var pipeline = new NamerComputePipeline())
+                {
+                    NamerComputeResult whitened = pipeline.Process(inspection);
+                    try
+                    {
+                        Color32[] surface = ReadBackColor32(whitened.PackedSurface);
+                        float medianB = MedianOf(surface, kSampleInset, c => c.b / 255f);
+                        Assert.GreaterOrEqual(medianB, 254f / 255f,
+                            "authored AO at strength 0 must collapse to white (D-08)");
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(whitened);
+                    }
+
+                    inspection.AoStrength = 0.5f;
+                    NamerComputeResult halved = pipeline.Process(inspection);
+                    try
+                    {
+                        // Grain center 0.5 -> lerp(1, 0.5, 0.5) = 0.75 -> byte ~191.
+                        Color32[] surface = ReadBackColor32(halved.PackedSurface);
+                        float medianB = MedianOf(surface, kSampleInset, c => c.b / 255f);
+                        Assert.AreEqual(0.75f, medianB, 2f / 255f,
+                            "authored AO at strength 0.5 must land halfway to white (grain median 0.5)");
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(halved);
+                    }
+                }
+            }
+            finally
+            {
+                Destroy(occlusion, baseMap, mesh);
+            }
+
+            yield return null;
+        }
+
+        // --------------------------------------------------------------------
+        // D-08 / STYL-05: the cavity floor clamps the REMAPPED authored AO — with
+        // contrast 2 a floor of 0.25 lifts the crushed floor; floor 0 keeps the crush.
+        // --------------------------------------------------------------------
+
+        [UnityTest]
+        public IEnumerator AuthoredAoRemap_CavityFloorKeepsCavitiesAboveFloor()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU cavity-floor test (D-15).");
+                yield break;
+            }
+
+            Mesh mesh = CreateQuadMesh();
+            Texture2D baseMap = CreateGrainBaseMap();
+            Texture2D occlusion = CreateGrainOcclusion();
+            try
+            {
+                var inspection = BuildInspection(baseMap, mesh, occlusion);
+                inspection.AoStrength = 1f;
+                inspection.AoContrast = 2f;
+
+                using (var pipeline = new NamerComputePipeline())
+                {
+                    inspection.CavityFloor = 0.25f;
+                    NamerComputeResult floored = pipeline.Process(inspection);
+                    Color32[] flooredSurface;
+                    try
+                    {
+                        flooredSurface = ReadBackColor32(floored.PackedSurface);
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(floored);
+                    }
+
+                    inspection.CavityFloor = 0f;
+                    NamerComputeResult unfloored = pipeline.Process(inspection);
+                    try
+                    {
+                        Color32[] unflooredSurface = ReadBackColor32(unfloored.PackedSurface);
+
+                        byte minFloored = MinChannel(flooredSurface, kSampleInset, c => c.b);
+                        Assert.GreaterOrEqual((int)minFloored, Mathf.RoundToInt(0.25f * 255f) - 1,
+                            "cavity floor 0.25 must keep every remapped AO texel at or above the floor (STYL-05)");
+
+                        byte minUnfloored = MinChannel(unflooredSurface, kSampleInset, c => c.b);
+                        Assert.LessOrEqual((int)minUnfloored, 2,
+                            "floor 0 (identity) must keep the contrast crush — texels reach black");
+
+                        for (int i = 0; i < flooredSurface.Length; i++)
+                        {
+                            Assert.GreaterOrEqual((int)flooredSurface[i].b, (int)unflooredSurface[i].b - 1,
+                                "the floor may only LIFT AO bytes, never lower them (texel " + i + ")");
+                        }
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(unfloored);
+                    }
+                }
+            }
+            finally
+            {
+                Destroy(occlusion, baseMap, mesh);
+            }
+
+            yield return null;
+        }
+
+        // --------------------------------------------------------------------
+        // D-07 / STYL-06: roughness simplify is a radius-2 neighborhood mean over
+        // _PackInputs BEFORE the 6-bit quantization — row-alternating smoothness
+        // (period 2, smaller than the 5-tap window) collapses to flat roughness.
+        // --------------------------------------------------------------------
+
+        [UnityTest]
+        public IEnumerator RoughnessSimplify_BoxMeanSmoothsRoughnessBeforeQuantization()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU roughness-simplify test (D-15).");
+                yield break;
+            }
+
+            Mesh mesh = CreateQuadMesh();
+            Texture2D baseMap = CreateGrainBaseMap();
+            Texture2D occlusion = CreateWhiteOcclusion();
+            Texture2D glossMap = CreateRowAlternatingGlossMap();
+            try
+            {
+                var inspection = BuildInspection(baseMap, mesh, occlusion);
+                inspection.MetallicGlossMap = glossMap;
+                inspection.Smoothness = 1f;
+
+                using (var pipeline = new NamerComputePipeline())
+                {
+                    inspection.RoughnessSimplify = 0f;
+                    NamerComputeResult baseline = pipeline.Process(inspection);
+                    Color32[] baselineSurface;
+                    try
+                    {
+                        baselineSurface = ReadBackColor32(baseline.PackedSurface);
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(baseline);
+                    }
+
+                    inspection.RoughnessSimplify = 1f;
+                    NamerComputeResult simplified = pipeline.Process(inspection);
+                    try
+                    {
+                        Color32[] simplifiedSurface = ReadBackColor32(simplified.PackedSurface);
+
+                        float baselineSpread = RowMedianSpread(baselineSurface, RoughnessOf);
+                        float simplifiedSpread = RowMedianSpread(simplifiedSurface, RoughnessOf);
+
+                        Assert.Greater(baselineSpread, 0.05f,
+                            "row-alternating smoothness (period 2) must produce separated row-medians before simplifying");
+                        Assert.Less(simplifiedSpread, 0.02f,
+                            "radius-2 box mean at strength 1 must collapse the row structure (STYL-06)");
+                        Assert.Less(simplifiedSpread, 0.5f * baselineSpread,
+                            "simplify must strictly reduce the row-median spread");
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(simplified);
+                    }
+                }
+            }
+            finally
+            {
+                Destroy(glossMap, occlusion, baseMap, mesh);
+            }
+
+            yield return null;
+        }
+
+        // --------------------------------------------------------------------
+        // D-07 ordering: simplify applies AFTER dip adoption on the Sobel path —
+        // the dipped roughness is pulled toward the neighborhood mean of the
+        // (uniform) scalar, so the Sobel dents vanish at strength 1.
+        // --------------------------------------------------------------------
+
+        [UnityTest]
+        public IEnumerator RoughnessSimplify_AppliesAfterDipAdoption_SobelPath()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU simplify-ordering test (D-15).");
+                yield break;
+            }
+
+            Mesh mesh = CreateQuadMesh();
+            Texture2D baseMap = CreateGrainBaseMap();
+            Texture2D occlusion = CreateWhiteOcclusion();
+            try
+            {
+                var inspection = BuildInspection(baseMap, mesh, occlusion);
+                inspection.DipSource = NamerDipSource.SobelEdge;
+                inspection.RoughnessExtractStrength = DefaultDipDepth;
+
+                using (var pipeline = new NamerComputePipeline())
+                {
+                    inspection.RoughnessSimplify = 0f;
+                    NamerComputeResult dipped = pipeline.Process(inspection);
+                    Color32[] dippedSurface;
+                    try
+                    {
+                        dippedSurface = ReadBackColor32(dipped.PackedSurface);
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(dipped);
+                    }
+
+                    inspection.RoughnessSimplify = 1f;
+                    NamerComputeResult simplified = pipeline.Process(inspection);
+                    try
+                    {
+                        Color32[] simplifiedSurface = ReadBackColor32(simplified.PackedSurface);
+
+                        // Scalar roughness is uniform 1 -> the neighborhood mean is 1 ->
+                        // strength 1 adopts the mean entirely: every texel quantizes to 63.
+                        int dentedBelowSobel = 0;
+                        int simplifiedNotFull = 0;
+                        int sampled = 0;
+                        for (int y = kSampleInset; y < WorkingSize - kSampleInset; y++)
+                        {
+                            for (int x = kSampleInset; x < WorkingSize - kSampleInset; x++)
+                            {
+                                int i = y * WorkingSize + x;
+                                sampled++;
+                                if (RoughnessOf(dippedSurface[i]) < 0.95f)
+                                {
+                                    dentedBelowSobel++;
+                                }
+
+                                if (RoughnessOf(simplifiedSurface[i]) < 1f - 1f / kRoughnessQuantLevels - kHalfEpsilon)
+                                {
+                                    simplifiedNotFull++;
+                                }
+                            }
+                        }
+
+                        Assert.Greater(dentedBelowSobel, sampled / 20,
+                            "the Sobel dip must dent the roughness on the grain base before simplifying");
+                        Assert.AreEqual(0, simplifiedNotFull,
+                            "simplify AFTER dip adoption at strength 1 must pull every texel to the scalar mean (roughness 1 -> alpha 63)");
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(simplified);
+                    }
+                }
+            }
+            finally
+            {
+                Destroy(occlusion, baseMap, mesh);
+            }
+
+            yield return null;
+        }
+
+        // --------------------------------------------------------------------
+        // D-07 / STYL-06: normal flatten lerps every rebuilt normal toward +Z
+        // BEFORE the octahedral encode — at strength 1 every packed RG decodes to
+        // +Z; at strength 0 the tilted grain normals survive untouched.
+        // --------------------------------------------------------------------
+
+        [UnityTest]
+        public IEnumerator NormalFlatten_Full_BlendsAllNormalsTowardPlusZ()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU normal-flatten test (D-15).");
+                yield break;
+            }
+
+            Mesh mesh = CreateQuadMesh();
+            Texture2D baseMap = CreateGrainBaseMap();
+            Texture2D occlusion = CreateWhiteOcclusion();
+            Texture2D normalMap = CreateGrainNormalMap();
+            try
+            {
+                var inspection = BuildInspection(baseMap, mesh, occlusion);
+                inspection.NormalMap = normalMap;
+
+                using (var pipeline = new NamerComputePipeline())
+                {
+                    inspection.NormalDetailReduction = 0f;
+                    NamerComputeResult tilted = pipeline.Process(inspection);
+                    Color32[] tiltedSurface;
+                    try
+                    {
+                        tiltedSurface = ReadBackColor32(tilted.PackedSurface);
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(tilted);
+                    }
+
+                    inspection.NormalDetailReduction = 1f;
+                    NamerComputeResult flattened = pipeline.Process(inspection);
+                    try
+                    {
+                        Color32[] flattenedSurface = ReadBackColor32(flattened.PackedSurface);
+                        float3 up = new float3(0f, 0f, 1f);
+
+                        float minFlattenedDot = 1f;
+                        float medianTiltedDot = MedianOf(tiltedSurface, kSampleInset, c => math.dot(
+                            NamerFormat.OctahedralDecode(new float2(c.r / 255f, c.g / 255f)), up));
+                        for (int i = 0; i < flattenedSurface.Length; i++)
+                        {
+                            float3 decoded = NamerFormat.OctahedralDecode(new float2(
+                                flattenedSurface[i].r / 255f, flattenedSurface[i].g / 255f));
+                            minFlattenedDot = Mathf.Min(minFlattenedDot, math.dot(decoded, up));
+                        }
+
+                        Assert.Less(medianTiltedDot, 0.99f,
+                            "the grain normal fixture must be genuinely tilted before flattening");
+                        Assert.GreaterOrEqual(minFlattenedDot, 1f - kNormalDotTolerance,
+                            "normal flatten at strength 1 must decode every texel to +Z within the oct-quantization slack (STYL-06)");
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(flattened);
+                    }
+                }
+            }
+            finally
+            {
+                Destroy(normalMap, occlusion, baseMap, mesh);
+            }
+
+            yield return null;
+        }
+
+        // --------------------------------------------------------------------
         // Fixture helpers (mirror NamerProjectionAcceptanceTests).
         // --------------------------------------------------------------------
 
@@ -527,6 +987,76 @@ namespace GraffitiEntertainment.Namer.Tests
                 hideFlags = HideFlags.HideAndDontSave,
             };
             texture.SetPixel(0, 0, Color.white);
+            texture.Apply(false, false);
+            return texture;
+        }
+
+        /// <summary>Grayscale hash-grain occlusion (authored _OcclusionMap stand-in):
+        /// texels in [0.25, 0.75], median 0.5 — the D-08 remap oracles are exact.</summary>
+        private static Texture2D CreateGrainOcclusion()
+        {
+            var texture = new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, false, true)
+            {
+                name = "GrainOcclusion",
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+            for (int y = 0; y < WorkingSize; y++)
+            {
+                for (int x = 0; x < WorkingSize; x++)
+                {
+                    float ao = HashNoise(x, y) * kOcclusionGrainAmplitude + kOcclusionGrainCenter;
+                    texture.SetPixel(x, y, new Color(ao, ao, ao, 1f));
+                }
+            }
+
+            texture.Apply(false, false);
+            return texture;
+        }
+
+        /// <summary>Row-alternating metallic/gloss map: .r = 0 (no metallic), .a =
+        /// smoothness center 0.5 (even rows) / 0.75 (odd rows) with hash grain — the
+        /// period-2 structure is smaller than the radius-2 simplify window.</summary>
+        private static Texture2D CreateRowAlternatingGlossMap()
+        {
+            var texture = new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, false, true)
+            {
+                name = "RowAlternatingGloss",
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+            for (int y = 0; y < WorkingSize; y++)
+            {
+                float center = (y % 2 == 0) ? kSmoothnessRowEven : kSmoothnessRowOdd;
+                for (int x = 0; x < WorkingSize; x++)
+                {
+                    float smoothness = center + HashNoise(x, y) * kSmoothnessGrainAmplitude;
+                    texture.SetPixel(x, y, new Color(0f, 0f, 0f, smoothness));
+                }
+            }
+
+            texture.Apply(false, false);
+            return texture;
+        }
+
+        /// <summary>Raw-DirectX-layout grain normals: x/y = 0.5 ± hash grain (signed xy
+        /// spans [-0.8, 0.8]), z is rebuilt by the kernel (never sampled), a = 1
+        /// (the raw-RGB layout flag).</summary>
+        private static Texture2D CreateGrainNormalMap()
+        {
+            var texture = new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, false, true)
+            {
+                name = "GrainNormals",
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+            for (int y = 0; y < WorkingSize; y++)
+            {
+                for (int x = 0; x < WorkingSize; x++)
+                {
+                    float nx = 0.5f + HashNoise(x, y) * kNormalGrainAmplitude;
+                    float ny = 0.5f + HashNoise(y, x) * kNormalGrainAmplitude;
+                    texture.SetPixel(x, y, new Color(nx, ny, 0.5f, 1f));
+                }
+            }
+
             texture.Apply(false, false);
             return texture;
         }
@@ -693,6 +1223,81 @@ namespace GraffitiEntertainment.Namer.Tests
 
             Array.Sort(values);
             return values[values.Length / 2];
+        }
+
+        /// <summary>Median of a selector over the inset interior of a square
+        /// <see cref="Color32"/> readback (edge texels excluded).</summary>
+        private static float MedianOf(Color32[] texels, int inset, Func<Color32, float> selector)
+        {
+            var values = new List<float>();
+            for (int y = inset; y < WorkingSize - inset; y++)
+            {
+                for (int x = inset; x < WorkingSize - inset; x++)
+                {
+                    values.Add(selector(texels[y * WorkingSize + x]));
+                }
+            }
+
+            values.Sort();
+            return values[values.Count / 2];
+        }
+
+        /// <summary>Minimum byte of a selector over the inset interior.</summary>
+        private static byte MinChannel(Color32[] texels, int inset, Func<Color32, byte> selector)
+        {
+            byte min = byte.MaxValue;
+            for (int y = inset; y < WorkingSize - inset; y++)
+            {
+                for (int x = inset; x < WorkingSize - inset; x++)
+                {
+                    byte value = selector(texels[y * WorkingSize + x]);
+                    if (value < min)
+                    {
+                        min = value;
+                    }
+                }
+            }
+
+            return min;
+        }
+
+        /// <summary>Decodes the 6-bit roughness from the packed surface alpha byte
+        /// (Core/NamerFormat NamerPackAlphaBits mirror).</summary>
+        private static float RoughnessOf(Color32 surface)
+        {
+            return (surface.a & kRoughnessAlphaMask) / kRoughnessQuantLevels;
+        }
+
+        /// <summary>Max deviation of per-row medians (inset interior rows) from their
+        /// own median — the spread metric for the roughness-simplify oracle. A radius-2
+        /// box mean cross-cuts period-2 row structure, so the spread collapses.</summary>
+        private static float RowMedianSpread(Color32[] texels, Func<Color32, float> selector)
+        {
+            int inner = WorkingSize - 2 * kSampleInset;
+            var rowMedians = new float[inner];
+            var rowValues = new float[inner];
+            for (int r = 0; r < inner; r++)
+            {
+                int y = kSampleInset + r;
+                for (int x = kSampleInset; x < WorkingSize - kSampleInset; x++)
+                {
+                    rowValues[x - kSampleInset] = selector(texels[y * WorkingSize + x]);
+                }
+
+                Array.Sort(rowValues, 0, inner);
+                rowMedians[r] = rowValues[inner / 2];
+            }
+
+            float[] sorted = (float[])rowMedians.Clone();
+            Array.Sort(sorted);
+            float center = sorted[inner / 2];
+            float spread = 0f;
+            for (int r = 0; r < inner; r++)
+            {
+                spread = Mathf.Max(spread, Mathf.Abs(rowMedians[r] - center));
+            }
+
+            return spread;
         }
 
         private static Color32 ToColor32(Color c)

@@ -45,7 +45,13 @@ float _HasMetallicGlossMap;
 float _HasExtractedRoughness;      // 1 = override the scalar roughness with _RoughnessTex at PACK time (D-01)
 float _RoughnessExtractStrength;   // 04.2 dip-depth taste slider (0 = keep the authored scalar)
 float _RoughnessDipApplied;        // 1 = _RoughnessTex already carries the dip-encoded roughness (04.2 removed-detail transfer, CSRoughnessTransferRemap) -> adopt as-is; 0 = direct mag/p90 (Sobel) -> apply the slider-scaled dip now
+float _RoughnessSimplify;          // 05-03 D-07 bake-side roughness box-mean strength [0,1]; applied in CSSurfacePack AFTER dip adoption, BEFORE 6-bit quantization (STYL-06); 0 = identity
+float _NormalDetailReduction;      // 05-03 D-07 bake-side normal flatten [0,1]; applied in CSOctahedralEncode after Z-rebuild, BEFORE octahedral encode (STYL-06); 0 = identity
 uint2 _Size; // unsigned: compared against SV_DispatchThreadID (uint) in the kernel guards
+
+// Radius-2 neighborhood (5x5) for the D-07 roughness box mean — texel-scale, matching
+// the bilateral radius in NAMERStylize.compute (SCREAMING_CASE per file-scope precedent).
+static const int NAMER_PACK_SIMPLIFY_RADIUS = 2;
 
 [numthreads(8,8,1)]
 void CSNormalize(uint3 id : SV_DispatchThreadID)
@@ -108,6 +114,16 @@ void CSOctahedralEncode(uint3 id : SV_DispatchThreadID)
     float2 signedXY = texel.xy * 2.0 - 1.0;
     texel.z = sqrt(1.0 - saturate(dot(signedXY, signedXY))) * 0.5 + 0.5;
 
+    // D-07 normal flatten (05-03, STYL-06): lerp the rebuilt signed normal toward +Z
+    // BEFORE the octahedral encode, so the packed RG bytes carry the flattened normal.
+    // Never touches _Octahedral.b (AO) — only the normal xyz path above. 0 = identity.
+    if (_NormalDetailReduction > 0.0)
+    {
+        float3 n = float3(signedXY, texel.z * 2.0 - 1.0);
+        n = normalize(lerp(n, float3(0.0, 0.0, 1.0), _NormalDetailReduction));
+        texel.xyz = n * 0.5 + 0.5;
+    }
+
     float2 oct = NamerOctahedralEncode(texel.xyz);
     _Octahedral[id.xy] = float4(oct, _AoIn[id.xy].g, 0.0);
 }
@@ -142,5 +158,33 @@ void CSSurfacePack(uint3 id : SV_DispatchThreadID)
     }
 
     float emissive = _PackInputs[id.xy].z;
+
+    // D-07 roughness simplify (05-03, STYL-06): radius-2 neighborhood mean over
+    // _PackInputs.y (the PRE-quantization roughness), AFTER dip adoption so the
+    // removed-detail signal itself is smoothed, BEFORE NamerPackSurfaceFromOct's
+    // 6-bit quantization. 0 = identity (no extra reads, no behavior change).
+    if (_RoughnessSimplify > 0.0)
+    {
+        float sum = 0.0;
+        float count = 0.0;
+        for (int dy = -NAMER_PACK_SIMPLIFY_RADIUS; dy <= NAMER_PACK_SIMPLIFY_RADIUS; ++dy)
+        {
+            for (int dx = -NAMER_PACK_SIMPLIFY_RADIUS; dx <= NAMER_PACK_SIMPLIFY_RADIUS; ++dx)
+            {
+                int2 p = int2(id.xy) + int2(dx, dy);
+                if (p.x < 0 || p.y < 0 || p.x >= (int)_Size.x || p.y >= (int)_Size.y)
+                {
+                    continue;
+                }
+
+                sum += _PackInputs[p].y;
+                count += 1.0;
+            }
+        }
+
+        float mean = sum / max(count, 1.0);
+        roughness = lerp(roughness, mean, _RoughnessSimplify);
+    }
+
     _SurfaceOut[id.xy] = NamerPackSurfaceFromOct(oct, ao, metallic, emissive, roughness);
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using GraffitiEntertainment.Namer.Core;
 using GraffitiEntertainment.Namer.Editor;
 using NUnit.Framework;
@@ -107,6 +108,18 @@ namespace GraffitiEntertainment.Namer.Tests
         // Grain normal fixture amplitude: signed xy spans [-0.8, 0.8] — genuinely
         // tilted normals (median +Z dot far below 1) that flatten must collapse.
         private const float kNormalGrainAmplitude = 0.4f;
+
+        // 05-03 Task 2 E2E constants. The E2E temp folder holds the source mesh/base/
+        // material/profile assets and the generated output, deleted in finally. The
+        // monochrome reference family is magenta (hue exactly 5/6 — R == B makes the
+        // hue ratio invariant under any per-channel encoding, so the PNG readback hue
+        // is exact), three refs of one hue at varying luma.
+        private const string StyleE2ETempFolder = "Assets/NAMER_Style_E2E_Temp";
+        private const float kMonochromeFamilyHue = 5f / 6f;
+        private const float kE2EHueTolerance = 0.01f;
+        private const float kE2ESaturationFloor = 0.9f;
+        private const float kSmoothStdReductionFactor = 0.75f;
+        private const string kDeadAssetGuid = "deadbeefdeadbeefdeadbeefdeadbeef";
 
         private static bool ComputeAvailable =>
             SystemInfo.supportsComputeShaders && SystemInfo.supportsAsyncGPUReadback;
@@ -860,6 +873,289 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         // --------------------------------------------------------------------
+        // 05-03 Task 2: the mesh-priming predicate (unit, no GPU).
+        // --------------------------------------------------------------------
+
+        [Test]
+        public void StylizationNeedsMesh_OnlyWhenProfileRequestsSmoothing()
+        {
+            Assert.IsFalse(NamerProcessor.StylizationNeedsMesh(null),
+                "no profile must never prime a mesh (byte-identity guard)");
+
+            NamerStyleProfile paletteOnly = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            paletteOnly.Smoothing = 0f;
+            Assert.IsFalse(NamerProcessor.StylizationNeedsMesh(paletteOnly),
+                "Smoothing 0 (palette-only) must not prime a mesh");
+
+            NamerStyleProfile smoothing = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            smoothing.Smoothing = 0.5f;
+            Assert.IsTrue(NamerProcessor.StylizationNeedsMesh(smoothing),
+                "Smoothing > 0 must prime the source mesh for island ids");
+            Destroy(paletteOnly, smoothing);
+        }
+
+        // --------------------------------------------------------------------
+        // 05-03 Task 2 E2E: an attached profile restyles the BAKED assets through
+        // the full NamerProcessor (STYL-05/STYL-06 wire-out). Three same-hue
+        // magenta references (a monochrome family — single hue, varying luma)
+        // extract to chromatic anchors whose hue is exactly 5/6; Replace at
+        // strength 1 must snap the baked base's hue to that anchor hue.
+        // --------------------------------------------------------------------
+
+        [UnityTest]
+        public IEnumerator Process_E2E_AttachedProfile_StylingFlowsIntoBakedAssets()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU styled-bake E2E test (D-15).");
+                yield break;
+            }
+
+            EnsureStyleE2ETempFolder();
+            E2ESettingsSnapshot prefs = CaptureE2ESettings();
+            GameObject gameObject = null;
+            try
+            {
+                Mesh mesh = CreateMeshAsset(StyleE2ETempFolder + "/SourceQuad.asset");
+                Texture2D baseMap = CreateGrainBaseMapAsset(StyleE2ETempFolder + "/SourceBase.png");
+                Material source = CreateE2ESourceMaterial(StyleE2ETempFolder, "SourceMat", baseMap);
+                gameObject = CreateE2ESceneObject(mesh, source);
+
+                NamerStyleProfile profile = CreateExtractedProfileAsset(StyleE2ETempFolder + "/StyleProfile.asset");
+                var settings = NewPinnedE2ESettings(StyleE2ETempFolder + "/Out");
+                settings.StyleProfileGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(profile));
+
+                // Resolution contract (the same composition NamerProcessor uses).
+                NamerStyleProfile resolved = NamerProcessor.ResolveStyleProfile(settings);
+                Assert.AreSame(profile, resolved, "a live GUID must resolve back to the profile asset");
+                Assert.IsNotNull(resolved.PaletteAnchors, "extraction must have produced anchors");
+                Assert.Greater(resolved.Stats.ReferenceCount, 0, "extraction must have counted the references");
+
+                NamerProcessResult result = NamerProcessor.Process(gameObject, settings);
+                Assert.IsNull(result.Error, "styled Process should succeed: " + result.Error);
+                Assert.AreEqual(1, result.GeneratedAssets.Count, "one material set expected");
+
+                NamerGeneratedAsset asset = result.GeneratedAssets[0];
+                Assert.IsTrue(File.Exists(asset.BaseTexturePath), "the styled base PNG must be written: " + asset.BaseTexturePath);
+                Assert.IsTrue(File.Exists(asset.SurfaceTexturePath), "the packed surface PNG must be written: " + asset.SurfaceTexturePath);
+
+                // The dominant chromatic anchor's hue IS the oracle (self-calibrating —
+                // the refs are one hue family, so every anchor hue is exactly 5/6).
+                float anchorHue = DominantAnchorHue(resolved);
+                Assert.AreEqual(kMonochromeFamilyHue, anchorHue, kE2EHueTolerance,
+                    "the magenta-family refs must extract a 5/6-hue dominant anchor");
+
+                Color32[] baked = DecodePng(asset.BaseTexturePath, out int width, out int height);
+                float medianHue = MedianOf(baked, kSampleInset, c => HueOf(c));
+                float medianSaturation = MedianOf(baked, kSampleInset, c => SaturationOf(c));
+
+                Assert.AreEqual(anchorHue, medianHue, kE2EHueTolerance,
+                    "Replace at strength 1: the BAKED base hue must snap to the anchor hue (orange 1/12 is the unstyled control)");
+                Assert.Greater(medianSaturation, kE2ESaturationFloor,
+                    "the baked base saturation must carry the anchor's full saturation");
+            }
+            finally
+            {
+                Destroy(gameObject);
+                RestoreE2ESettings(prefs);
+                AssetDatabase.DeleteAsset(StyleE2ETempFolder);
+            }
+
+            yield return null;
+        }
+
+        // --------------------------------------------------------------------
+        // 05-03 Task 2 identity E2E: empty GUID, dead (deleted-asset) GUID, and an
+        // attached all-identity profile all bake the SAME bytes — the 04.3
+        // baseline (zero stylize dispatches, silent detach, no exception).
+        // --------------------------------------------------------------------
+
+        [UnityTest]
+        public IEnumerator Process_NullOrDeadGuid_ByteIdenticalToIdentityProfile()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU identity E2E test (D-15).");
+                yield break;
+            }
+
+            EnsureStyleE2ETempFolder();
+            E2ESettingsSnapshot prefs = CaptureE2ESettings();
+            GameObject gameObject = null;
+            try
+            {
+                Mesh mesh = CreateMeshAsset(StyleE2ETempFolder + "/SourceQuad.asset");
+                Texture2D baseMap = CreateGrainBaseMapAsset(StyleE2ETempFolder + "/SourceBase.png");
+                Material source = CreateE2ESourceMaterial(StyleE2ETempFolder, "SourceMat", baseMap);
+                gameObject = CreateE2ESceneObject(mesh, source);
+
+                // All-identity attached profile: unextracted (no anchors), strength 0,
+                // smoothing 0 — every new branch is walked but each is identity.
+                NamerStyleProfile identity = ScriptableObject.CreateInstance<NamerStyleProfile>();
+                identity.name = "IdentityProfile";
+                AssetDatabase.CreateAsset(identity, StyleE2ETempFolder + "/IdentityProfile.asset");
+
+                var settings = NewPinnedE2ESettings(StyleE2ETempFolder + "/Out");
+                settings.OverwriteGenerated = true;
+
+                settings.StyleProfileGuid = string.Empty;
+                NamerProcessResult nullGuid = NamerProcessor.Process(gameObject, settings);
+                Assert.IsNull(nullGuid.Error, "null-GUID Process should succeed: " + nullGuid.Error);
+                Color32[] nullGuidBase = DecodePng(nullGuid.GeneratedAssets[0].BaseTexturePath, out int _, out int _);
+                Color32[] nullGuidSurface = DecodePng(nullGuid.GeneratedAssets[0].SurfaceTexturePath, out int _, out int _);
+
+                settings.StyleProfileGuid = kDeadAssetGuid;
+                NamerProcessResult deadGuid = NamerProcessor.Process(gameObject, settings);
+                Assert.IsNull(deadGuid.Error,
+                    "a deleted-asset GUID must silently detach (T-05-11), never error: " + deadGuid.Error);
+                Assert.IsNull(NamerProcessor.ResolveStyleProfile(settings),
+                    "a dead GUID must resolve to a null profile");
+                Color32[] deadGuidBase = DecodePng(deadGuid.GeneratedAssets[0].BaseTexturePath, out int _, out int _);
+                Color32[] deadGuidSurface = DecodePng(deadGuid.GeneratedAssets[0].SurfaceTexturePath, out int _, out int _);
+
+                settings.StyleProfileGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(identity));
+                NamerProcessResult identityProfile = NamerProcessor.Process(gameObject, settings);
+                Assert.IsNull(identityProfile.Error, "identity-profile Process should succeed: " + identityProfile.Error);
+                Color32[] identityBase = DecodePng(identityProfile.GeneratedAssets[0].BaseTexturePath, out int _, out int _);
+                Color32[] identitySurface = DecodePng(identityProfile.GeneratedAssets[0].SurfaceTexturePath, out int _, out int _);
+
+                Assert.AreEqual(0, CountByteDifferences(nullGuidBase, deadGuidBase),
+                    "null GUID and dead GUID must bake byte-identical bases");
+                Assert.AreEqual(0, CountByteDifferences(nullGuidSurface, deadGuidSurface),
+                    "null GUID and dead GUID must bake byte-identical surfaces");
+                Assert.AreEqual(0, CountByteDifferences(nullGuidBase, identityBase),
+                    "an all-identity attached profile must bake the 04.3 baseline base byte for byte");
+                Assert.AreEqual(0, CountByteDifferences(nullGuidSurface, identitySurface),
+                    "an all-identity attached profile must bake the 04.3 baseline surface byte for byte");
+            }
+            finally
+            {
+                Destroy(gameObject);
+                RestoreE2ESettings(prefs);
+                AssetDatabase.DeleteAsset(StyleE2ETempFolder);
+            }
+
+            yield return null;
+        }
+
+        // --------------------------------------------------------------------
+        // 05-03 Task 2 priming E2E: Smoothing > 0 with decomposition OFF primes
+        // the source mesh — the island-gated bilateral runs and measurably
+        // flattens the grain base in the BAKED asset (no priming = skip = the
+        // grain survives untouched).
+        // --------------------------------------------------------------------
+
+        [UnityTest]
+        public IEnumerator Process_ProfileSmoothing_PrimesMeshWithoutDecomposition()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU smoothing-priming E2E test (D-15).");
+                yield break;
+            }
+
+            EnsureStyleE2ETempFolder();
+            E2ESettingsSnapshot prefs = CaptureE2ESettings();
+            GameObject gameObject = null;
+            try
+            {
+                Mesh mesh = CreateMeshAsset(StyleE2ETempFolder + "/SourceQuad.asset");
+                Texture2D baseMap = CreateGrainBaseMapAsset(StyleE2ETempFolder + "/SourceBase.png");
+                Material source = CreateE2ESourceMaterial(StyleE2ETempFolder, "SourceMat", baseMap);
+                gameObject = CreateE2ESceneObject(mesh, source);
+
+                // Smoothing-only profile: unextracted (no palette) so the ONLY effect is
+                // the island-gated bilateral — its variance drop proves the mesh was
+                // primed, split, and rasterized (skip would leave the grain untouched).
+                NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
+                profile.name = "SmoothingProfile";
+                profile.Smoothing = 0.5f;
+                AssetDatabase.CreateAsset(profile, StyleE2ETempFolder + "/SmoothingProfile.asset");
+
+                var settings = NewPinnedE2ESettings(StyleE2ETempFolder + "/Out");
+                settings.OverwriteGenerated = true;
+                settings.StyleProfileGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(profile));
+
+                settings.OverwriteGenerated = false;
+                NamerProcessResult unsmoothed = NamerProcessor.Process(gameObject, settings);
+                Assert.IsNull(unsmoothed.Error, "unsmoothed Process should succeed: " + unsmoothed.Error);
+                Color32[] plain = DecodePng(unsmoothed.GeneratedAssets[0].BaseTexturePath, out int _, out int _);
+
+                settings.OverwriteGenerated = true;
+                NamerProcessResult smoothed = NamerProcessor.Process(gameObject, settings);
+                Assert.IsNull(smoothed.Error, "smoothed Process should succeed: " + smoothed.Error);
+                Color32[] island = DecodePng(smoothed.GeneratedAssets[0].BaseTexturePath, out int _, out int _);
+
+                float plainStd = InteriorLumaStdDev(plain);
+                float islandStd = InteriorLumaStdDev(island);
+                Assert.Greater(plainStd, 0.01f, "the grain base must carry measurable luma variance");
+                Assert.Less(islandStd, kSmoothStdReductionFactor * plainStd,
+                    "Smoothing 0.5 with decomposition OFF must prime the mesh and flatten the grain in the baked base");
+            }
+            finally
+            {
+                Destroy(gameObject);
+                RestoreE2ESettings(prefs);
+                AssetDatabase.DeleteAsset(StyleE2ETempFolder);
+            }
+
+            yield return null;
+        }
+
+        // --------------------------------------------------------------------
+        // 05-03 Task 2 no-mesh fallback: a bare-material selection (no mesh) with
+        // Smoothing > 0 degrades to palette-only — the skip flag is set on the
+        // composed context, palette transfer still styles the bake, no exception.
+        // --------------------------------------------------------------------
+
+        [UnityTest]
+        public IEnumerator Process_BareMaterial_PaletteRunsSmoothingSkips()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU no-mesh fallback E2E test (D-15).");
+                yield break;
+            }
+
+            EnsureStyleE2ETempFolder();
+            E2ESettingsSnapshot prefs = CaptureE2ESettings();
+            try
+            {
+                Texture2D baseMap = CreateGrainBaseMapAsset(StyleE2ETempFolder + "/SourceBase.png");
+                Material source = CreateE2ESourceMaterial(StyleE2ETempFolder, "SourceMat", baseMap);
+
+                NamerStyleProfile profile = CreateExtractedProfileAsset(StyleE2ETempFolder + "/StyleProfile.asset");
+                profile.Smoothing = 0.5f;
+
+                // The composed context for a mesh-less selection: palette available +
+                // strength 1 => Active, but the islands are missing => skip flag set.
+                NamerStyleStylization context = NamerStyleStylization.Create(profile, null);
+                Assert.IsTrue(context.Active, "palette at strength 1 must keep the context active without a mesh");
+                Assert.IsTrue(context.SmoothingSkippedNoMesh,
+                    "Smoothing > 0 without island data must set SmoothingSkippedNoMesh (OQ-3)");
+
+                var settings = NewPinnedE2ESettings(StyleE2ETempFolder + "/Out");
+                settings.StyleProfileGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(profile));
+
+                NamerProcessResult result = NamerProcessor.Process(source, settings);
+                Assert.IsNull(result.Error, "bare-material Process should succeed (palette-only degrade): " + result.Error);
+                Assert.AreEqual(1, result.GeneratedAssets.Count, "one material set expected");
+
+                Color32[] baked = DecodePng(result.GeneratedAssets[0].BaseTexturePath, out int _, out int _);
+                float medianHue = MedianOf(baked, kSampleInset, c => HueOf(c));
+                Assert.AreEqual(DominantAnchorHue(profile), medianHue, kE2EHueTolerance,
+                    "palette transfer must still restyle the bare-material bake to the anchor hue");
+            }
+            finally
+            {
+                RestoreE2ESettings(prefs);
+                AssetDatabase.DeleteAsset(StyleE2ETempFolder);
+            }
+
+            yield return null;
+        }
+
+        // --------------------------------------------------------------------
         // Fixture helpers (mirror NamerProjectionAcceptanceTests).
         // --------------------------------------------------------------------
 
@@ -1059,6 +1355,311 @@ namespace GraffitiEntertainment.Namer.Tests
 
             texture.Apply(false, false);
             return texture;
+        }
+
+        // -- 05-03 Task 2 E2E fixtures (NamerAOBakeTests processor-E2E idiom) ----
+
+        private static void EnsureStyleE2ETempFolder()
+        {
+            if (AssetDatabase.IsValidFolder(StyleE2ETempFolder))
+            {
+                AssetDatabase.DeleteAsset(StyleE2ETempFolder);
+            }
+
+            AssetDatabase.CreateFolder("Assets", "NAMER_Style_E2E_Temp");
+        }
+
+        /// <summary>Quad mesh persisted as an asset so the scene object's renderer
+        /// wears a resolvable sharedMesh (ResolveSourceMesh's scene path).</summary>
+        private static Mesh CreateMeshAsset(string path)
+        {
+            Mesh mesh = CreateQuadMesh();
+            AssetDatabase.CreateAsset(mesh, path);
+            return AssetDatabase.LoadAssetAtPath<Mesh>(path);
+        }
+
+        /// <summary>The grain-orange base as an imported linear PNG asset — the
+        /// processor's source BaseMap (CreateImportedSolidBaseMap idiom).</summary>
+        private static Texture2D CreateGrainBaseMapAsset(string path)
+        {
+            Texture2D source = new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, false, true);
+            for (int y = 0; y < WorkingSize; y++)
+            {
+                for (int x = 0; x < WorkingSize; x++)
+                {
+                    source.SetPixel(x, y, GrainOrange(x, y, WorkingSize));
+                }
+            }
+
+            source.Apply(false, false);
+            File.WriteAllBytes(path, source.EncodeToPNG());
+            Destroy(source);
+            AssetDatabase.ImportAsset(path);
+            TextureImporter importer = (TextureImporter)AssetImporter.GetAtPath(path);
+            importer.sRGBTexture = false;
+            importer.SaveAndReimport();
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+
+        private static Material CreateE2ESourceMaterial(string folder, string name, Texture2D baseMap)
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+            Assert.IsNotNull(shader, "URP Lit shader not found");
+            Material material = new Material(shader) { name = name };
+            material.SetTexture("_BaseMap", baseMap);
+            material.SetFloat("_Metallic", 0f);
+            material.SetFloat("_Smoothness", 0f);
+            AssetDatabase.CreateAsset(material, folder + "/" + name + ".mat");
+            return material;
+        }
+
+        private static GameObject CreateE2ESceneObject(Mesh mesh, Material material)
+        {
+            var go = new GameObject("StyleE2ETarget");
+            MeshFilter filter = go.AddComponent<MeshFilter>();
+            filter.sharedMesh = mesh;
+            MeshRenderer renderer = go.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = material;
+            return go;
+        }
+
+        /// <summary>Extracted profile ASSET via the REAL extractor: three readable
+        /// same-hue magenta refs (monochrome family), extraction applied with the
+        /// editor's exact apply sequence, then strength 1 + Replace mode, saved to
+        /// <paramref name="path"/> so its GUID is resolvable.</summary>
+        private static NamerStyleProfile CreateExtractedProfileAsset(string path)
+        {
+            Texture2D bright = CreateSolidRef("RefMagentaBright", new Color(1f, 0f, 1f, 1f));
+            Texture2D mid = CreateSolidRef("RefMagentaMid", new Color(0.8f, 0f, 0.8f, 1f));
+            Texture2D dark = CreateSolidRef("RefMagentaDark", new Color(0.6f, 0f, 0.6f, 1f));
+            NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            try
+            {
+                profile.References.Add(bright);
+                profile.References.Add(mid);
+                profile.References.Add(dark);
+
+                NamerStyleExtractResult result = NamerStyleExtractor.Extract(profile, shouldCancel: NeverCancel);
+                Assert.IsFalse(result.Cancelled, "headless extraction must not cancel");
+                Assert.IsFalse(result.TooFewReferences, "three refs must satisfy the minimum");
+                Assert.IsTrue(string.IsNullOrEmpty(result.ErrorTextureName), "readable in-memory refs must not error");
+                Assert.IsNotNull(result.Anchors, "three readable refs must extract anchors");
+
+                // The NamerStyleProfileEditor apply sequence (05-01), verbatim.
+                profile.PaletteAnchors.Clear();
+                for (int i = 0; i < result.Anchors.Length; i++)
+                {
+                    profile.PaletteAnchors.Add(result.Anchors[i]);
+                }
+
+                profile.Stats = result.Stats;
+                profile.ReferenceFingerprint = result.Fingerprint;
+                profile.StyleStrength = 1f;
+                profile.Smoothing = 0f;
+                profile.HueMode = kHueModeReplace;
+
+                // The refs are in-memory (non-persistent) — Stats.ReferenceCount is
+                // already counted, so drop them before serialization instead of
+                // writing broken references into the asset.
+                profile.References.Clear();
+
+                AssetDatabase.CreateAsset(profile, path);
+                return profile;
+            }
+            finally
+            {
+                Destroy(bright, mid, dark);
+            }
+        }
+
+        private static Texture2D CreateSolidRef(string name, Color color)
+        {
+            var texture = new Texture2D(16, 16, TextureFormat.RGBA32, false, true)
+            {
+                name = name,
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+            Color[] pixels = new Color[16 * 16];
+            for (int i = 0; i < pixels.Length; i++)
+            {
+                pixels[i] = color;
+            }
+
+            texture.SetPixels(pixels);
+            texture.Apply(false, false);
+            return texture;
+        }
+
+        private static bool NeverCancel()
+        {
+            return false;
+        }
+
+        /// <summary>The dominant chromatic anchor's hue (max weight, sat above the
+        /// achromatic cutoff) — the extraction-derived oracle hue.</summary>
+        private static float DominantAnchorHue(NamerStyleProfile profile)
+        {
+            bool found = false;
+            NamerStyleAnchor dominant = default;
+            foreach (NamerStyleAnchor anchor in profile.PaletteAnchors)
+            {
+                if (anchor.Saturation >= 0.15f && (!found || anchor.Weight > dominant.Weight))
+                {
+                    found = true;
+                    dominant = anchor;
+                }
+            }
+
+            Assert.IsTrue(found, "the magenta-family refs must extract at least one chromatic anchor");
+            return dominant.Hue;
+        }
+
+        private static Color32[] DecodePng(string path, out int width, out int height)
+        {
+            byte[] bytes = File.ReadAllBytes(path);
+            Texture2D texture = new Texture2D(2, 2, TextureFormat.RGBA32, false, true);
+            bool loaded = ImageConversion.LoadImage(texture, bytes);
+            Assert.IsTrue(loaded, "failed to decode PNG at " + path);
+            Color32[] pixels = texture.GetPixels32();
+            width = texture.width;
+            height = texture.height;
+            Destroy(texture);
+            return pixels;
+        }
+
+        /// <summary>Standard deviation of Rec.709 luma over the inset interior — the
+        /// smoothing-flattens-grain metric for the priming E2E.</summary>
+        private static float InteriorLumaStdDev(Color32[] texels)
+        {
+            double sum = 0;
+            double sumSquares = 0;
+            long count = 0;
+            for (int y = kSampleInset; y < WorkingSize - kSampleInset; y++)
+            {
+                for (int x = kSampleInset; x < WorkingSize - kSampleInset; x++)
+                {
+                    float luma = LumaOf(texels[y * WorkingSize + x]);
+                    sum += luma;
+                    sumSquares += (double)luma * luma;
+                    count++;
+                }
+            }
+
+            Assert.Greater(count, 0, "the interior sample region must be non-empty");
+            double mean = sum / count;
+            return (float)Math.Sqrt(sumSquares / count - mean * mean);
+        }
+
+        /// <summary>Pins every outcome-relevant setting (Pitfall 6): the E2E writes
+        /// these EditorPrefs-backed keys, so they are explicitly identity/default here
+        /// and snapshot-restored in the test's finally.</summary>
+        private static NamerProcessorSettings NewPinnedE2ESettings(string destination)
+        {
+            return new NamerProcessorSettings
+            {
+                Destination = destination,
+                DecompositionEnabled = false,
+                AoStageEnabled = false,
+                RoughnessStageEnabled = false,
+                MetallicContributionEnabled = false,
+                EmissiveContributionEnabled = false,
+                AoStrength = 1f,
+                AoContrast = 1f,
+                AoBlurRadius = 0f,
+            };
+        }
+
+        // -- E2E EditorPrefs isolation (the keys NewPinnedE2ESettings writes) ----
+
+        private sealed class E2ESettingsSnapshot
+        {
+            public string Destination;
+            public string StyleProfileGuid;
+            public bool DecompositionEnabled;
+            public bool AoStageEnabled;
+            public bool RoughnessStageEnabled;
+            public bool MetallicContributionEnabled;
+            public bool EmissiveContributionEnabled;
+            public bool OverwriteGenerated;
+            public float AoStrength;
+            public float AoContrast;
+            public float AoBlurRadius;
+            public bool HadDestination;
+            public bool HadStyleProfileGuid;
+            public bool HadDecompositionEnabled;
+            public bool HadAoStageEnabled;
+            public bool HadRoughnessStageEnabled;
+            public bool HadMetallicContributionEnabled;
+            public bool HadEmissiveContributionEnabled;
+            public bool HadOverwriteGenerated;
+            public bool HadAoStrength;
+            public bool HadAoContrast;
+            public bool HadAoBlurRadius;
+        }
+
+        private static E2ESettingsSnapshot CaptureE2ESettings()
+        {
+            return new E2ESettingsSnapshot
+            {
+                Destination = EditorPrefs.GetString("NamerProcessor.Destination", string.Empty),
+                StyleProfileGuid = EditorPrefs.GetString("NamerProcessor.StyleProfileGuid", string.Empty),
+                DecompositionEnabled = EditorPrefs.GetBool("NamerProcessor.DecompositionEnabled", false),
+                AoStageEnabled = EditorPrefs.GetBool("NamerProcessor.AoStageEnabled", true),
+                RoughnessStageEnabled = EditorPrefs.GetBool("NamerProcessor.RoughnessStageEnabled", true),
+                MetallicContributionEnabled = EditorPrefs.GetBool("NamerProcessor.MetallicContributionEnabled", true),
+                EmissiveContributionEnabled = EditorPrefs.GetBool("NamerProcessor.EmissiveContributionEnabled", true),
+                OverwriteGenerated = EditorPrefs.GetBool("NamerProcessor.OverwriteGenerated", false),
+                AoStrength = EditorPrefs.GetFloat("NamerProcessor.AoStrength", 1f),
+                AoContrast = EditorPrefs.GetFloat("NamerProcessor.AoContrast", 1f),
+                AoBlurRadius = EditorPrefs.GetFloat("NamerProcessor.AoBlurRadius", 0f),
+                HadDestination = EditorPrefs.HasKey("NamerProcessor.Destination"),
+                HadStyleProfileGuid = EditorPrefs.HasKey("NamerProcessor.StyleProfileGuid"),
+                HadDecompositionEnabled = EditorPrefs.HasKey("NamerProcessor.DecompositionEnabled"),
+                HadAoStageEnabled = EditorPrefs.HasKey("NamerProcessor.AoStageEnabled"),
+                HadRoughnessStageEnabled = EditorPrefs.HasKey("NamerProcessor.RoughnessStageEnabled"),
+                HadMetallicContributionEnabled = EditorPrefs.HasKey("NamerProcessor.MetallicContributionEnabled"),
+                HadEmissiveContributionEnabled = EditorPrefs.HasKey("NamerProcessor.EmissiveContributionEnabled"),
+                HadOverwriteGenerated = EditorPrefs.HasKey("NamerProcessor.OverwriteGenerated"),
+                HadAoStrength = EditorPrefs.HasKey("NamerProcessor.AoStrength"),
+                HadAoContrast = EditorPrefs.HasKey("NamerProcessor.AoContrast"),
+                HadAoBlurRadius = EditorPrefs.HasKey("NamerProcessor.AoBlurRadius"),
+            };
+        }
+
+        private static void RestoreE2ESettings(E2ESettingsSnapshot snapshot)
+        {
+            if (snapshot.HadDestination) { EditorPrefs.SetString("NamerProcessor.Destination", snapshot.Destination); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.Destination"); }
+
+            if (snapshot.HadStyleProfileGuid) { EditorPrefs.SetString("NamerProcessor.StyleProfileGuid", snapshot.StyleProfileGuid); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.StyleProfileGuid"); }
+
+            if (snapshot.HadDecompositionEnabled) { EditorPrefs.SetBool("NamerProcessor.DecompositionEnabled", snapshot.DecompositionEnabled); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.DecompositionEnabled"); }
+
+            if (snapshot.HadAoStageEnabled) { EditorPrefs.SetBool("NamerProcessor.AoStageEnabled", snapshot.AoStageEnabled); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.AoStageEnabled"); }
+
+            if (snapshot.HadRoughnessStageEnabled) { EditorPrefs.SetBool("NamerProcessor.RoughnessStageEnabled", snapshot.RoughnessStageEnabled); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.RoughnessStageEnabled"); }
+
+            if (snapshot.HadMetallicContributionEnabled) { EditorPrefs.SetBool("NamerProcessor.MetallicContributionEnabled", snapshot.MetallicContributionEnabled); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.MetallicContributionEnabled"); }
+
+            if (snapshot.HadEmissiveContributionEnabled) { EditorPrefs.SetBool("NamerProcessor.EmissiveContributionEnabled", snapshot.EmissiveContributionEnabled); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.EmissiveContributionEnabled"); }
+
+            if (snapshot.HadOverwriteGenerated) { EditorPrefs.SetBool("NamerProcessor.OverwriteGenerated", snapshot.OverwriteGenerated); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.OverwriteGenerated"); }
+
+            if (snapshot.HadAoStrength) { EditorPrefs.SetFloat("NamerProcessor.AoStrength", snapshot.AoStrength); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.AoStrength"); }
+
+            if (snapshot.HadAoContrast) { EditorPrefs.SetFloat("NamerProcessor.AoContrast", snapshot.AoContrast); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.AoContrast"); }
+
+            if (snapshot.HadAoBlurRadius) { EditorPrefs.SetFloat("NamerProcessor.AoBlurRadius", snapshot.AoBlurRadius); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.AoBlurRadius"); }
         }
 
         private static Mesh CreateQuadMesh()

@@ -99,12 +99,20 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 AssetGenerator.PreflightTargets(model, settings, destinationFolder, settings.DecompositionEnabled);
 
+                // 05-03: resolve the attached style profile ONCE (empty GUID -> null, the
+                // byte-identical 04.3 baseline; deleted asset -> silent detach, T-05-11).
+                // Stylization with Smoothing > 0 needs the source mesh for island ids, so
+                // it joins the priming disjunct below (palette-only profiles never resolve
+                // a mesh).
+                NamerStyleProfile styleProfile = ResolveStyleProfile(settings);
+
                 // D-05 decomposition needs the source mesh the inspection wears. Resolve it
                 // once from the selection (a scene object, prefab, or model) so the split and
                 // the later renderer sharedMesh swap agree on the same source. The 2026-09-21
                 // AO contract follow-up also resolves it for the AO stage alone: the bake is
                 // the synthetic source whenever the stage is on, decomposition or not.
-                Mesh decomposeSourceMesh = (settings.DecompositionEnabled || settings.AoStageEnabled) ? ResolveSourceMesh(selection) : null;
+                Mesh decomposeSourceMesh = (settings.DecompositionEnabled || settings.AoStageEnabled
+                    || StylizationNeedsMesh(styleProfile)) ? ResolveSourceMesh(selection) : null;
 
                 // CR-01: one vertex-color stream per source mesh cannot carry N materials'
                 // fits simultaneously, and a multi-mesh selection resolves only its FIRST
@@ -130,6 +138,16 @@ namespace GraffitiEntertainment.Namer.Editor
                 pipeline = new NamerComputePipeline();
                 AssetGenerator generator = new AssetGenerator();
 
+                // 05-03: when stylization needs a mesh but decomposition does NOT run,
+                // split the (already CR-01-vetted) source mesh ONCE for the whole batch —
+                // island ids are mesh-intrinsic, so every material shares the split. When
+                // decomposition runs, the per-material fitSplit below is reused instead.
+                NamerSplitResult stylizeSplitShared = styleProfile != null
+                    && !settings.DecompositionEnabled
+                    && decomposeSourceMesh != null
+                    ? MeshVertexSplitter.Split(decomposeSourceMesh)
+                    : null;
+
                 foreach (NamerMaterialInspection inspection in model.Materials)
                 {
                     // 2026-09-21 contract: the AO stage checkbox gates SYNTHESIS only
@@ -144,6 +162,20 @@ namespace GraffitiEntertainment.Namer.Editor
                     inspection.AoContrast = settings.AoContrast;
                     inspection.RoughnessExtractStrength = settings.RoughnessStageEnabled ? settings.RoughnessExtractStrength : 0f;
                     inspection.DipSource = (NamerDipSource)settings.DipSource;
+
+                    // 05-03 D-07/D-08: plumb the attached profile's bake-side controls into
+                    // the inspection (clamped + NaN-guarded here — ClampToCaps sanitizes
+                    // anchors, not sliders, T-05-12 mitigation). No profile = identity 0 on
+                    // all three = the byte-identical 04.3 baseline.
+                    inspection.CavityFloor = styleProfile != null
+                        ? SanitizedClamp(styleProfile.CavityFloor, 0f, kMaxCavityFloor)
+                        : 0f;
+                    inspection.NormalDetailReduction = styleProfile != null
+                        ? SanitizedClamp01(styleProfile.NormalDetailReduction)
+                        : 0f;
+                    inspection.RoughnessSimplify = styleProfile != null
+                        ? SanitizedClamp01(styleProfile.RoughnessSimplify)
+                        : 0f;
 
                     // ResolveSourceMesh ordering: attach the source mesh BEFORE Process so the
                     // projection/transfer and the AO three-way gate can reference it. (The
@@ -184,9 +216,22 @@ namespace GraffitiEntertainment.Namer.Editor
                         }
                     }
 
+                    // 05-03: compose the stylization context (05-02 NamerStyleStylization).
+                    // The split is the decomposition fitSplit when decomposition runs, the
+                    // pre-split shared mesh otherwise; null mesh (bare material, CR-01
+                    // guard, or unresolvable selection) degrades to palette-only with
+                    // SmoothingSkippedNoMesh set. profile == null keeps stylization null —
+                    // zero stylize dispatches, byte-identical.
+                    NamerStyleStylization stylization = null;
+                    if (styleProfile != null)
+                    {
+                        stylization = NamerStyleStylization.Create(
+                            styleProfile, fitSplit != null ? fitSplit : stylizeSplitShared);
+                    }
+
                     try
                     {
-                    NamerComputeResult computeResult = pipeline.Process(inspection, projection);
+                    NamerComputeResult computeResult = pipeline.Process(inspection, projection, stylization);
                     try
                     {
                         NamerDecompData decomp = null;
@@ -680,6 +725,59 @@ namespace GraffitiEntertainment.Namer.Editor
 
             string path = AssetDatabase.GetAssetPath(selection);
             return string.IsNullOrEmpty(path) ? null : FindMeshSubAsset(path);
+        }
+
+        // 05-03 D-07/D-08: the profile's CavityFloor slider is authored in [0, 0.5]
+        // (mirrors the NamerStyleProfile slider cap); the plumb clamps rather than
+        // trusting serialized data (T-05-12).
+        private const float kMaxCavityFloor = 0.5f;
+
+        /// <summary>
+        /// Resolves the attached <see cref="NamerStyleProfile"/> from the settings'
+        /// persisted GUID (05-03 W2 bake side). Empty GUID, a deleted/unresolvable asset,
+        /// or a GUID that no longer points at a profile all return null — the silent
+        /// detach (T-05-11) — so Process degrades to the byte-identical 04.3 baseline
+        /// instead of failing.
+        /// </summary>
+        internal static NamerStyleProfile ResolveStyleProfile(NamerProcessorSettings settings)
+        {
+            string guid = settings.StyleProfileGuid;
+            if (string.IsNullOrEmpty(guid))
+            {
+                return null;
+            }
+
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            if (string.IsNullOrEmpty(path))
+            {
+                return null;
+            }
+
+            return AssetDatabase.LoadAssetAtPath<NamerStyleProfile>(path);
+        }
+
+        /// <summary>
+        /// True when the attached profile requests island-gated smoothing and therefore
+        /// needs the source mesh split (05-03): profile != null &amp;&amp; Smoothing &gt; 0.
+        /// A null profile (or palette-only) never primes a mesh — the identity path adds
+        /// zero mesh resolutions.
+        /// </summary>
+        internal static bool StylizationNeedsMesh(NamerStyleProfile profile)
+        {
+            return profile != null && profile.Smoothing > 0f;
+        }
+
+        /// <summary>NaN-guarded clamp: a NaN serialized slider reads as identity 0
+        /// instead of poisoning the kernels (05-03 T-05-12 plumb-side guard).</summary>
+        private static float SanitizedClamp(float value, float min, float max)
+        {
+            return float.IsNaN(value) ? 0f : Mathf.Clamp(value, min, max);
+        }
+
+        /// <summary>NaN-guarded <see cref="Mathf.Clamp01"/> (identity 0 on NaN).</summary>
+        private static float SanitizedClamp01(float value)
+        {
+            return float.IsNaN(value) ? 0f : Mathf.Clamp01(value);
         }
 
         private static Mesh FindMeshInObject(GameObject gameObject)

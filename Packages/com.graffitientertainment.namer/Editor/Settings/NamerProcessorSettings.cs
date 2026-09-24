@@ -37,6 +37,9 @@ namespace GraffitiEntertainment.Namer.Editor
         private const string FoldoutAoKey = "NamerProcessor.FoldoutAo";
         private const string FoldoutDecompositionKey = "NamerProcessor.FoldoutDecomposition";
         private const string FoldoutOutputKey = "NamerProcessor.FoldoutOutput";
+        private const string FoldoutStylizationKey = "NamerProcessor.FoldoutStylization";
+        private const string AfterViewKey = "NamerProcessor.AfterView";
+        private const string StyleProfileGuidKey = "NamerProcessor.StyleProfileGuid";
 
         /// <summary>Generated-output root folder (D-01 default: Assets/NAMERGenerated/).</summary>
         public string Destination
@@ -211,6 +214,29 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             get { return EditorPrefs.GetBool(FoldoutOutputKey, false); }
             set { EditorPrefs.SetBool(FoldoutOutputKey, value); }
+        }
+
+        /// <summary>Stylization foldout open/closed state (05-03 W1; default collapsed).</summary>
+        public bool FoldoutStylization
+        {
+            get { return EditorPrefs.GetBool(FoldoutStylizationKey, false); }
+            set { EditorPrefs.SetBool(FoldoutStylizationKey, value); }
+        }
+
+        /// <summary>Preview After View popup index (05-03 W4; 0 = NAMER, 1 = Stylized NAMER —
+        /// a preview-only lens, NEVER a bake gate; default 0).</summary>
+        public int AfterView
+        {
+            get { return EditorPrefs.GetInt(AfterViewKey, 0); }
+            set { EditorPrefs.SetInt(AfterViewKey, value); }
+        }
+
+        /// <summary>Attached <see cref="NamerStyleProfile"/> asset GUID (05-03 W2; empty =
+        /// no profile — the byte-identical 04.3 baseline path).</summary>
+        public string StyleProfileGuid
+        {
+            get { return EditorPrefs.GetString(StyleProfileGuidKey, string.Empty); }
+            set { EditorPrefs.SetString(StyleProfileGuidKey, value); }
         }
     }
 }

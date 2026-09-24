@@ -143,15 +143,40 @@ Each task was committed atomically:
 - **Verification:** Compile proof green
 - **Committed in:** 8ca8f45
 
+**5. [Rule 2 - Missing Critical] Unity 6 / Metal silently skips dispatches with unbound kernel properties (post-wave gate, 3 fix rounds)**
+- **Found during:** Post-wave live gate round 1 (2026-09-23) — Bilateral trio failed with dst = fresh-RT zeros
+- **Issue:** Unity 6 on Metal SKIPS a dispatch when ANY property a dispatched kernel references is unbound — constants ("requires a Compute ConstantBuffer at index 1 ... Skipping dispatch to avoid crashing", Editor.log) and StructuredBuffers ("Property (_AnchorParams) at kernel index (2) is not set") alike. NamerStylizePipeline.Run bound _StyleStrength/_HueReplaceMode and the _AnchorParams buffer only in the has-anchors branch, so the ALWAYS-DISPATCHED palette kernel's passthrough copy (the write that fills the caller-owned dst on the smoothing-only path) never executed. The bilateral/rasterize kernels ran correctly throughout — only the final copy was skipped, which is why the full-chain alpha test passed while the three no-anchor smoothing tests read zeros. Found in two rounds because the constant-buffer skip and the buffer skip log differently; the second round proved the rule is per-property over the whole argument table
+- **Fix (rounds 1+2):** Every argument of CSPaletteTransfer is set UNCONDITIONALLY — _AnchorCount/_StyleStrength/_HueReplaceMode scalars plus the _AnchorParams StructuredBuffer on every dispatch; only the anchor DATA is conditional, and the no-anchor buffer carries one dummy record (count 0 → 1; zero-length ComputeBuffers are rejected on some backends; the kernel provably never reads it — _AnchorCount == 0 returns before the first access). Full argument-table sweep of all three kernels: rasterize and bilateral bind every property immediately before their only dispatch sites
+- **Files modified:** Editor/Stylize/NamerStylizePipeline.cs
+- **Verification:** Targeted NamerStylizeKernelTests 10/10; full EditMode suite 226/226 twice, identical (wave-2 gate)
+- **Committed in:** 3656d07
+
+**6. [Rule 1 - Bug] Ramp-test fixture clipped in the HSV rebuild (post-wave gate round 1)**
+- **Found during:** Post-wave live gate — Palette_PreserveMidStrength_HueRampedHalfwayToAnchor off by exactly 0.00833
+- **Issue:** With the (0.6, 0.6, 0.4) anchor at strength 0.5, the midpoint hue 0.84167 carries sat 0.8 / luma 0.485, demanding V = 0.485/0.425 = 1.14; saturate() clipped R and B and bent the read-back hue by exactly 1/120 (the reported 0.00833338499 to five digits). The kernel's Preserve ramp (f = strength) was correct — the pre-rebuild outHue matched the oracle exactly
+- **Fix:** Anchor saturation 0.6 → 0.2 (V ≈ 0.85 < 1, no clipping; anchor stays chromatic at 0.2 ≥ the 0.15 cutoff so the hue-match path is unchanged). Assertions untouched
+- **Files modified:** Tests/Editor/NamerStylizeKernelTests.cs
+- **Verification:** Targeted class 10/10
+- **Committed in:** 3656d07
+
+**7. [Rule 1 - Bug] Median-preservation oracle asserted a property the filter does not guarantee (post-wave gate round 3)**
+- **Found during:** Post-wave live gate — grain-strip median drift 0.00146484375 vs a 0.001 bound
+- **Issue:** The observed drift is EXACTLY 3 × 2^-11 — three binary16 steps, one ulp of store-rounding per bilateral pass. Repeated averaging pulls a skewed sample's median toward its mean; the island bilateral (symmetric spatial/range weights) preserves the strip MEAN, not the median. The old assert tested fixture statistics, not filter behavior
+- **Fix:** Replaced (not loosened) with mean preservation, kMeanPreservationTolerance = 0.002 (~4 binary16 steps at luma ~0.5, covering 3 intermediate stores + final store plus the second-order strip-boundary exchange); MAD now centered on the mean; variance-drop assert unchanged
+- **Files modified:** Tests/Editor/NamerStylizeKernelTests.cs
+- **Verification:** Targeted class 10/10; full suite 226/226 ×2 identical
+- **Committed in:** 3656d07
+
 ---
 
-**Total deviations:** 4 auto-fixed (3 Rule 1 bugs, 1 Rule 2 missing critical)
-**Impact on plan:** All fixes were correctness requirements within the plan's own file scope. The 04.2 files carry comment-only edits (zero assertion changes — verified by diff grep). No scope creep; pre-existing dirty files untouched.
+**Total deviations:** 7 (4 auto-fixed during execution, 3 gate findings — all Rule 1/2, all within plan file scope)
+**Impact on plan:** All fixes were correctness requirements within the plan's own file scope. The 04.2 files carry comment-only edits (zero assertion changes — verified by diff grep). No scope creep; pre-existing dirty files untouched. The Metal argument-table rule is a durable project lesson: every property referenced by a dispatched kernel must be bound on every dispatch of that kernel, regardless of branch.
 
 ## Issues Encountered
-- Live editor holds the Library lock (6000.0.82f1), so the EditMode suite defers to the orchestrator's post-wave live regression gate per house precedent (STATE 04.2/05-01). Compile evidence: Roslyn closure proofs green for Editor (26 sources) and Tests.Editor (35 sources) assemblies (GSD-05-02-COMPILE-OK), compiled to REAL assembly names with the fresh Editor dll override; the live editor additionally hot-imported each new file on refresh (ScriptAssemblies regenerated)
+- Live editor holds the Library lock (6000.0.82f1), so the EditMode suite defers to the orchestrator's post-wave live regression gate per house precedent (STATE 04.2/05-01). Compile evidence: Roslyn closure proofs green for Editor (26 sources) and Tests.Editor (35 sources) assemblies (GSD-05-02-COMPILE-OK), compiled to REAL assembly names with the fresh Editor dll override; the live editor additionally hot-imported each new file on refresh (ScriptAssemblies regenerated). GATE RESOLVED: wave-2 live run green — targeted NamerStylizeKernelTests 10/10, full EditMode suite 226/226 pass twice with identical results (determinism bar met)
 - macOS bash 3.2 + set -u rejects empty-array expansion ("unbound variable") — the compile script guards extras with ${ExtraFiles[@]+"${ExtraFiles[@]}"}
 - 04.2 test-file addenda re-flowed three existing comment lines (shown as -// +// pairs in the diff); no code or assertion lines touched
+- Metal shader warnings on NamerStylize ("potentially uninitialized variable" for NamerStylizeHue/NamerStylizeHsvUnit) are conservative flow-analysis notes on static helpers whose every path returns — benign, no action
 
 ## User Setup Required
 None - no external service configuration required.
@@ -162,7 +187,7 @@ None - no external service configuration required.
 
 ## Self-Check: PASSED
 
-All 6 created files exist on disk; all 3 task commits (8ca8f45, 4417d3b, b3afe9b) present in git log.
+All 6 created files exist on disk; all 3 task commits (8ca8f45, 4417d3b, b3afe9b) present in git log. Post-wave gate fix commit 3656d07 present; both files it touched exist on disk.
 
 ---
 *Phase: 05-stylization*

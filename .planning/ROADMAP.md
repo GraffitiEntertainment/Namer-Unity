@@ -16,6 +16,7 @@ The journey moves from the format contract outward. First we lock the NAMER pack
 - [x] **Phase 3: Asset Generation + Editor Workflow + Preview** - Generate NAMER assets non-destructively from an editor window with preview (completed 2026-08-27)
 - [x] **Phase 4: Vertex-Color Decomposition + Residual** - Fit low-frequency color into vertex colors with an adaptive residual texture (gap closure in progress; verification found 3 gaps) (completed 2026-09-01)
 - [x] **Phase 5: Stylization** - Apply reference-image-driven, hue-preserving stylization via NAMERStyleProfile (completed 2026-09-24)
+- [ ] **Phase 5.1: Reference-fitted URP post-processing look** - Fit the reference look's global grade into a generated URP Volume profile after the baked palette mapping (INSERTED)
 
 ## Phase Details
 
@@ -310,6 +311,38 @@ Plans:
 
 - [x] 05-03: AO/normal/roughness controls + stylization pipeline integration
 
+### Phase 5.1: Reference-fitted URP post-processing look (INSERTED)
+
+**Goal**: After the baked per-texel palette mapping (Phase 5 / quick 260924-hk7), fit the reference look's global grade into a generated URP Volume profile — the whole scene shares one coherent runtime look, and nothing tone-mapped is baked into the albedo
+**Mode**: mvp
+**Depends on**: Phase 5
+**Requirements**: STYL-07, STYL-08, STYL-09
+**Success Criteria** (what must be TRUE):
+
+  1. From the style profile's references and the palette-mapped output, the editor deterministically fits URP post parameters — white balance (von Kries), post-exposure (mean-luma EV ratio), contrast (percentile spread), saturation (perceptual chroma ratio), master/RGB color curves (histogram specification) — and writes a generated Volume profile asset artists drop into a scene
+  2. Tonemapping is ACES by default (URP's curve is parameter-free — the fit shapes exposure/contrast/curves around it); bloom threshold is fitted from the reference highlight percentile, intensity defaulted for artist tweaking
+  3. Fitted knobs are named, tweakable Volume parameters (not an opaque LUT) — v1 parametric; the 3D-LUT/ColorLookup route is a plan-time fallback decision only if residual mismatch is visible
+  4. The Processor window previews Stylized NAMER + fitted post look using the same math in-shader, so the look is approved without play mode
+  5. Fit is CPU editor-side, deterministic, no new package dependencies; tests pin the fit math on synthetic source/reference pairs
+
+**Plans**: 4 plans
+
+Plans:
+
+**Wave 1** *(parallel — disjoint files)*
+
+- [ ] 05.1-01-PLAN.md — CPU fit core: NamerStylePostMath (LogC/LMS/ACES port) + NamerStylePostFit estimator suite (von Kries WB solve, EV ratio, LogC contrast, chroma saturation, histogram-spec curves, bloom percentile) + golden/determinism/known-answer pins
+
+- [ ] 05.1-02-PLAN.md — NamerStyleProfile fitted-post block (D-02 source of truth + ClampToCaps) + NamerStyleVolumeWriter (generated VolumeProfile with named overrides, sub-asset wiring, GEN-01/GEN-03 gates) + asset tests
+
+**Wave 2** *(blocked on Waves 1)*
+
+- [ ] 05.1-03-PLAN.md — Fit Look lifecycle: window exemplar seam (forced-stylized recompute + readback + fit), profile inspector P15–P20, W8 attach-state, Process companion-Volume regeneration, lifecycle pins + USER_GUIDE
+
+**Wave 3** *(blocked on Waves 1-2)*
+
+- [ ] 05.1-04-PLAN.md — Stylized + Post preview lens: NamerPostPreview.hlsl LDR-chain twin composed in ForwardLit, W5–W8 lens wiring + post uniform table, pane-level bloom approximation, lens pins + USER_GUIDE
+
 ## Progress
 
 **Execution Order:**
@@ -324,3 +357,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 4. Vertex-Color Decomposition + Residual | 5/5 | Complete   | 2026-09-01 |
 | 04.1. Roughness Extraction + One-Texture (INSERTED) | 7/7 | Complete   | 2026-09-16 |
 | 5. Stylization | 3/3 | Complete   | 2026-09-24 |
+| 5.1. Reference-fitted URP Post-processing Look (INSERTED) | 0/4 | In Progress | — |

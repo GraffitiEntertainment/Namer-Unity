@@ -105,6 +105,19 @@ namespace GraffitiEntertainment.Namer.Tests
         private const float kSmoothnessRowOdd = 0.75f;
         private const float kSmoothnessGrainAmplitude = 0.1f;
 
+        // Roughness-simplify derived oracle (run A pinned this to the digit): a
+        // radius-2 box mean over period-2 rows mixes 3 own-parity + 2 other-parity
+        // taps, so roughness 0.5 / 0.25 filters to 0.40 / 0.35 — the Dirichlet
+        // residual is exactly 1/5 of the 0.25 row spread. The alpha quantizer is
+        // FLOOR to 63 levels (NamerPackAlphaBits), so the row medians floor to
+        // 25/63 and 22/63: spread EXACTLY 3/63. That value pins the radius: a
+        // radius-1 (3x3) window would give 26/21 = 5/63 and radius-3 (7x7)
+        // 24/22 = 2/63 — both outside the half-step tolerance. (Pre-vs-post
+        // quantization ORDER is not separable through this metric under floor
+        // quantization; the Sobel-path test pins the ordering.)
+        private const float kSimplifySpreadSteps = 3f;
+        private const float kHalfQuantStep = 0.5f;
+
         // Grain normal fixture amplitude: signed xy spans [-0.8, 0.8] — genuinely
         // tilted normals (median +Z dot far below 1) that flatten must collapse.
         private const float kNormalGrainAmplitude = 0.4f;
@@ -117,7 +130,10 @@ namespace GraffitiEntertainment.Namer.Tests
         private const string StyleE2ETempFolder = "Assets/NAMER_Style_E2E_Temp";
         private const float kMonochromeFamilyHue = 5f / 6f;
         private const float kE2EHueTolerance = 0.01f;
-        private const float kE2ESaturationFloor = 0.9f;
+        // Derived-bound tolerance (round 2): the saturation oracle is computed from
+        // the tie-winning anchor's sRGB byte round-trip, so it only wobbles by the
+        // +-1-byte PNG quantization of each channel (~1/200 here) — 0.01 covers it.
+        private const float kE2ESaturationTolerance = 0.01f;
         private const float kSmoothStdReductionFactor = 0.75f;
         private const string kDeadAssetGuid = "deadbeefdeadbeefdeadbeefdeadbeef";
 
@@ -645,8 +661,10 @@ namespace GraffitiEntertainment.Namer.Tests
 
         // --------------------------------------------------------------------
         // D-07 / STYL-06: roughness simplify is a radius-2 neighborhood mean over
-        // _PackInputs BEFORE the 6-bit quantization — row-alternating smoothness
-        // (period 2, smaller than the 5-tap window) collapses to flat roughness.
+        // _PackInputs BEFORE the 6-bit quantization. A 5-tap box CANNOT fully
+        // collapse period-2 rows — it attenuates them by the Dirichlet factor
+        // 1/5 — so the oracle is the DERIVED residual spread (3/63 quantized;
+        // see the kSimplifySpreadSteps derivation), not a collapse threshold.
         // --------------------------------------------------------------------
 
         [UnityTest]
@@ -693,8 +711,10 @@ namespace GraffitiEntertainment.Namer.Tests
 
                         Assert.Greater(baselineSpread, 0.05f,
                             "row-alternating smoothness (period 2) must produce separated row-medians before simplifying");
-                        Assert.Less(simplifiedSpread, 0.02f,
-                            "radius-2 box mean at strength 1 must collapse the row structure (STYL-06)");
+                        Assert.AreEqual(kSimplifySpreadSteps / kRoughnessQuantLevels, simplifiedSpread,
+                            kHalfQuantStep / kRoughnessQuantLevels,
+                            "radius-2 box mean at strength 1 must leave the DERIVED 1/5 Dirichlet residual " +
+                            "(row medians floor to 25/63 vs 22/63 = 3/63; 5/63 = radius-1 window, 2/63 = radius-3)");
                         Assert.Less(simplifiedSpread, 0.5f * baselineSpread,
                             "simplify must strictly reduce the row-median spread");
                     }
@@ -951,8 +971,23 @@ namespace GraffitiEntertainment.Namer.Tests
 
                 Assert.AreEqual(anchorHue, medianHue, kE2EHueTolerance,
                     "Replace at strength 1: the BAKED base hue must snap to the anchor hue (orange 1/12 is the unstyled control)");
-                Assert.Greater(medianSaturation, kE2ESaturationFloor,
-                    "the baked base saturation must carry the anchor's full saturation");
+
+                // DERIVED saturation bound (round 2): a 0.9 floor is unattainable. The
+                // extractor's 16-bin/channel histogram reconstructs every occupied bin
+                // at its bin CENTER, so a pure (x, 0, x) magenta ref extracts as
+                // (x', 0.5/16, x') — anchor saturation is structurally < 1. All three
+                // anchors tie at the family hue, so CSPaletteTransfer's strict-less
+                // -than scan picks the FIRST chromatic anchor (slot 0 = the darkest
+                // equal-mass bin, (0.59375, 0.5/16, 0.59375)), and at strength 1 +
+                // Replace NamerStylizeRebuild inverts the extraction exactly: the
+                // styled base IS that uniform color. The base PNG then sRGB-encodes it
+                // to bytes (202, 49, 202), and the byte-space saturation reads
+                // (202 - 49) / 202 = 0.7574 — the sRGB curve amplifies the dark G
+                // (byte ratio 49/202 = 0.243 vs linear 0.03125/0.59375 = 0.0526).
+                // Derive the oracle from the same anchor instead of assuming 1.0.
+                float expectedSaturation = ExpectedByteSaturation(TieWinningChromaticAnchor(resolved).LinearColor);
+                Assert.AreEqual(expectedSaturation, medianSaturation, kE2ESaturationTolerance,
+                    "Replace at strength 1: the baked base must carry the tie-winning anchor's byte-round-tripped saturation");
             }
             finally
             {
@@ -1074,14 +1109,22 @@ namespace GraffitiEntertainment.Namer.Tests
 
                 var settings = NewPinnedE2ESettings(StyleE2ETempFolder + "/Out");
                 settings.OverwriteGenerated = true;
-                settings.StyleProfileGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(profile));
+                string profileGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(profile));
+                settings.StyleProfileGuid = profileGuid;
 
+                // The unsmoothed CONTROL must run with NO profile attached (the empty
+                // GUID is 05-03 Task 2's identity path): with the smoothing profile
+                // attached, the bilateral flattens the "plain" bake too and the
+                // variance oracle loses its baseline (round 2 — both runs came out
+                // byte-identical smoothed output).
+                settings.StyleProfileGuid = string.Empty;
                 settings.OverwriteGenerated = false;
                 NamerProcessResult unsmoothed = NamerProcessor.Process(gameObject, settings);
                 Assert.IsNull(unsmoothed.Error, "unsmoothed Process should succeed: " + unsmoothed.Error);
                 Color32[] plain = DecodePng(unsmoothed.GeneratedAssets[0].BaseTexturePath, out int _, out int _);
 
                 settings.OverwriteGenerated = true;
+                settings.StyleProfileGuid = profileGuid;
                 NamerProcessResult smoothed = NamerProcessor.Process(gameObject, settings);
                 Assert.IsNull(smoothed.Error, "smoothed Process should succeed: " + smoothed.Error);
                 Color32[] island = DecodePng(smoothed.GeneratedAssets[0].BaseTexturePath, out int _, out int _);
@@ -1452,7 +1495,13 @@ namespace GraffitiEntertainment.Namer.Tests
         /// wears a resolvable sharedMesh (ResolveSourceMesh's scene path).</summary>
         private static Mesh CreateMeshAsset(string path)
         {
+            // CreateQuadMesh's HideAndDontSave is for the in-memory fixtures only —
+            // AssetDatabase.CreateAsset on a DontSave-flagged object trips Unity's
+            // saver assert (kAllowDontSaveObjectsToBePersistent). The proven idiom
+            // is NamerProjectionAcceptanceTests.CreateQuadMeshAsset: a flag-free
+            // mesh on the persisted path. Clear the flag before the asset write.
             Mesh mesh = CreateQuadMesh();
+            mesh.hideFlags = HideFlags.None;
             AssetDatabase.CreateAsset(mesh, path);
             return AssetDatabase.LoadAssetAtPath<Mesh>(path);
         }
@@ -1591,6 +1640,58 @@ namespace GraffitiEntertainment.Namer.Tests
 
             Assert.IsTrue(found, "the magenta-family refs must extract at least one chromatic anchor");
             return dominant.Hue;
+        }
+
+        /// <summary>The anchor CSPaletteTransfer actually matches for this fixture:
+        /// every extracted anchor ties at the family hue (R == B refs), and the
+        /// kernel's chromatic scan keeps the FIRST anchor on a tie (strict
+        /// less-than), so the winner is the first anchor above the achromatic
+        /// cutoff (0.15 mirrors NAMER_STYLIZE_ACHROMATIC_CUTOFF; the extractor
+        /// reserves the flagged slots LAST, so chromatic slots come first).</summary>
+        private static NamerStyleAnchor TieWinningChromaticAnchor(NamerStyleProfile profile)
+        {
+            const float kAchromaticCutoff = 0.15f;
+            foreach (NamerStyleAnchor anchor in profile.PaletteAnchors)
+            {
+                if (anchor.Saturation >= kAchromaticCutoff)
+                {
+                    return anchor;
+                }
+            }
+
+            Assert.Fail("the extracted profile must carry at least one chromatic anchor");
+            return default;
+        }
+
+        /// <summary>The saturation the baked-base readback measures for a uniform
+        /// linear color: sRGB-encode each channel exactly as the base PNG does
+        /// (IEC 61966-2-1 piecewise), quantize to bytes, then apply the same
+        /// (max - min) / max the test computes on the decoded Color32.</summary>
+        private static float ExpectedByteSaturation(Color linear)
+        {
+            byte r = SrgbByte(linear.r);
+            byte g = SrgbByte(linear.g);
+            byte b = SrgbByte(linear.b);
+            byte max = Math.Max(r, Math.Max(g, b));
+            byte min = Math.Min(r, Math.Min(g, b));
+            return max > 0 ? (max - min) / (float)max : 0f;
+        }
+
+        /// <summary>Linear-to-sRGB encode (IEC 61966-2-1) rounded to a byte — the
+        /// base PNG save path's exact per-channel quantization.</summary>
+        private static byte SrgbByte(float linear)
+        {
+            const float kLinearCutoff = 0.0031308f;
+            const float kLinearSlope = 12.92f;
+            const float kGammaScale = 1.055f;
+            const float kGammaOffset = 0.055f;
+            const float kGammaExponent = 1f / 2.4f;
+            const float kMaxByte = 255f;
+            float c = Mathf.Clamp01(linear);
+            float encoded = c <= kLinearCutoff
+                ? kLinearSlope * c
+                : kGammaScale * Mathf.Pow(c, kGammaExponent) - kGammaOffset;
+            return (byte)Mathf.RoundToInt(kMaxByte * encoded);
         }
 
         private static Color32[] DecodePng(string path, out int width, out int height)

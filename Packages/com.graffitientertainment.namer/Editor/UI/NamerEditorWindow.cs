@@ -108,6 +108,8 @@ namespace GraffitiEntertainment.Namer.Editor
         private Mesh _previewWireSource;
         private Mesh _previewWireMesh;
 
+        // Explicit user pick: asset selections survive domain reload; scene refs cannot (accepted EditorWindow serialization limitation).
+        [SerializeField]
         private UnityEngine.Object _selection;
         private NamerSourceModel _model;
         private Mesh _previewMesh;
@@ -213,17 +215,23 @@ namespace GraffitiEntertainment.Namer.Editor
             _preview = new NamerPreviewRenderer();
 
             EditorApplication.update += Tick;
-            Selection.selectionChanged += OnSelectionChanged;
             NamerStyleProfile.Changed += OnProfileChanged;
 
-            _selection = ResolveSelection();
+            // Seed-only-when-null: a fresh window opens on the current editor pick,
+            // but a persisted pick (domain reload) is never clobbered. Unity's
+            // overloaded null-comparison makes a destroyed/stale serialized
+            // reference read as null, so the guard re-seeds in that case too.
+            if (_selection == null)
+            {
+                _selection = ResolveSelection();
+            }
+
             RebuildInspection();
         }
 
         private void OnDisable()
         {
             EditorApplication.update -= Tick;
-            Selection.selectionChanged -= OnSelectionChanged;
             NamerStyleProfile.Changed -= OnProfileChanged;
 
             ReleaseLiveResult();
@@ -276,12 +284,6 @@ namespace GraffitiEntertainment.Namer.Editor
         private static UnityEngine.Object ResolveSelection()
         {
             return Selection.activeObject != null ? Selection.activeObject : Selection.activeGameObject;
-        }
-
-        private void OnSelectionChanged()
-        {
-            _selection = ResolveSelection();
-            RebuildInspection();
         }
 
         /// <summary>
@@ -1003,17 +1005,23 @@ namespace GraffitiEntertainment.Namer.Editor
                 return;
             }
 
-            if (_selection == null)
+            EditorGUI.BeginDisabledGroup(_busy);
+            UnityEngine.Object newSelection = EditorGUILayout.ObjectField(
+                new GUIContent(
+                    "Source",
+                    "The object to process. This pick is explicit — it does NOT follow the editor selection; "
+                        + "clicking other items or empty space leaves it unchanged. Assign a GameObject, prefab, "
+                        + "model, material, or folder to rebuild the inspection immediately."),
+                _selection,
+                typeof(UnityEngine.Object),
+                true);
+            if (newSelection != _selection)
             {
-                EditorGUILayout.LabelField("No source selected", EditorStyles.largeLabel);
-                EditorGUILayout.LabelField(
-                    "Select a GameObject, prefab, model, material, or folder in the Project or Hierarchy window, then press Process with NAMER.",
-                    EditorStyles.label);
-                EditorGUILayout.Space();
-                return;
+                _selection = newSelection;
+                RebuildInspection();
             }
 
-            EditorGUILayout.LabelField(_selection.name + " (" + _selection.GetType().Name + ")", EditorStyles.label);
+            EditorGUI.EndDisabledGroup();
 
             if (_model != null && _model.Materials.Count == 0)
             {

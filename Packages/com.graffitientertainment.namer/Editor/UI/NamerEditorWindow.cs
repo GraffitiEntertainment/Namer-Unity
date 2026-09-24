@@ -135,6 +135,12 @@ namespace GraffitiEntertainment.Namer.Editor
         private Mesh _previewWireSource;
         private Mesh _previewWireMesh;
 
+        // Embedded inspector for the attached style profile. Always fully qualified:
+        // inside namespace GraffitiEntertainment.Namer.Editor the simple name 'Editor'
+        // resolves to the NAMESPACE segment, not the UnityEditor.Editor type (same
+        // gotcha as the NamerStyleProfileEditor base-class declaration).
+        private UnityEditor.Editor _profileEditor;
+
         // Explicit user pick: asset selections survive domain reload; scene refs cannot (accepted EditorWindow serialization limitation).
         [SerializeField]
         private UnityEngine.Object _selection;
@@ -286,6 +292,12 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 DestroyImmediate(_channelViewMaterial);
                 _channelViewMaterial = null;
+            }
+
+            if (_profileEditor != null)
+            {
+                DestroyImmediate(_profileEditor);
+                _profileEditor = null;
             }
 
             if (_wireMaterial != null)
@@ -1770,6 +1782,13 @@ namespace GraffitiEntertainment.Namer.Editor
                 _settings.StyleProfileGuid = newProfile != null
                     ? AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(newProfile))
                     : string.Empty;
+                if (newProfile == null && _profileEditor != null)
+                {
+                    // Detached: drop the embedded inspector immediately (no target to draw).
+                    DestroyImmediate(_profileEditor);
+                    _profileEditor = null;
+                }
+
                 attached = newProfile;
                 _afterPanelState.MarkTweaking();
                 MarkDirty();
@@ -1785,6 +1804,13 @@ namespace GraffitiEntertainment.Namer.Editor
             if (attached != null)
             {
                 EditorGUILayout.LabelField(DescribeProfileState(attached), EditorStyles.miniLabel);
+
+                // Embedded profile editor: the profile's full editing UI (reference
+                // slots, +/– footer, Extract, sliders, Statistics, Advanced) drawn in
+                // place — the artist never leaves the window. Value edits raise
+                // NamerStyleProfile.Changed -> OnProfileChanged -> the standard
+                // debounced preview recompute; no new wiring.
+                EnsureProfileEditor(attached)?.OnInspectorGUI();
             }
 
             if (_stylizeSmoothingSkipped)
@@ -1885,6 +1911,35 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             EditorGUILayout.EndHorizontal();
+        }
+
+        /// <summary>
+        /// Ensures the embedded inspector for the attached style profile exists and
+        /// targets <paramref name="attached"/> — creating or recreating the cached
+        /// <see cref="UnityEditor.Editor"/> for that target via CreateEditor — or returns
+        /// null when no profile is attached. Internal so the headless EditMode test can
+        /// drive the cache contract without an OnGUI pass: creating an editor is safe
+        /// outside OnGUI; only OnInspectorGUI is OnGUI-only. Never duplicates the
+        /// NamerStyleProfileEditor drawing code — the embedded editor IS that editor.
+        /// </summary>
+        internal UnityEditor.Editor EnsureProfileEditor(NamerStyleProfile attached)
+        {
+            if (attached == null)
+            {
+                return null;
+            }
+
+            if (_profileEditor == null || _profileEditor.target != attached)
+            {
+                if (_profileEditor != null)
+                {
+                    DestroyImmediate(_profileEditor);
+                }
+
+                _profileEditor = UnityEditor.Editor.CreateEditor(attached);
+            }
+
+            return _profileEditor;
         }
 
         /// <summary>

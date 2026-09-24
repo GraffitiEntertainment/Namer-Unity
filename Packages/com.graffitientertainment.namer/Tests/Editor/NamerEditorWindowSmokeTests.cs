@@ -12,10 +12,11 @@ namespace GraffitiEntertainment.Namer.Tests
     /// and the <see cref="NamerEditorWindow.ShaderInputToggleLabels"/> contents/order (the seven
     /// neutral-default shaded-view toggles, read via reflection). Also pins the persistent
     /// Source pick (a global editor selection change must not clobber the window's explicit
-    /// pick) and the albedo preview caption copy (locked, em-dashes verbatim). The
-    /// render-only claims (window fits a small screen with all sections collapsed; every
-    /// control reachable by scrolling) are manual-verification checklist items, not
-    /// automated tests.
+    /// pick), the albedo preview caption copy (locked, em-dashes verbatim), and the embedded
+    /// profile-inspector cache contract (created for the attached profile, reused, null when
+    /// detached). The render-only claims (window fits a small screen with all sections
+    /// collapsed; every control reachable by scrolling) are manual-verification checklist
+    /// items, not automated tests.
     /// </summary>
     public class NamerEditorWindowSmokeTests
     {
@@ -134,6 +135,42 @@ namespace GraffitiEntertainment.Namer.Tests
             Assert.IsNotNull(field, fieldName + " field must exist on NamerEditorWindow");
             Assert.AreEqual(expected, (string)field.GetValue(null),
                 fieldName + " must equal the locked copy verbatim (em-dashes included)");
+        }
+
+        /// <summary>
+        /// The Stylization section embeds the attached profile's full inspector: the cached
+        /// UnityEditor.Editor is created for the attached profile, reused on the second call,
+        /// and absent when no profile is attached. Drives EnsureProfileEditor via reflection
+        /// with no OnGUI pass (creating an editor is safe outside OnGUI; only OnInspectorGUI
+        /// is OnGUI-only). The profile is an in-memory ScriptableObject — CreateEditor needs
+        /// no asset on disk.
+        /// </summary>
+        [Test]
+        public void ProfileEditor_EmbedsForAttachedProfile()
+        {
+            NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            NamerEditorWindow window = ScriptableObject.CreateInstance<NamerEditorWindow>();
+            try
+            {
+                MethodInfo ensure = typeof(NamerEditorWindow).GetMethod(
+                    "EnsureProfileEditor", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.IsNotNull(ensure, "EnsureProfileEditor method must exist on NamerEditorWindow");
+
+                UnityEditor.Editor embedded = ensure.Invoke(window, new object[] { profile }) as UnityEditor.Editor;
+                Assert.IsNotNull(embedded, "EnsureProfileEditor must create an editor for the attached profile");
+                Assert.AreSame(profile, embedded.target, "The embedded editor must target the attached profile");
+
+                UnityEditor.Editor second = ensure.Invoke(window, new object[] { profile }) as UnityEditor.Editor;
+                Assert.AreSame(embedded, second, "EnsureProfileEditor must reuse the cached editor instance");
+
+                Assert.IsNull(ensure.Invoke(window, new object[] { null }),
+                    "EnsureProfileEditor must return null when no profile is attached");
+            }
+            finally
+            {
+                Object.DestroyImmediate(window);
+                Object.DestroyImmediate(profile);
+            }
         }
 
         // -- EditorPrefs isolation for the foldout keys -----------------------

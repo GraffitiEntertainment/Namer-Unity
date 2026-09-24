@@ -35,6 +35,9 @@ namespace GraffitiEntertainment.Namer.Tests
         private const string RoughnessExtractStrengthKey = "NamerProcessor.RoughnessExtractStrength";
         private const string DipSourceKey = "NamerProcessor.DipSource";
         private const string WriteResidualKey = "NamerProcessor.WriteResidual";
+        private const string StyleProfileGuidKey = "NamerProcessor.StyleProfileGuid";
+        private const string FoldoutStylizationKey = "NamerProcessor.FoldoutStylization";
+        private const string AfterViewKey = "NamerProcessor.AfterView";
 
         private static bool ComputeAvailable =>
             SystemInfo.supportsComputeShaders && SystemInfo.supportsAsyncGPUReadback;
@@ -975,6 +978,12 @@ namespace GraffitiEntertainment.Namer.Tests
             public bool HadRoughnessExtractStrength;
             public bool HadDipSource;
             public bool HadWriteResidual;
+            public string StyleProfileGuid;
+            public bool FoldoutStylization;
+            public int AfterView;
+            public bool HadStyleProfileGuid;
+            public bool HadFoldoutStylization;
+            public bool HadAfterView;
         }
 
         private static PrefsSnapshot CapturePrefs()
@@ -1003,6 +1012,12 @@ namespace GraffitiEntertainment.Namer.Tests
                 HadRoughnessExtractStrength = EditorPrefs.HasKey(RoughnessExtractStrengthKey),
                 HadDipSource = EditorPrefs.HasKey(DipSourceKey),
                 HadWriteResidual = EditorPrefs.HasKey(WriteResidualKey),
+                StyleProfileGuid = EditorPrefs.GetString(StyleProfileGuidKey, string.Empty),
+                FoldoutStylization = EditorPrefs.GetBool(FoldoutStylizationKey, false),
+                AfterView = EditorPrefs.GetInt(AfterViewKey, 0),
+                HadStyleProfileGuid = EditorPrefs.HasKey(StyleProfileGuidKey),
+                HadFoldoutStylization = EditorPrefs.HasKey(FoldoutStylizationKey),
+                HadAfterView = EditorPrefs.HasKey(AfterViewKey),
             };
         }
 
@@ -1105,6 +1120,33 @@ namespace GraffitiEntertainment.Namer.Tests
             else
             {
                 EditorPrefs.DeleteKey(WriteResidualKey);
+            }
+
+            if (snapshot.HadStyleProfileGuid)
+            {
+                EditorPrefs.SetString(StyleProfileGuidKey, snapshot.StyleProfileGuid);
+            }
+            else
+            {
+                EditorPrefs.DeleteKey(StyleProfileGuidKey);
+            }
+
+            if (snapshot.HadFoldoutStylization)
+            {
+                EditorPrefs.SetBool(FoldoutStylizationKey, snapshot.FoldoutStylization);
+            }
+            else
+            {
+                EditorPrefs.DeleteKey(FoldoutStylizationKey);
+            }
+
+            if (snapshot.HadAfterView)
+            {
+                EditorPrefs.SetInt(AfterViewKey, snapshot.AfterView);
+            }
+            else
+            {
+                EditorPrefs.DeleteKey(AfterViewKey);
             }
         }
     }

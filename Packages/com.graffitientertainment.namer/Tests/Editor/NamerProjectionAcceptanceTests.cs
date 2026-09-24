@@ -824,6 +824,12 @@ namespace GraffitiEntertainment.Namer.Tests
             public bool HadRoughnessExtractStrength;
             public bool HadDipSource;
             public bool HadWriteResidual;
+            public string StyleProfileGuid;
+            public bool FoldoutStylization;
+            public int AfterView;
+            public bool HadStyleProfileGuid;
+            public bool HadFoldoutStylization;
+            public bool HadAfterView;
         }
 
         private static PrefsSnapshot CapturePrefs()
@@ -852,6 +858,12 @@ namespace GraffitiEntertainment.Namer.Tests
                 HadRoughnessExtractStrength = EditorPrefs.HasKey("NamerProcessor.RoughnessExtractStrength"),
                 HadDipSource = EditorPrefs.HasKey("NamerProcessor.DipSource"),
                 HadWriteResidual = EditorPrefs.HasKey("NamerProcessor.WriteResidual"),
+                StyleProfileGuid = EditorPrefs.GetString("NamerProcessor.StyleProfileGuid", string.Empty),
+                FoldoutStylization = EditorPrefs.GetBool("NamerProcessor.FoldoutStylization", false),
+                AfterView = EditorPrefs.GetInt("NamerProcessor.AfterView", 0),
+                HadStyleProfileGuid = EditorPrefs.HasKey("NamerProcessor.StyleProfileGuid"),
+                HadFoldoutStylization = EditorPrefs.HasKey("NamerProcessor.FoldoutStylization"),
+                HadAfterView = EditorPrefs.HasKey("NamerProcessor.AfterView"),
             };
         }
 
@@ -889,6 +901,15 @@ namespace GraffitiEntertainment.Namer.Tests
 
             if (snapshot.HadWriteResidual) { EditorPrefs.SetBool("NamerProcessor.WriteResidual", snapshot.WriteResidual); }
             else { EditorPrefs.DeleteKey("NamerProcessor.WriteResidual"); }
+
+            if (snapshot.HadStyleProfileGuid) { EditorPrefs.SetString("NamerProcessor.StyleProfileGuid", snapshot.StyleProfileGuid); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.StyleProfileGuid"); }
+
+            if (snapshot.HadFoldoutStylization) { EditorPrefs.SetBool("NamerProcessor.FoldoutStylization", snapshot.FoldoutStylization); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.FoldoutStylization"); }
+
+            if (snapshot.HadAfterView) { EditorPrefs.SetInt("NamerProcessor.AfterView", snapshot.AfterView); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.AfterView"); }
         }
     }
 }

@@ -164,18 +164,9 @@ namespace GraffitiEntertainment.Namer.Editor
                     inspection.DipSource = (NamerDipSource)settings.DipSource;
 
                     // 05-03 D-07/D-08: plumb the attached profile's bake-side controls into
-                    // the inspection (clamped + NaN-guarded here — ClampToCaps sanitizes
-                    // anchors, not sliders, T-05-12 mitigation). No profile = identity 0 on
-                    // all three = the byte-identical 04.3 baseline.
-                    inspection.CavityFloor = styleProfile != null
-                        ? SanitizedClamp(styleProfile.CavityFloor, 0f, kMaxCavityFloor)
-                        : 0f;
-                    inspection.NormalDetailReduction = styleProfile != null
-                        ? SanitizedClamp01(styleProfile.NormalDetailReduction)
-                        : 0f;
-                    inspection.RoughnessSimplify = styleProfile != null
-                        ? SanitizedClamp01(styleProfile.RoughnessSimplify)
-                        : 0f;
+                    // the inspection (shared with the preview window so the saved bake and
+                    // the stylized preview compose identically — phase boundary invariant).
+                    ApplyStyleControls(inspection, styleProfile);
 
                     // ResolveSourceMesh ordering: attach the source mesh BEFORE Process so the
                     // projection/transfer and the AO three-way gate can reference it. (The
@@ -778,6 +769,21 @@ namespace GraffitiEntertainment.Namer.Editor
         private static float SanitizedClamp01(float value)
         {
             return float.IsNaN(value) ? 0f : Mathf.Clamp01(value);
+        }
+
+        /// <summary>
+        /// Plumbs the attached profile's bake-side controls (CavityFloor /
+        /// NormalDetailReduction / RoughnessSimplify, 05-03 D-07/D-08) onto an
+        /// inspection — clamped and NaN-guarded (ClampToCaps sanitizes anchors, not
+        /// sliders, T-05-12). A null profile writes identity 0 on all three: the
+        /// byte-identical 04.3 baseline. Shared by the bake path and the preview
+        /// window so the saved output equals the stylized preview.
+        /// </summary>
+        internal static void ApplyStyleControls(NamerMaterialInspection inspection, NamerStyleProfile profile)
+        {
+            inspection.CavityFloor = profile != null ? SanitizedClamp(profile.CavityFloor, 0f, kMaxCavityFloor) : 0f;
+            inspection.NormalDetailReduction = profile != null ? SanitizedClamp01(profile.NormalDetailReduction) : 0f;
+            inspection.RoughnessSimplify = profile != null ? SanitizedClamp01(profile.RoughnessSimplify) : 0f;
         }
 
         private static Mesh FindMeshInObject(GameObject gameObject)

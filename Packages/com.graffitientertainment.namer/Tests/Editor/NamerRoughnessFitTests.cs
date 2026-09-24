@@ -601,6 +601,9 @@ namespace GraffitiEntertainment.Namer.Tests
             public float RoughnessExtractStrength;
             public int DipSource;
             public bool WriteResidual;
+            public string StyleProfileGuid;
+            public bool FoldoutStylization;
+            public int AfterView;
             public bool HadDestination;
             public bool HadPrefix;
             public bool HadSuffix;
@@ -612,6 +615,9 @@ namespace GraffitiEntertainment.Namer.Tests
             public bool HadRoughnessExtractStrength;
             public bool HadDipSource;
             public bool HadWriteResidual;
+            public bool HadStyleProfileGuid;
+            public bool HadFoldoutStylization;
+            public bool HadAfterView;
         }
 
         private static PrefsSnapshot CapturePrefs()
@@ -629,6 +635,9 @@ namespace GraffitiEntertainment.Namer.Tests
                 RoughnessExtractStrength = EditorPrefs.GetFloat("NamerProcessor.RoughnessExtractStrength", 1f),
                 DipSource = EditorPrefs.GetInt("NamerProcessor.DipSource", 0),
                 WriteResidual = EditorPrefs.GetBool("NamerProcessor.WriteResidual", false),
+                StyleProfileGuid = EditorPrefs.GetString("NamerProcessor.StyleProfileGuid", string.Empty),
+                FoldoutStylization = EditorPrefs.GetBool("NamerProcessor.FoldoutStylization", false),
+                AfterView = EditorPrefs.GetInt("NamerProcessor.AfterView", 0),
                 HadDestination = EditorPrefs.HasKey("NamerProcessor.Destination"),
                 HadPrefix = EditorPrefs.HasKey("NamerProcessor.Prefix"),
                 HadSuffix = EditorPrefs.HasKey("NamerProcessor.Suffix"),
@@ -640,6 +649,9 @@ namespace GraffitiEntertainment.Namer.Tests
                 HadRoughnessExtractStrength = EditorPrefs.HasKey("NamerProcessor.RoughnessExtractStrength"),
                 HadDipSource = EditorPrefs.HasKey("NamerProcessor.DipSource"),
                 HadWriteResidual = EditorPrefs.HasKey("NamerProcessor.WriteResidual"),
+                HadStyleProfileGuid = EditorPrefs.HasKey("NamerProcessor.StyleProfileGuid"),
+                HadFoldoutStylization = EditorPrefs.HasKey("NamerProcessor.FoldoutStylization"),
+                HadAfterView = EditorPrefs.HasKey("NamerProcessor.AfterView"),
             };
         }
 
@@ -677,6 +689,15 @@ namespace GraffitiEntertainment.Namer.Tests
 
             if (snapshot.HadWriteResidual) { EditorPrefs.SetBool("NamerProcessor.WriteResidual", snapshot.WriteResidual); }
             else { EditorPrefs.DeleteKey("NamerProcessor.WriteResidual"); }
+
+            if (snapshot.HadStyleProfileGuid) { EditorPrefs.SetString("NamerProcessor.StyleProfileGuid", snapshot.StyleProfileGuid); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.StyleProfileGuid"); }
+
+            if (snapshot.HadFoldoutStylization) { EditorPrefs.SetBool("NamerProcessor.FoldoutStylization", snapshot.FoldoutStylization); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.FoldoutStylization"); }
+
+            if (snapshot.HadAfterView) { EditorPrefs.SetInt("NamerProcessor.AfterView", snapshot.AfterView); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.AfterView"); }
         }
     }
 }

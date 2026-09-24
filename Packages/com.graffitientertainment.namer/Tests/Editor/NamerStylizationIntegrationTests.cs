@@ -1156,6 +1156,85 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         // --------------------------------------------------------------------
+        // 05-03 Task 3 — the window's W3/W4 seams: the preview lens composition
+        // (ComposePreviewStylization) and the attach-state copy
+        // (DescribeProfileState). Pure statics — no GPU, no prefs.
+        // --------------------------------------------------------------------
+
+        [Test]
+        public void ComposePreviewStylization_LensGatesPreviewOnly()
+        {
+            NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            try
+            {
+                profile.Smoothing = 0.5f;
+
+                // Lens NAMER (0): no stylization even with a profile — the preview
+                // must stay byte-identical to the 04.3 baseline (scalars zeroed).
+                Assert.IsNull(
+                    NamerEditorWindow.ComposePreviewStylization(profile, NamerEditorWindow.kAfterViewNamer, null),
+                    "After View = NAMER must preview the un-stylized baseline regardless of profile/split");
+
+                // No profile: the popup is disabled — composition must be null even at
+                // the stylized index (no NullReference, no default-asset styling).
+                Assert.IsNull(
+                    NamerEditorWindow.ComposePreviewStylization(null, NamerEditorWindow.kAfterViewStylized, null),
+                    "no attached profile must compose to null even at After View = Stylized NAMER");
+
+                // Lens Stylized NAMER (1) with a profile: a composed context. Without
+                // a split the smoothing branch sets the skip flag — the W1 Info note's
+                // trigger (OQ-3).
+                NamerStyleStylization composed = NamerEditorWindow.ComposePreviewStylization(
+                    profile, NamerEditorWindow.kAfterViewStylized, null);
+                Assert.IsNotNull(composed, "profile + Stylized NAMER must compose a preview context");
+                Assert.IsTrue(composed.SmoothingSkippedNoMesh,
+                    "no split handed to the composition must set SmoothingSkippedNoMesh (OQ-3)");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(profile);
+            }
+        }
+
+        [Test]
+        public void DescribeProfileState_MatchesUiSpecCopy()
+        {
+            NamerStyleProfile notExtracted = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            notExtracted.name = "Ink";
+            NamerStyleProfile extracted = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            try
+            {
+                // IsExtracted reads the fingerprint Extract writes (T-05-11), so a
+                // synthetic non-empty one marks the extracted state; anchors + stats
+                // supply the copy's counts.
+                extracted.name = "Ink";
+                extracted.ReferenceFingerprint = "synthetic-fingerprint";
+                extracted.PaletteAnchors.Add(new NamerStyleAnchor());
+                extracted.PaletteAnchors.Add(new NamerStyleAnchor());
+                extracted.Stats = new NamerStyleStats { ReferenceCount = 3 };
+                Assert.IsTrue(extracted.IsExtracted, "fixture setup: a written fingerprint must mark the profile extracted");
+                Assert.IsFalse(notExtracted.IsExtracted, "fixture setup: a fresh profile must not read as extracted");
+
+                // W3 locked copy (05-UI-SPEC): "" for nothing attached (the popup's
+                // disabled hint carries that state), the honesty line otherwise.
+                Assert.AreEqual(string.Empty, NamerEditorWindow.DescribeProfileState(null));
+
+                Assert.AreEqual(
+                    "Ink — not extracted",
+                    NamerEditorWindow.DescribeProfileState(notExtracted));
+
+                Assert.AreEqual(
+                    "Ink — palette extracted (2 anchors, 3 references)",
+                    NamerEditorWindow.DescribeProfileState(extracted));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(notExtracted);
+                UnityEngine.Object.DestroyImmediate(extracted);
+            }
+        }
+
+        // --------------------------------------------------------------------
         // Fixture helpers (mirror NamerProjectionAcceptanceTests).
         // --------------------------------------------------------------------
 

@@ -83,6 +83,11 @@ namespace GraffitiEntertainment.Namer.Editor
         private const float ChannelPopupSize = 384f;
         private const float kCoverageSliderStep = 0.005f;
 
+        // 05-03 W4 "After View" popup indices (preview-only lens; 0 = the un-stylized
+        // NAMER baseline, the shipped default).
+        internal const int kAfterViewNamer = 0;
+        internal const int kAfterViewStylized = 1;
+
         private NamerProcessorSettings _settings;
         private NamerPreviewRenderer _preview;
         private NamerComputePipeline _pipeline;
@@ -116,6 +121,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private float _aoBlurRadius;
         private float _aoStrength = 1f;
         private float _aoContrast = 1f;
+        private int _afterView;
         private bool _decompositionEnabled;
         private bool _roughnessStageEnabled;
         private bool _aoStageEnabled;
@@ -142,6 +148,10 @@ namespace GraffitiEntertainment.Namer.Editor
         private bool _busy;
         private bool _recomputing;
         private ColorSpace _previewColorSpace = ColorSpace.Uninitialized;
+
+        // 05-03: set by RecomputePreview from the composed stylization context —
+        // drives the Stylization section's Smoothing-skipped Info HelpBox (OQ-3).
+        private bool _stylizeSmoothingSkipped;
 
         private string _status = string.Empty;
         private bool _statusIsError;
@@ -204,6 +214,7 @@ namespace GraffitiEntertainment.Namer.Editor
 
             EditorApplication.update += Tick;
             Selection.selectionChanged += OnSelectionChanged;
+            NamerStyleProfile.Changed += OnProfileChanged;
 
             _selection = ResolveSelection();
             RebuildInspection();
@@ -213,6 +224,7 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             EditorApplication.update -= Tick;
             Selection.selectionChanged -= OnSelectionChanged;
+            NamerStyleProfile.Changed -= OnProfileChanged;
 
             ReleaseLiveResult();
             ReleaseDecompPreview();
@@ -272,6 +284,18 @@ namespace GraffitiEntertainment.Namer.Editor
             RebuildInspection();
         }
 
+        /// <summary>
+        /// 05-03: any profile edit (the inspector's P7-P14 sliders raise
+        /// <see cref="NamerStyleProfile.Changed"/>) re-marks the preview dirty on the
+        /// standard debounce — the profile applies on load AND on change (D-06), with no
+        /// focus change required.
+        /// </summary>
+        private void OnProfileChanged(NamerStyleProfile profile)
+        {
+            _afterPanelState.MarkTweaking();
+            MarkDirty();
+        }
+
         private void RebuildInspection()
         {
             _model = SourceInspector.Inspect(_selection);
@@ -280,6 +304,7 @@ namespace GraffitiEntertainment.Namer.Editor
             _aoBlurRadius = _settings.AoBlurRadius;
             _aoStrength = _settings.AoStrength;
             _aoContrast = _settings.AoContrast;
+            _afterView = _settings.AfterView;
             _decompositionEnabled = _settings.DecompositionEnabled;
             _roughnessStageEnabled = _settings.RoughnessStageEnabled;
             _aoStageEnabled = _settings.AoStageEnabled;
@@ -402,11 +427,20 @@ namespace GraffitiEntertainment.Namer.Editor
                 // will never deliver.
                 bool decompWillRun = _decompositionEnabled && string.IsNullOrEmpty(_decompGuardReason);
 
+                // 05-03 W2/W4: the attached profile + the preview lens (mirrors the
+                // NamerProcessor composition; the lens only gates the PREVIEW — Process
+                // always bakes with the profile).
+                NamerStyleProfile styleProfile = NamerProcessor.ResolveStyleProfile(_settings);
+                bool stylizeLens = styleProfile != null && _afterView == kAfterViewStylized;
+
                 // 2026-09-21 contract follow-up: prime the bake mesh for the AO stage too,
                 // so AO on + decomposition off previews the bake Process actually generates
-                // (not the white fill). The guard reason still suppresses priming — Process
-                // nulls the mesh for CR-01-guarded selections, so the preview must match.
-                bool primeBakeMesh = (decompWillRun || _aoStageEnabled) && string.IsNullOrEmpty(_decompGuardReason);
+                // (not the white fill). 05-03: smoothing > 0 joins the disjunct — island
+                // ids need the split mesh. The guard reason still suppresses priming —
+                // Process nulls the mesh for CR-01-guarded selections, so the preview must
+                // match.
+                bool primeBakeMesh = (decompWillRun || _aoStageEnabled
+                    || NamerProcessor.StylizationNeedsMesh(styleProfile)) && string.IsNullOrEmpty(_decompGuardReason);
 
                 inspection.BakeSourceMesh = primeBakeMesh ? _previewMesh : null;
                 int baseW = inspection.BaseMap != null ? inspection.BaseMap.width : NamerComputePipeline.DefaultBaseResolution;
@@ -417,17 +451,38 @@ namespace GraffitiEntertainment.Namer.Editor
                 // NamerProcessor (its internal CreateProjectionContext) so the preview shows
                 // the projection + transfer Process actually generates. Otherwise pass null
                 // (Sobel fallback, or Phase-3 when decomposition is off / guard-skipped).
+                // 05-03: when decomposition runs, its fitSplit is reused as the stylize
+                // split; when only stylization needs the mesh, split once here (lens only —
+                // no cost when the popup reads NAMER).
                 _projectionContext = null;
-                if (decompWillRun && _previewMesh != null && _dipSource == NamerDipSource.RemovedDetail)
+                NamerSplitResult stylizeSplit = null;
+                if (decompWillRun && _previewMesh != null
+                    && (_dipSource == NamerDipSource.RemovedDetail || stylizeLens))
                 {
                     EnsureDecompPipeline();
                     NamerSplitResult fitSplit = MeshVertexSplitter.Split(_previewMesh);
-                    _projectionContext = NamerProcessor.CreateProjectionContext(
-                        fitSplit, _decompPipeline, baseW, baseH, _errorThreshold, _residualResolution, _writeResidual,
-                        _coverageTarget);
+                    if (_dipSource == NamerDipSource.RemovedDetail)
+                    {
+                        _projectionContext = NamerProcessor.CreateProjectionContext(
+                            fitSplit, _decompPipeline, baseW, baseH, _errorThreshold, _residualResolution, _writeResidual,
+                            _coverageTarget);
+                    }
+
+                    if (stylizeLens)
+                    {
+                        stylizeSplit = fitSplit;
+                    }
+                }
+                else if (stylizeLens && _previewMesh != null)
+                {
+                    stylizeSplit = MeshVertexSplitter.Split(_previewMesh);
                 }
 
-                _liveResult = _pipeline.Process(inspection, _projectionContext);
+                NamerStyleStylization stylization = ComposePreviewStylization(styleProfile, _afterView, stylizeSplit);
+                _stylizeSmoothingSkipped = stylization != null && stylization.SmoothingSkippedNoMesh;
+                NamerProcessor.ApplyStyleControls(inspection, stylization != null ? styleProfile : null);
+
+                _liveResult = _pipeline.Process(inspection, _projectionContext, stylization);
 
                 RenderTexture previewBaseMap = ResolvePreviewBaseMap();
 
@@ -856,6 +911,7 @@ namespace GraffitiEntertainment.Namer.Editor
             DrawPreviewSection(inspection);
             DrawRoughnessExtractionSection(inspection);
             DrawAoSection(inspection);
+            DrawStylizationSection(inspection);
             DrawDecompositionSection(inspection);
             DrawOutputSection();
             EditorGUILayout.EndScrollView();
@@ -993,6 +1049,38 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 return;
             }
+
+            // 05-03 W4: preview-only lens above the Before/After caption row. NEVER
+            // gates Process — the bake always applies the attached profile; only the
+            // preview's computation swaps between the un-stylized and stylized bases.
+            NamerStyleProfile lensProfile = NamerProcessor.ResolveStyleProfile(_settings);
+            EditorGUI.BeginDisabledGroup(_busy || lensProfile == null);
+            int newAfterView = EditorGUILayout.Popup(
+                new GUIContent(
+                    "After View",
+                    "Preview-only lens: NAMER computes the un-stylized packed result; Stylized NAMER "
+                        + "applies the attached Style Profile (palette transfer, smoothing, and the "
+                        + "profile's bake-side controls). Process always bakes with the attached profile "
+                        + "regardless of this popup. Recomputes the preview in memory "
+                        + NamerEditorConstants.DebounceSeconds + " s after the change — nothing is written to disk."),
+                _afterView,
+                new[] { "NAMER", "Stylized NAMER" });
+            if (newAfterView != _afterView)
+            {
+                _afterView = newAfterView;
+                _settings.AfterView = newAfterView;
+                _afterPanelState.MarkTweaking();
+                MarkDirty();
+            }
+
+            if (lensProfile == null)
+            {
+                EditorGUILayout.LabelField(
+                    "Attach a Style Profile to enable the stylized view.",
+                    EditorStyles.miniLabel);
+            }
+
+            EditorGUI.EndDisabledGroup();
 
             if (_previewMesh == null || inspection == null)
             {
@@ -1607,6 +1695,95 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             EditorGUI.EndDisabledGroup();
+        }
+
+        /// <summary>
+        /// 05-03 W1-W3: the Stylization section — profile attach (W2, GUID-persisted),
+        /// the attach-state line (W3, honesty about what the preview uses), and the
+        /// smoothing-skipped Info note (OQ-3). The profile reference itself is the
+        /// opt-in gate (null = stylization stage off — no new Stage &amp; Shader Gates
+        /// toggle), matching the DecompositionEnabled precedent.
+        /// </summary>
+        private void DrawStylizationSection(NamerMaterialInspection inspection)
+        {
+            _settings.FoldoutStylization = EditorGUILayout.Foldout(_settings.FoldoutStylization, "Stylization", true);
+            if (!_settings.FoldoutStylization)
+            {
+                return;
+            }
+
+            EditorGUI.BeginDisabledGroup(_busy);
+
+            NamerStyleProfile attached = NamerProcessor.ResolveStyleProfile(_settings);
+            NamerStyleProfile newProfile = (NamerStyleProfile)EditorGUILayout.ObjectField(
+                new GUIContent(
+                    "Style Profile",
+                    "Attaches a NAMER Style Profile: palette transfer, island-gated smoothing, and the "
+                        + "profile's bake-side controls (cavity floor, normal detail, roughness simplify) "
+                        + "apply to the Stylized NAMER preview and to every Process run. Detach to return to "
+                        + "the un-stylized baseline. Recomputes the preview in memory "
+                        + NamerEditorConstants.DebounceSeconds + " s after the change — nothing is written to disk."),
+                attached,
+                typeof(NamerStyleProfile),
+                false);
+            if (newProfile != attached)
+            {
+                _settings.StyleProfileGuid = newProfile != null
+                    ? AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(newProfile))
+                    : string.Empty;
+                attached = newProfile;
+                _afterPanelState.MarkTweaking();
+                MarkDirty();
+            }
+
+            if (attached != null)
+            {
+                EditorGUILayout.LabelField(DescribeProfileState(attached), EditorStyles.miniLabel);
+            }
+
+            if (_stylizeSmoothingSkipped)
+            {
+                EditorGUILayout.HelpBox(
+                    "Smoothing unavailable — no mesh to derive UV islands",
+                    MessageType.Info);
+            }
+
+            EditorGUI.EndDisabledGroup();
+        }
+
+        /// <summary>
+        /// 05-03 W3 attach-state copy (UI-SPEC locked): "" when nothing is attached
+        /// (the W4 popup's disabled hint carries the null state), otherwise the
+        /// extraction honesty line. Internal for the formatting test.
+        /// </summary>
+        internal static string DescribeProfileState(NamerStyleProfile profile)
+        {
+            if (profile == null)
+            {
+                return string.Empty;
+            }
+
+            return profile.IsExtracted
+                ? profile.name + " — palette extracted (" + profile.PaletteAnchors.Count + " anchors, "
+                    + profile.Stats.ReferenceCount + " references)"
+                : profile.name + " — not extracted";
+        }
+
+        /// <summary>
+        /// 05-03 W4 lens composition: the stylization handed to
+        /// <see cref="NamerComputePipeline.Process"/> for the PREVIEW — null unless a
+        /// profile is attached AND After View reads Stylized NAMER. Internal for the
+        /// lens logic test (the smallest honest seam).
+        /// </summary>
+        internal static NamerStyleStylization ComposePreviewStylization(
+            NamerStyleProfile profile, int afterView, NamerSplitResult split)
+        {
+            if (profile == null || afterView != kAfterViewStylized)
+            {
+                return null;
+            }
+
+            return NamerStyleStylization.Create(profile, split);
         }
 
         private void DrawDecompositionSection(NamerMaterialInspection inspection)

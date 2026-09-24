@@ -18,15 +18,20 @@
 //                            gaussian form). Uncovered centers pass through unchanged;
 //                            the center texel always carries weight 1 so the average is
 //                            well-defined; alpha is preserved (Pitfall 5 discipline).
-//   CSPaletteTransfer     -> hue-anchored palette pull (Pattern 5): decompose each texel
-//                            HSV-style, match the nearest anchor by CIRCULAR hue
-//                            distance (achromatic texels match achromatic anchors by
-//                            luma distance instead — hue of a low-sat texel is noise),
-//                            lerp luma/sat by strength, ramp hue by f = strength
-//                            (Preserve) or f = 1 (Replace, D-05/A5), rebuild + saturate,
-//                            preserve base alpha. With no anchors or zero strength the
-//                            kernel is a byte-exact passthrough copy, so dst is always
-//                            fully written even when only smoothing ran.
+//   CSPaletteTransfer     -> hue-anchored palette RAMP (Pattern 5, quick 260924-hk7
+//                            redesign): decompose each texel HSV-style, match the
+//                            nearest anchor by CIRCULAR hue distance (achromatic
+//                            texels match achromatic anchors by luma distance instead
+//                            — hue of a low-sat texel is noise), ramp hue by f =
+//                            strength (Preserve) or f = 1 (Replace, D-05/A5), boost
+//                            saturation toward the anchor without ever desaturating
+//                            (achromatic texels keep hue AND sat frozen so blacks can
+//                            never be tinted), and pull luma ONLY by the independent
+//                            _ToneMatch control [0,1] (0 preserves source tonality),
+//                            rebuild + saturate, preserve base alpha. With no anchors,
+//                            or zero strength AND zero tone match, the kernel is a
+//                            byte-exact passthrough copy, so dst is always fully
+//                            written even when only smoothing ran.
 //
 // The island id lives in the .r channel of a binary16 R16G16B16A16_SFloat target:
 // integers are exact only through 2048, so the CPU side clamps ids at
@@ -219,6 +224,8 @@ static const float NAMER_STYLIZE_LUMA_SCALE_EPS = 1e-4; // K floor for the luma-
 StructuredBuffer<float4> _AnchorParams;
 uint _AnchorCount;
 float _StyleStrength;
+float _ToneMatch;      // independent tonality control [0,1]: 0 preserves the source's
+                       // own luma, 1 snaps output luma to the matched anchor's luma
 int _HueReplaceMode;   // 0 = Preserve (f = strength), 1 = Replace (f = 1) — D-05/A5
 
 Texture2D<float4> _PaletteSrc;    // last bilateral output (or src when smoothing skipped)
@@ -304,14 +311,19 @@ float3 NamerStylizeRebuild(float h, float s, float luma)
     return saturate(unit * v);
 }
 
-// Hue-anchored palette transfer. Per texel: HSV decompose the linear base; match the
-// nearest anchor — achromatic texels (S < cutoff) match achromatic anchors by LUMA
-// distance with hue untouched, chromatic texels match by circular hue distance; a
-// chromatic texel with no chromatic anchor falls back to the min-distance winner over
-// ALL anchors (never fail). Pull luma/sat by strength; ramp hue by f (Preserve =
-// strength, Replace = 1). Rebuild + saturate, PRESERVE base alpha (Pitfall 5). With
-// zero anchors or zero strength this is a passthrough copy, so the caller-owned dst is
-// always fully written.
+// Hue-anchored palette ramp (quick 260924-hk7 redesign). Per texel: HSV decompose the
+// linear base; match the nearest anchor — achromatic texels (S < cutoff) match
+// achromatic anchors by LUMA distance with hue untouched, chromatic texels match by
+// circular hue distance; a chromatic texel with no chromatic anchor falls back to the
+// min-distance winner over ALL anchors (never fail). Ramp hue by f (Preserve =
+// strength, Replace = 1); pull saturation BOOST-ONLY toward the anchor
+// (max(srcSat, lerp(srcSat, anchorSat, strength)) — never desaturates, so a pastel
+// reference cannot soften a vivid source: acknowledged trade-off); keep ACHROMATIC
+// texels' hue AND saturation frozen (blacks/grays can never be tinted even when the
+// fallback matched them to a chromatic anchor); pull luma by the INDEPENDENT _ToneMatch
+// control only (strength never moves luma). Rebuild + saturate, PRESERVE base alpha
+// (Pitfall 5). With zero anchors, or zero strength AND zero tone match, this is a
+// passthrough copy, so the caller-owned dst is always fully written.
 [numthreads(8,8,1)]
 void CSPaletteTransfer(uint3 id : SV_DispatchThreadID)
 {
@@ -328,7 +340,8 @@ void CSPaletteTransfer(uint3 id : SV_DispatchThreadID)
     }
 
     float strength = saturate(_StyleStrength);
-    if (strength <= 0.0)
+    float toneMatch = saturate(_ToneMatch);
+    if (strength <= 0.0 && toneMatch <= 0.0)
     {
         _PaletteOut[id.xy] = c;
         return;
@@ -401,11 +414,17 @@ void CSPaletteTransfer(uint3 id : SV_DispatchThreadID)
     }
 
     float4 anchor = _AnchorParams[winner];
-    float outLuma = lerp(srcLuma, anchor.z, strength);
-    float outSat = lerp(srcSat, anchor.y, strength);
+    float outLuma = lerp(srcLuma, anchor.z, toneMatch);
+    float outSat = texelAchromatic
+        ? srcSat
+        : max(srcSat, lerp(srcSat, anchor.y, strength));
     float outHue = srcHue;
-    if (!texelAchromatic)
+    if (!texelAchromatic && strength > 0.0)
     {
+        // The strength > 0 gate keeps tone-only dispatches (strength 0, toneMatch > 0)
+        // from snapping hue under Replace (f = 1) — strength 0 means hue AND sat
+        // unchanged in BOTH modes. At strength 0 the sat formula above already
+        // collapses to srcSat; the gate is load-bearing only for hue.
         float f = (_HueReplaceMode == 1) ? 1.0 : strength;
         outHue = NamerStylizeHueLerp(srcHue, anchor.x, f);
     }

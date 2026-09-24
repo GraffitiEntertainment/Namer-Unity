@@ -18,9 +18,10 @@ namespace GraffitiEntertainment.Namer.Editor
     {
         /// <summary>
         /// True when any effect is non-identity (smoothing &gt; 0 with an available mesh,
-        /// or palette pull with strength &gt; 0 and at least one valid anchor). The
-        /// identity case (strength 0 + smoothing 0, or smoothing with no mesh data)
-        /// stays false so the caller skips the stage entirely.
+        /// or palette pull with strength &gt; 0 or tone match &gt; 0 and at least one
+        /// valid anchor). The identity case (strength 0 + tone match 0 + smoothing 0,
+        /// or smoothing with no mesh data) stays false so the caller skips the stage
+        /// entirely.
         /// </summary>
         public bool Active;
 
@@ -35,6 +36,13 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>Style strength [0,1]: 0 = original, 1 = full palette snap (D-04).</summary>
         public float StyleStrength;
+
+        /// <summary>
+        /// Tone match [0,1]: 0 preserves the source's own luma, 1 snaps output luma to
+        /// the matched anchor's luma. Independent of <see cref="StyleStrength"/> (which
+        /// governs hue + vibrance only) — quick 260924-hk7 redesign.
+        /// </summary>
+        public float ToneMatch;
 
         /// <summary>Island-gated bilateral smoothing strength [0,1] (D-03).</summary>
         public float Smoothing;
@@ -90,6 +98,7 @@ namespace GraffitiEntertainment.Namer.Editor
             NamerStyleStylization stylization = new NamerStyleStylization
             {
                 StyleStrength = Mathf.Clamp01(profile.StyleStrength),
+                ToneMatch = Mathf.Clamp01(profile.ToneMatch),
                 Smoothing = Mathf.Clamp01(profile.Smoothing),
                 HueReplaceMode = profile.HueMode,
             };
@@ -128,7 +137,8 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             stylization.Active = (stylization.Smoothing > 0f && stylization.TriIsland != null)
-                || (stylization.PaletteAvailable && stylization.StyleStrength > 0f);
+                || (stylization.PaletteAvailable && stylization.StyleStrength > 0f)
+                || (stylization.PaletteAvailable && stylization.ToneMatch > 0f);
             return stylization;
         }
 
@@ -157,7 +167,7 @@ namespace GraffitiEntertainment.Namer.Editor
     /// iterations = 1 + round(2 * smoothing) (skipped when smoothing &lt;= 0 or
     /// TriIsland is null — OQ-3), (3) palette transfer, which ALWAYS runs so the
     /// caller-owned dst is fully written (it is a byte-exact passthrough copy when
-    /// there are no anchors or zero strength). All targets are linear
+    /// there are no anchors or zero strength + zero tone match). All targets are linear
     /// R16G16B16A16_SFloat — compute never writes sRGB.
     /// </summary>
     public sealed class NamerStylizePipeline : IDisposable
@@ -280,12 +290,14 @@ namespace GraffitiEntertainment.Namer.Editor
                 }
 
                 // Stage 3: palette transfer ALWAYS runs so the caller-owned dst is fully
-                // written — passthrough copy when no anchors / zero strength. Unity 6 on
-                // Metal SKIPS the dispatch when ANY property a dispatched kernel
-                // references is unbound — constants ("requires a Compute ConstantBuffer
-                // ... Skipping dispatch to avoid crashing") and StructuredBuffers
-                // ("Property (_AnchorParams) at kernel index (2) is not set") alike. So
-                // EVERY argument of this kernel is set UNCONDITIONALLY, on the no-anchor
+                // written — passthrough copy when no anchors / zero strength + zero tone
+                // match. Unity 6 on Metal SKIPS the dispatch when ANY property a
+                // dispatched kernel references is unbound — constants ("requires a
+                // Compute ConstantBuffer ... Skipping dispatch to avoid crashing") and
+                // StructuredBuffers ("Property (_AnchorParams) at kernel index (2) is
+                // not set") alike. So EVERY argument of this kernel (_AnchorCount,
+                // _StyleStrength, _ToneMatch, _HueReplaceMode, _AnchorParams,
+                // _PaletteSrc, _PaletteOut) is set UNCONDITIONALLY, on the no-anchor
                 // path too; only the anchor DATA is conditional. The no-anchor buffer
                 // carries a single dummy record the kernel never reads (_AnchorCount is
                 // 0 and it returns before the first _AnchorParams access) because
@@ -297,6 +309,7 @@ namespace GraffitiEntertainment.Namer.Editor
                         : 0;
                 _compute.SetInt("_AnchorCount", anchorCount);
                 _compute.SetFloat("_StyleStrength", Mathf.Clamp01(stylization.StyleStrength));
+                _compute.SetFloat("_ToneMatch", Mathf.Clamp01(stylization.ToneMatch));
                 _compute.SetInt("_HueReplaceMode", stylization.HueReplaceMode);
                 anchorBuffer = CreateBuffer(BuildAnchorParams(stylization, anchorCount), Mathf.Max(anchorCount, 1), sizeof(float) * 4);
                 _compute.SetBuffer(_kernelPaletteTransfer, "_AnchorParams", anchorBuffer);

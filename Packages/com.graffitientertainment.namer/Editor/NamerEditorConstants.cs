@@ -92,6 +92,9 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>Default style strength (D-04; 0 = original, 1 = full palette snap).</summary>
         public const float DefaultStyleStrength = 0.5f;
 
+        /// <summary>Default tone match (quick 260924-hk7; 0 = preserve source tonality — the redesign's safe default, so old profile assets deserialize ToneMatch to 0 automatically).</summary>
+        public const float DefaultToneMatch = 0f;
+
         /// <summary>Default island-gated bilateral smoothing strength (D-03; 0 = off).</summary>
         public const float DefaultSmoothingStrength = 0f;
 

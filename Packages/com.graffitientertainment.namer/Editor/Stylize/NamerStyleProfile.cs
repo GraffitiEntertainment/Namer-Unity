@@ -84,7 +84,7 @@ namespace GraffitiEntertainment.Namer.Editor
 
     /// <summary>
     /// Reusable stylization profile asset (STYL-01). Holds 3-10 reference images with
-    /// per-reference weights, the five stylization sliders, and the Advanced hue mode
+    /// per-reference weights, the six stylization sliders, and the Advanced hue mode
     /// (D-05). The extracted block (anchors, stats, fingerprint) is written ONLY by the
     /// explicit Extract action in <see cref="NamerStyleProfileEditor"/> (D-04: extraction
     /// is never run on the debounced preview path). Attaching the profile in the
@@ -104,6 +104,15 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>Style strength, 0 = original, 1 = full palette snap (D-04, UI-SPEC P7).</summary>
         [Range(0f, 1f)] public float StyleStrength = NamerEditorConstants.DefaultStyleStrength;
+
+        /// <summary>
+        /// Tone match [0,1] (quick 260924-hk7 semantics amendment): 0 preserves the
+        /// source's own tonality; higher values pull brightness toward the reference
+        /// anchors' luma. StyleStrength now governs hue + vibrance only — tonality is
+        /// this slider, independent of strength. Old profile assets deserialize the
+        /// missing field to the default 0 (safe no-migration).
+        /// </summary>
+        [Range(0f, 1f)] public float ToneMatch = NamerEditorConstants.DefaultToneMatch;
 
         /// <summary>Island-gated bilateral smoothing strength (D-03, UI-SPEC P8).</summary>
         [Range(0f, 1f)] public float Smoothing = NamerEditorConstants.DefaultSmoothingStrength;
@@ -206,7 +215,10 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <see cref="References"/> to <see cref="NamerEditorConstants.MaxReferences"/>,
         /// syncs <see cref="ReferenceWeights"/> to the reference count, clamps every
         /// weight to [0,1], and replaces non-numeric weights with the default weight.
-        /// Consumed at Extract time and at Process time (05-03).
+        /// Sanitizes <see cref="ToneMatch"/> the same way (T-hk7-01: NaN falls back to
+        /// the default, then clamps to [0,1] — Mathf.Clamp propagates NaN, and the
+        /// Create()/Run Clamp01 chain would otherwise ship it to the GPU). Consumed at
+        /// Extract time and at Process time (05-03).
         /// </summary>
         public void ClampToCaps()
         {
@@ -235,6 +247,13 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 ReferenceWeights[i] = Mathf.Clamp(weight, 0f, 1f);
             }
+
+            if (float.IsNaN(ToneMatch))
+            {
+                ToneMatch = NamerEditorConstants.DefaultToneMatch;
+            }
+
+            ToneMatch = Mathf.Clamp(ToneMatch, 0f, 1f);
         }
 
         /// <summary>

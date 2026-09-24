@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verifying
-stopped_at: "Phase 5.1 context gathered (discuss-phase complete, e786b29); next: ui-phase 5.1, then plan-phase 5.1 --research"
-last_updated: "2026-09-24T22:24:26.689Z"
+stopped_at: Phase 5.1 UI-SPEC approved
+last_updated: "2026-09-24T22:33:07.055Z"
 last_activity: 2026-09-24
 progress:
   total_phases: 10
@@ -251,6 +251,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-24T22:24:26.677Z
-Stopped at: Phase 5.1 context gathered (discuss-phase complete, e786b29); next: ui-phase 5.1, then plan-phase 5.1 --research
-Resume file: .planning/phases/05.1-reference-fitted-urp-post-processing-look-inserted/05.1-CONTEXT.md
+Last session: 2026-09-24T22:33:07.045Z
+Stopped at: Phase 5.1 UI-SPEC approved
+Resume file: .planning/phases/05.1-reference-fitted-urp-post-processing-look-inserted/05.1-UI-SPEC.md

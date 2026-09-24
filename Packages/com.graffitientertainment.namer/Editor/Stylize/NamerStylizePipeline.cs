@@ -280,20 +280,26 @@ namespace GraffitiEntertainment.Namer.Editor
                 }
 
                 // Stage 3: palette transfer ALWAYS runs so the caller-owned dst is fully
-                // written — passthrough copy when no anchors / zero strength.
-                if (stylization.PaletteAvailable && stylization.AnchorCount > 0 && stylization.Anchors != null)
-                {
-                    Vector4[] anchorParams = BuildAnchorParams(stylization);
-                    anchorBuffer = CreateBuffer(anchorParams, stylization.AnchorCount, sizeof(float) * 4);
-                    _compute.SetInt("_AnchorCount", stylization.AnchorCount);
-                    _compute.SetFloat("_StyleStrength", Mathf.Clamp01(stylization.StyleStrength));
-                    _compute.SetInt("_HueReplaceMode", stylization.HueReplaceMode);
-                    _compute.SetBuffer(_kernelPaletteTransfer, "_AnchorParams", anchorBuffer);
-                }
-                else
-                {
-                    _compute.SetInt("_AnchorCount", 0);
-                }
+                // written — passthrough copy when no anchors / zero strength. Unity 6 on
+                // Metal SKIPS the dispatch when ANY property a dispatched kernel
+                // references is unbound — constants ("requires a Compute ConstantBuffer
+                // ... Skipping dispatch to avoid crashing") and StructuredBuffers
+                // ("Property (_AnchorParams) at kernel index (2) is not set") alike. So
+                // EVERY argument of this kernel is set UNCONDITIONALLY, on the no-anchor
+                // path too; only the anchor DATA is conditional. The no-anchor buffer
+                // carries a single dummy record the kernel never reads (_AnchorCount is
+                // 0 and it returns before the first _AnchorParams access) because
+                // zero-length ComputeBuffers are rejected on some backends
+                // (2026-09-23 gate, rounds 1-2).
+                int anchorCount = stylization.PaletteAvailable && stylization.Anchors != null
+                    && stylization.AnchorCount > 0
+                        ? stylization.AnchorCount
+                        : 0;
+                _compute.SetInt("_AnchorCount", anchorCount);
+                _compute.SetFloat("_StyleStrength", Mathf.Clamp01(stylization.StyleStrength));
+                _compute.SetInt("_HueReplaceMode", stylization.HueReplaceMode);
+                anchorBuffer = CreateBuffer(BuildAnchorParams(stylization, anchorCount), Mathf.Max(anchorCount, 1), sizeof(float) * 4);
+                _compute.SetBuffer(_kernelPaletteTransfer, "_AnchorParams", anchorBuffer);
 
                 _compute.SetTexture(_kernelPaletteTransfer, "_PaletteSrc", paletteSource);
                 _compute.SetTexture(_kernelPaletteTransfer, "_PaletteOut", dst);
@@ -316,10 +322,12 @@ namespace GraffitiEntertainment.Namer.Editor
         {
         }
 
-        private static Vector4[] BuildAnchorParams(NamerStyleStylization stylization)
+        private static Vector4[] BuildAnchorParams(NamerStyleStylization stylization, int anchorCount)
         {
-            var anchorParams = new Vector4[stylization.AnchorCount];
-            for (int i = 0; i < stylization.AnchorCount; i++)
+            // One dummy record when anchorCount == 0 (zero-length ComputeBuffers are
+            // rejected on some backends); the passthrough kernel never reads it.
+            var anchorParams = new Vector4[Mathf.Max(anchorCount, 1)];
+            for (int i = 0; i < anchorCount; i++)
             {
                 NamerStyleAnchor anchor = stylization.Anchors[i];
                 float achromaticFlag = anchor.Saturation < kAchromaticSaturationCutoff ? 1f : 0f;

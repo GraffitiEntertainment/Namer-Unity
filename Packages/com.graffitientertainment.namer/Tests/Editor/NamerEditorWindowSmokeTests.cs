@@ -10,9 +10,12 @@ namespace GraffitiEntertainment.Namer.Tests
     /// Headless EditMode smoke for the window facts that do not require window rendering:
     /// the <see cref="NamerProcessorSettings"/> foldout defaults (Source open, others collapsed)
     /// and the <see cref="NamerEditorWindow.ShaderInputToggleLabels"/> contents/order (the seven
-    /// neutral-default shaded-view toggles, read via reflection). The render-only claims (window
-    /// fits a small screen with all sections collapsed; every control reachable by scrolling) are
-    /// manual-verification checklist items, not automated tests.
+    /// neutral-default shaded-view toggles, read via reflection). Also pins the persistent
+    /// Source pick (a global editor selection change must not clobber the window's explicit
+    /// pick) and the albedo preview caption copy (locked, em-dashes verbatim). The
+    /// render-only claims (window fits a small screen with all sections collapsed; every
+    /// control reachable by scrolling) are manual-verification checklist items, not
+    /// automated tests.
     /// </summary>
     public class NamerEditorWindowSmokeTests
     {
@@ -71,6 +74,66 @@ namespace GraffitiEntertainment.Namer.Tests
             string[] expected = { "Base", "Roughness", "AO", "Metallic", "Emissive", "Normal" };
             CollectionAssert.AreEqual(expected, labels,
                 "ChannelPaneLabels must be the six channel panes decoded from the After material's packed textures");
+        }
+
+        /// <summary>
+        /// Behavioral pin for the persistent Source pick: the window no longer subscribes to
+        /// <c>Selection.selectionChanged</c>, so a global editor selection change must leave the
+        /// window's explicit <c>_selection</c> untouched. The window instance runs OnEnable (null
+        /// selection — the production default, no GPU work) and OnDisable (via DestroyImmediate)
+        /// inside the test; Tick never fires in a synchronous test body.
+        /// </summary>
+        [Test]
+        public void SourceSelection_PersistsAcrossEditorSelectionChange()
+        {
+            UnityEngine.Object previousSelection = Selection.activeObject;
+            NamerEditorWindow window = ScriptableObject.CreateInstance<NamerEditorWindow>();
+            ScriptableObject tokenA = ScriptableObject.CreateInstance<ScriptableObject>();
+            ScriptableObject tokenB = ScriptableObject.CreateInstance<ScriptableObject>();
+            tokenA.name = "NamerSourceTokenA";
+            tokenB.name = "NamerSourceTokenB";
+            try
+            {
+                FieldInfo selectionField = typeof(NamerEditorWindow).GetField(
+                    "_selection", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.IsNotNull(selectionField, "_selection field must exist on NamerEditorWindow");
+
+                selectionField.SetValue(window, tokenA);
+                Selection.activeObject = tokenB;
+
+                Assert.AreSame(tokenA, selectionField.GetValue(window),
+                    "A global editor selection change must not clobber the window's explicit Source pick");
+            }
+            finally
+            {
+                Selection.activeObject = previousSelection;
+                Object.DestroyImmediate(window);
+                Object.DestroyImmediate(tokenA);
+                Object.DestroyImmediate(tokenB);
+            }
+        }
+
+        /// <summary>
+        /// The albedo preview caption/button strings are locked copy — the caption must state
+        /// honestly which lens produced the image. Pinned verbatim (em-dashes included) via the
+        /// same reflection seam as the other label fields.
+        /// </summary>
+        [Test]
+        public void AlbedoPreviewCaptions_ExactLockedCopy()
+        {
+            AssertLockedConstString("AlbedoPreviewStylizedCaption", "Stylized albedo — palette transfer applied");
+            AssertLockedConstString("AlbedoPreviewUnstylizedCaption", "Un-stylized albedo — After View (Preview/Debug) is NAMER");
+            AssertLockedConstString("AlbedoPreviewEmptyCaption", "select a source / attach a profile");
+            AssertLockedConstString("AlbedoPreviewViewStylizedButton", "View Stylized");
+        }
+
+        private static void AssertLockedConstString(string fieldName, string expected)
+        {
+            FieldInfo field = typeof(NamerEditorWindow).GetField(
+                fieldName, BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.IsNotNull(field, fieldName + " field must exist on NamerEditorWindow");
+            Assert.AreEqual(expected, (string)field.GetValue(null),
+                fieldName + " must equal the locked copy verbatim (em-dashes included)");
         }
 
         // -- EditorPrefs isolation for the foldout keys -----------------------

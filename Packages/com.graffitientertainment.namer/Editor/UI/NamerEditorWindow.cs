@@ -61,6 +61,31 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>Residual-row value when no residual is written (04.2 one-texture outcome).</summary>
         internal const string ResidualNotWrittenLabel = "not written (one-texture)";
 
+        /// <summary>
+        /// Albedo preview caption when the preview lens is Stylized NAMER. Locked copy,
+        /// em-dash verbatim; read via reflection by <c>NamerEditorWindowSmokeTests</c>.
+        /// </summary>
+        internal const string AlbedoPreviewStylizedCaption = "Stylized albedo — palette transfer applied";
+
+        /// <summary>
+        /// Albedo preview caption when the preview lens is NAMER (the un-stylized
+        /// baseline). Locked copy, em-dash verbatim; read via reflection by
+        /// <c>NamerEditorWindowSmokeTests</c>.
+        /// </summary>
+        internal const string AlbedoPreviewUnstylizedCaption = "Un-stylized albedo — After View (Preview/Debug) is NAMER";
+
+        /// <summary>
+        /// Albedo preview caption when no live preview textures exist. Locked copy;
+        /// read via reflection by <c>NamerEditorWindowSmokeTests</c>.
+        /// </summary>
+        internal const string AlbedoPreviewEmptyCaption = "select a source / attach a profile";
+
+        /// <summary>
+        /// Albedo preview button label that flips the After View lens to Stylized NAMER.
+        /// Locked copy; read via reflection by <c>NamerEditorWindowSmokeTests</c>.
+        /// </summary>
+        internal const string AlbedoPreviewViewStylizedButton = "View Stylized";
+
         private static readonly int SurfaceMapId = Shader.PropertyToID("_SurfaceMap");
         private static readonly int BaseResidualMapId = Shader.PropertyToID("_BaseResidualMap");
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
@@ -82,6 +107,8 @@ namespace GraffitiEntertainment.Namer.Editor
         private const float ChannelPaneSize = 48f;
         private const float ChannelPopupSize = 384f;
         private const float kCoverageSliderStep = 0.005f;
+        private const float kAlbedoPreviewHeight = 128f;
+        private const float kCreateProfileButtonWidth = 110f;
 
         // 05-03 W4 "After View" popup indices (preview-only lens; 0 = the un-stylized
         // NAMER baseline, the shipped default).
@@ -1723,6 +1750,7 @@ namespace GraffitiEntertainment.Namer.Editor
             EditorGUI.BeginDisabledGroup(_busy);
 
             NamerStyleProfile attached = NamerProcessor.ResolveStyleProfile(_settings);
+            EditorGUILayout.BeginHorizontal();
             NamerStyleProfile newProfile = (NamerStyleProfile)EditorGUILayout.ObjectField(
                 new GUIContent(
                     "Style Profile",
@@ -1734,6 +1762,9 @@ namespace GraffitiEntertainment.Namer.Editor
                 attached,
                 typeof(NamerStyleProfile),
                 false);
+            // Change-check BEFORE the Create button: a same-frame create sets `attached`
+            // itself, and a stale `newProfile != attached` read would otherwise wipe the
+            // GUID the button just wrote.
             if (newProfile != attached)
             {
                 _settings.StyleProfileGuid = newProfile != null
@@ -1743,6 +1774,13 @@ namespace GraffitiEntertainment.Namer.Editor
                 _afterPanelState.MarkTweaking();
                 MarkDirty();
             }
+
+            if (GUILayout.Button("Create Profile…", EditorStyles.miniButton, GUILayout.Width(kCreateProfileButtonWidth)))
+            {
+                CreateAndAttachStyleProfile(ref attached);
+            }
+
+            EditorGUILayout.EndHorizontal();
 
             if (attached != null)
             {
@@ -1756,7 +1794,97 @@ namespace GraffitiEntertainment.Namer.Editor
                     MessageType.Info);
             }
 
+            if (attached != null)
+            {
+                DrawAlbedoPreview();
+            }
+
             EditorGUI.EndDisabledGroup();
+        }
+
+        /// <summary>
+        /// Creates a new <see cref="NamerStyleProfile"/> asset at a user-chosen in-project
+        /// path and attaches it to the window in one step (the same GUID mechanism as the
+        /// Style Profile ObjectField handler). A cancelled save dialog is a no-op. The
+        /// created profile is pinged in the Project window and the preview is marked dirty
+        /// so the albedo preview and attach-state line react immediately.
+        /// </summary>
+        private void CreateAndAttachStyleProfile(ref NamerStyleProfile attached)
+        {
+            string path = EditorUtility.SaveFilePanelInProject(
+                "Create NAMER Style Profile",
+                "New Namer Style Profile",
+                "asset",
+                "Create a new NAMER Style Profile asset and attach it to this window.");
+            if (string.IsNullOrEmpty(path))
+            {
+                return;
+            }
+
+            NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            AssetDatabase.CreateAsset(profile, path);
+            AssetDatabase.SaveAssets();
+            _settings.StyleProfileGuid = AssetDatabase.AssetPathToGUID(path);
+            attached = profile;
+            EditorGUIUtility.PingObject(profile);
+            _afterPanelState.MarkTweaking();
+            MarkDirty();
+        }
+
+        /// <summary>
+        /// The 2D albedo preview (stylization fix 3): a full-width Base-channel view of
+        /// the LIVE <c>_namerMaterial</c>'s textures — the stylized result only exists
+        /// there — drawn through the shared <c>NamerChannelView</c> material. Read-only
+        /// view of the last preview recompute: no new GPU compute, no readback, no disk
+        /// I/O. The caption states honestly which lens produced the image (stylized vs
+        /// un-stylized), with a one-click View Stylized flip when the lens is NAMER.
+        /// </summary>
+        private void DrawAlbedoPreview()
+        {
+            EditorGUILayout.LabelField("Albedo Preview", EditorStyles.boldLabel);
+
+            float rowWidth = Mathf.Max(EditorGUIUtility.currentViewWidth - GUI.skin.verticalScrollbar.fixedWidth, 256f);
+            Rect rect = GUILayoutUtility.GetRect(rowWidth, kAlbedoPreviewHeight);
+
+            if (_namerMaterial == null || _namerMaterial.GetTexture(SurfaceMapId) == null)
+            {
+                GUI.Box(rect, GUIContent.none);
+                EditorGUILayout.LabelField(AlbedoPreviewEmptyCaption, EditorStyles.miniLabel);
+                return;
+            }
+
+            // Channel-view pattern (260919-fp3): set all four properties before the draw,
+            // Repaint-guarded Graphics.DrawTexture — NEVER Graphics.Blit in OnGUI. Sharing
+            // _channelViewMaterial with DrawChannelPanes is safe: both set all four
+            // properties before every draw.
+            EnsureChannelViewMaterial();
+            _channelViewMaterial.SetTexture(SurfaceMapId, _namerMaterial.GetTexture(SurfaceMapId));
+            _channelViewMaterial.SetTexture(BaseResidualMapId, _namerMaterial.GetTexture(BaseResidualMapId));
+            _channelViewMaterial.SetFloat(OcclusionStrengthId, _namerMaterial.GetFloat(OcclusionStrengthId));
+            _channelViewMaterial.SetFloat(ChannelId, 0);
+            if (Event.current.type == EventType.Repaint)
+            {
+                Graphics.DrawTexture(rect, Texture2D.whiteTexture, _channelViewMaterial);
+            }
+
+            EditorGUILayout.BeginHorizontal();
+            if (_afterView == kAfterViewStylized)
+            {
+                EditorGUILayout.LabelField(AlbedoPreviewStylizedCaption, EditorStyles.miniLabel);
+            }
+            else
+            {
+                EditorGUILayout.LabelField(AlbedoPreviewUnstylizedCaption, EditorStyles.miniLabel);
+                if (GUILayout.Button(AlbedoPreviewViewStylizedButton, EditorStyles.miniButton))
+                {
+                    _afterView = kAfterViewStylized;
+                    _settings.AfterView = kAfterViewStylized;
+                    _afterPanelState.MarkTweaking();
+                    MarkDirty();
+                }
+            }
+
+            EditorGUILayout.EndHorizontal();
         }
 
         /// <summary>

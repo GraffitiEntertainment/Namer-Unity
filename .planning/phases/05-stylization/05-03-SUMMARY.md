@@ -140,10 +140,36 @@ Each task was committed atomically:
 - **Verification:** Roslyn compile green; assertions match the NamerStyleStylization.Create and NamerStyleProfile.IsExtracted sources (read directly, not assumed).
 - **Committed in:** d283984
 
+**3. [Rule 1 - bug] Wave-3 gate: E2E fixture persisted a HideAndDontSave mesh (DontSave saver asserts)**
+- **Found during:** Post-wave gate round 1 (full EditMode run A: 3 of the 4 failures)
+- **Issue:** `CreateMeshAsset` persisted the fixture quad built by `CreateQuadMesh` with `HideAndDontSave`; `AssetDatabase.CreateAsset` on a DontSave-flagged object trips Unity's saver assert (`kAllowDontSaveObjectsToBePersistent`) — six unhandled asserts failed three E2E tests at their FIRST fixture step (Editor.log stacks disproved the initial production-path hypothesis).
+- **Fix:** `CreateMeshAsset` clears `hideFlags` before the asset write (the proven NamerProjectionAcceptanceTests idiom: flag-free mesh on the persisted path). Fixture-only; no LogAssert bandaid, no production change.
+- **Files modified:** Tests/Editor/NamerStylizationIntegrationTests.cs
+- **Verification:** Round-1 targeted rerun — asserts gone; 16/18 pass (the 2 remaining were previously masked by the fixture assert and became round 2).
+- **Committed in:** b74c358
+
+**4. [Rule 1 - bug] Wave-3 gate: roughness-simplify oracle threshold unattainable (derived 3/63 exact)**
+- **Found during:** Post-wave gate round 1 (failure 4)
+- **Issue:** The simplify spread assert demanded < 0.02, but a radius-2 5x5 box mean over period-2 rows attenuates by exactly the Dirichlet 1/5 factor: row medians land at 0.40/0.25, floor-quantize to 25/63 vs 22/63 = spread exactly 3/63 = 0.0476 (the observed value to 8 decimals). Kernel verified correct on all three suspects (simplify applied pre-quantization per STYL-06, bounds-checked 25 taps, full replace at strength 1); 5/63 = radius-1 and 2/63 = radius-3 discriminate the radius, and the pre/post-quantization order is separately pinned by the Sobel-path test.
+- **Fix:** Oracle replaced with the derived exact value (3/63, tolerance half a quant step); constant + full derivation comment in the test.
+- **Files modified:** Tests/Editor/NamerStylizationIntegrationTests.cs
+- **Verification:** Round-1 targeted rerun green.
+- **Committed in:** b74c358
+
+**5. [Rule 1 - bug] Wave-3 gate: two previously-masked E2E oracles — unattainable 0.9 saturation floor + smoothed "plain" control**
+- **Found during:** Post-wave gate round 2 (the two E2E tests that first executed after the round-1 fixture fix)
+- **Issue (saturation):** The baked-base saturation floor of 0.9 is unattainable by correct behavior, derived statically end-to-end: the extractor's 16-bin/channel histogram reconstructs pure (x,0,x) magenta refs at bin centers (G = 0.5/16 = 0.03125, anchor sat 0.947 not 1.0); all anchors tie at the family hue so CSPaletteTransfer's strict-less-than scan picks slot 0 (the darkest equal-mass bin, (0.59375, 0.03125, 0.59375)); at strength 1 + Replace NamerStylizeRebuild inverts the extraction exactly, so the styled base IS that uniform color; the base PNG sRGB-encodes it to bytes (202, 49, 202), reading back (202-49)/202 = 153/202 = 0.75742574 — matching the observed 0.757425725 to 8 decimals. The passing hue assert (Replace snaps hue independent of strength) plus depressed saturation localized the cause to the anchor, not the strength wiring.
+- **Issue (control run):** `Process_ProfileSmoothing_PrimesMeshWithoutDecomposition` attached the profile GUID before BOTH Process runs, so the island bilateral flattened the "plain" control bake too (plainStd 0.0047 = already-smoothed; both bakes byte-identical).
+- **Fix:** Saturation oracle now DERIVED from the tie-winning anchor's sRGB byte round-trip (`TieWinningChromaticAnchor` mirrors the kernel tie-break; `ExpectedByteSaturation`/`SrgbByte` implement the exact IEC 61966-2-1 encode; AreEqual within 0.01) — self-calibrating like DominantAnchorHue, and it now also catches over-saturation. The priming test runs its control with an empty GUID (the Task-2 identity path) and re-attaches for the smoothed run; derived attainable bounds: plain ~0.020 > 0.01 floor, smoothed 0.0047 < 0.75 x plain.
+- **Files modified:** Tests/Editor/NamerStylizationIntegrationTests.cs
+- **Verification:** Round-2 targeted rerun 18/18; full-suite double-run A = B = pass 239 fail 0 skip 0 (deterministic). Production exonerated in ALL THREE gate findings — every fix is test/oracle-side.
+- **Committed in:** b74c358
+
 ---
 
-**Total deviations:** 2 auto-fixed (1 x Rule 3, 1 x Rule 1)
-**Impact on plan:** Both within the plan's own action text and identity guard; no scope creep, no behavior change on pre-existing paths.
+**Total deviations:** 5 auto-fixed (1 x Rule 3, 4 x Rule 1 — all test/oracle-side; production exonerated in every wave-3 gate finding)
+**Fix loop:** 2 of 3 allowed rounds used (round 1: 4 failures; round 2: 2 previously-masked failures; round 3 unused).
+**Impact on plan:** Both task-time deviations stayed within the plan's own action text and identity guard; the three wave-3 gate findings were fixture/oracle defects, not production behavior changes. No scope creep, no behavior change on pre-existing paths (239/239 twice proves the D-08 zero-flip audit held through the fix loop).
 
 ## Issues Encountered
 

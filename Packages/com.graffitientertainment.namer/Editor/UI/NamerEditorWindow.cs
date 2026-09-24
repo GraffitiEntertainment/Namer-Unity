@@ -75,10 +75,18 @@ namespace GraffitiEntertainment.Namer.Editor
         internal const string AlbedoPreviewUnstylizedCaption = "Un-stylized albedo — After View (Preview/Debug) is NAMER";
 
         /// <summary>
-        /// Albedo preview caption when no live preview textures exist. Locked copy;
-        /// read via reflection by <c>NamerEditorWindowSmokeTests</c>.
+        /// Albedo preview reason line when no Source is picked (Task 7: a domain reload
+        /// wipes scene-object picks — the accepted Task 1 limitation). Locked copy; read
+        /// via reflection by <c>NamerEditorWindowSmokeTests</c>.
         /// </summary>
-        internal const string AlbedoPreviewEmptyCaption = "select a source / attach a profile";
+        internal const string AlbedoPreviewNoSourceCaption = "select a Source above to preview";
+
+        /// <summary>
+        /// Albedo preview reason line when a Source is picked but no preview recompute
+        /// has produced a live result yet. Locked copy, em-dash verbatim; read via
+        /// reflection by <c>NamerEditorWindowSmokeTests</c>.
+        /// </summary>
+        internal const string AlbedoPreviewNoResultCaption = "no preview yet — waiting for recompute";
 
         /// <summary>
         /// Albedo preview button label that flips the After View lens to Stylized NAMER.
@@ -1901,9 +1909,11 @@ namespace GraffitiEntertainment.Namer.Editor
         /// or the Gouraud-projected base). The packed surface map and occlusion strength
         /// still come from the live <c>_namerMaterial</c>. Drawn through the shared
         /// <c>NamerChannelView</c> material. Read-only view of the last preview recompute:
-        /// no new GPU compute, no readback, no disk I/O. The caption states honestly which
-        /// lens produced the image (stylized vs un-stylized), with a one-click View
-        /// Stylized flip when the lens is NAMER.
+        /// no new GPU compute, no readback, no disk I/O. The caption row renders ALWAYS —
+        /// including the neutral state (Task 7: the empty image no longer swallows the
+        /// View Stylized lens flipper; it is disabled when no profile is attached, and a
+        /// reason line names the missing prerequisite via
+        /// <see cref="ResolveAlbedoPreviewEmptyReason"/>).
         /// </summary>
         private void DrawAlbedoPreview()
         {
@@ -1913,32 +1923,42 @@ namespace GraffitiEntertainment.Namer.Editor
             Rect rect = GUILayoutUtility.GetRect(rowWidth, kAlbedoPreviewHeight);
 
             // Gamma projects sample the re-encoded cache built in RecomputePreview; Linear
-            // projects bind the pool target directly. Null (no live result / no recompute
-            // yet) falls into the neutral case below.
+            // projects bind the pool target directly.
             Texture stylizeBase = QualitySettings.activeColorSpace == ColorSpace.Gamma
                 ? _stylizePreviewBaseRt
                 : ResolveStylizePreviewBase(_liveResult);
-            if (_namerMaterial == null || _namerMaterial.GetTexture(SurfaceMapId) == null || stylizeBase == null)
+            Texture surfaceMap = _namerMaterial != null ? _namerMaterial.GetTexture(SurfaceMapId) : null;
+            bool canDrawImage = surfaceMap != null && stylizeBase != null;
+
+            // Same profile resolution the After View popup uses: without a profile the
+            // lens flip stays visible but disabled (mirrors the popup's disable state).
+            bool hasProfile = NamerProcessor.ResolveStyleProfile(_settings) != null;
+
+            if (canDrawImage)
             {
+                // Channel-view pattern (260919-fp3): set all four properties before the draw,
+                // Repaint-guarded Graphics.DrawTexture — NEVER Graphics.Blit in OnGUI. Sharing
+                // _channelViewMaterial with DrawChannelPanes is safe: both set all four
+                // properties before every draw.
+                EnsureChannelViewMaterial();
+                _channelViewMaterial.SetTexture(SurfaceMapId, surfaceMap);
+                _channelViewMaterial.SetTexture(BaseResidualMapId, stylizeBase);
+                _channelViewMaterial.SetFloat(OcclusionStrengthId, _namerMaterial.GetFloat(OcclusionStrengthId));
+                _channelViewMaterial.SetFloat(ChannelId, 0);
+                if (Event.current.type == EventType.Repaint)
+                {
+                    Graphics.DrawTexture(rect, Texture2D.whiteTexture, _channelViewMaterial);
+                }
+            }
+            else
+            {
+                // Neutral box — but NEVER early-return past the caption row below (Task 7:
+                // the empty state used to swallow the View Stylized button, leaving a dead
+                // preview with no path back to the stylized lens).
                 GUI.Box(rect, GUIContent.none);
-                EditorGUILayout.LabelField(AlbedoPreviewEmptyCaption, EditorStyles.miniLabel);
-                return;
             }
 
-            // Channel-view pattern (260919-fp3): set all four properties before the draw,
-            // Repaint-guarded Graphics.DrawTexture — NEVER Graphics.Blit in OnGUI. Sharing
-            // _channelViewMaterial with DrawChannelPanes is safe: both set all four
-            // properties before every draw.
-            EnsureChannelViewMaterial();
-            _channelViewMaterial.SetTexture(SurfaceMapId, _namerMaterial.GetTexture(SurfaceMapId));
-            _channelViewMaterial.SetTexture(BaseResidualMapId, stylizeBase);
-            _channelViewMaterial.SetFloat(OcclusionStrengthId, _namerMaterial.GetFloat(OcclusionStrengthId));
-            _channelViewMaterial.SetFloat(ChannelId, 0);
-            if (Event.current.type == EventType.Repaint)
-            {
-                Graphics.DrawTexture(rect, Texture2D.whiteTexture, _channelViewMaterial);
-            }
-
+            // Caption row renders ALWAYS — lens honesty plus the preview-side lens flipper.
             EditorGUILayout.BeginHorizontal();
             if (_afterView == kAfterViewStylized)
             {
@@ -1947,16 +1967,28 @@ namespace GraffitiEntertainment.Namer.Editor
             else
             {
                 EditorGUILayout.LabelField(AlbedoPreviewUnstylizedCaption, EditorStyles.miniLabel);
-                if (GUILayout.Button(AlbedoPreviewViewStylizedButton, EditorStyles.miniButton))
+                using (new EditorGUI.DisabledScope(!hasProfile))
                 {
-                    _afterView = kAfterViewStylized;
-                    _settings.AfterView = kAfterViewStylized;
-                    _afterPanelState.MarkTweaking();
-                    MarkDirty();
+                    if (GUILayout.Button(AlbedoPreviewViewStylizedButton, EditorStyles.miniButton))
+                    {
+                        _afterView = kAfterViewStylized;
+                        _settings.AfterView = kAfterViewStylized;
+                        _afterPanelState.MarkTweaking();
+                        MarkDirty();
+                    }
                 }
             }
 
             EditorGUILayout.EndHorizontal();
+
+            if (!canDrawImage)
+            {
+                string reason = ResolveAlbedoPreviewEmptyReason(_selection != null, _liveResult != null);
+                if (reason != null)
+                {
+                    EditorGUILayout.LabelField(reason, EditorStyles.miniLabel);
+                }
+            }
         }
 
         /// <summary>
@@ -2039,6 +2071,24 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             return result.SourceBaseColor != null ? result.SourceBaseColor : result.NormalizedBaseColor;
+        }
+
+        /// <summary>
+        /// The albedo preview's neutral-state reason line: null when both prerequisites
+        /// hold (no line rendered), the no-source line when the Source pick is missing
+        /// (e.g. a domain reload wiped a scene-object pick — the accepted Task 1
+        /// limitation), else the no-result line (source picked, recompute pending).
+        /// Internal static pure seam mirroring <see cref="ResolveStylizePreviewBase"/> —
+        /// headless-testable.
+        /// </summary>
+        internal static string ResolveAlbedoPreviewEmptyReason(bool hasSource, bool hasLiveResult)
+        {
+            if (!hasSource)
+            {
+                return AlbedoPreviewNoSourceCaption;
+            }
+
+            return hasLiveResult ? null : AlbedoPreviewNoResultCaption;
         }
 
         private void DrawDecompositionSection(NamerMaterialInspection inspection)

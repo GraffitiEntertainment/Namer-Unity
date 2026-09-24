@@ -12,7 +12,8 @@ namespace GraffitiEntertainment.Namer.Tests
     /// and the <see cref="NamerEditorWindow.ShaderInputToggleLabels"/> contents/order (the seven
     /// neutral-default shaded-view toggles, read via reflection). Also pins the persistent
     /// Source pick (a global editor selection change must not clobber the window's explicit
-    /// pick), the albedo preview caption copy (locked, em-dashes verbatim), the embedded
+    /// pick), the albedo preview caption copy (locked, em-dashes verbatim), the neutral-state
+    /// reason differentiation (no-source vs no-result), the embedded
     /// profile-inspector cache contract (created for the attached profile, reused, null when
     /// detached), and the stylize preview base selection (the styled SOURCE base wins over
     /// the projected base). The render-only claims (window fits a small screen with all
@@ -117,16 +118,43 @@ namespace GraffitiEntertainment.Namer.Tests
 
         /// <summary>
         /// The albedo preview caption/button strings are locked copy — the caption must state
-        /// honestly which lens produced the image. Pinned verbatim (em-dashes included) via the
-        /// same reflection seam as the other label fields.
+        /// honestly which lens produced the image, and the neutral-state reason lines must name
+        /// the missing prerequisite. Pinned verbatim (em-dashes included) via the same
+        /// reflection seam as the other label fields.
         /// </summary>
         [Test]
         public void AlbedoPreviewCaptions_ExactLockedCopy()
         {
             AssertLockedConstString("AlbedoPreviewStylizedCaption", "Stylized albedo — palette transfer applied");
             AssertLockedConstString("AlbedoPreviewUnstylizedCaption", "Un-stylized albedo — After View (Preview/Debug) is NAMER");
-            AssertLockedConstString("AlbedoPreviewEmptyCaption", "select a source / attach a profile");
+            AssertLockedConstString("AlbedoPreviewNoSourceCaption", "select a Source above to preview");
+            AssertLockedConstString("AlbedoPreviewNoResultCaption", "no preview yet — waiting for recompute");
             AssertLockedConstString("AlbedoPreviewViewStylizedButton", "View Stylized");
+        }
+
+        /// <summary>
+        /// The neutral-state reason line differentiates WHAT is missing: no Source (e.g. a
+        /// domain reload wiped a scene-object pick — accepted Task 1 limitation) reads the
+        /// no-source line, a picked source without a computed result reads the no-result
+        /// line, and both-present resolves null (no line). Pure seam — no OnGUI, no GPU.
+        /// </summary>
+        [Test]
+        public void AlbedoPreviewEmptyReason_Differentiates()
+        {
+            MethodInfo resolve = typeof(NamerEditorWindow).GetMethod(
+                "ResolveAlbedoPreviewEmptyReason", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.IsNotNull(resolve, "ResolveAlbedoPreviewEmptyReason method must exist on NamerEditorWindow");
+
+            Assert.AreEqual("select a Source above to preview", resolve.Invoke(null, new object[] { false, true }),
+                "No Source picked must read the no-source reason");
+            Assert.AreEqual("select a Source above to preview", resolve.Invoke(null, new object[] { false, false }),
+                "No Source dominates — the no-source reason wins even without a live result");
+
+            Assert.AreEqual("no preview yet — waiting for recompute", resolve.Invoke(null, new object[] { true, false }),
+                "Source picked but no recompute yet must read the no-result reason");
+
+            Assert.IsNull(resolve.Invoke(null, new object[] { true, true }),
+                "Both prerequisites hold — no reason line renders (null)");
         }
 
         private static void AssertLockedConstString(string fieldName, string expected)

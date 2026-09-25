@@ -375,6 +375,24 @@ namespace GraffitiEntertainment.Namer.Editor
                         }
                     }
                 }
+
+                // 05.1-03 UI-SPEC B amendment: keep the generated bundle in sync with
+                // profile truth — whenever Process runs with a fitted profile attached,
+                // regenerate the companion Volume (D-02). No fit -> no Volume, zero new
+                // code paths. The write gates (overwrite opt-in refusal among them)
+                // surface as a warning, never a failed Process: the materials are
+                // already written and the Volume re-runs on the next Process.
+                if (styleProfile != null && styleProfile.HasPostFit)
+                {
+                    try
+                    {
+                        NamerStyleVolumeWriter.Write(styleProfile, settings);
+                    }
+                    catch (Exception ex)
+                    {
+                        result.Warnings.Add("Post look Volume regeneration failed: " + ex.Message);
+                    }
+                }
             }
             catch (InvalidOperationException ex)
             {

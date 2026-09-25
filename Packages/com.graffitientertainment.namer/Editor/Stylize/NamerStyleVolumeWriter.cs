@@ -135,7 +135,12 @@ namespace GraffitiEntertainment.Namer.Editor
             AssetDatabase.AddObjectToAsset(colorAdjustments, volume);
             AssetDatabase.AddObjectToAsset(bloom, volume);
             AssetDatabase.AddObjectToAsset(curves, volume);
-            AssetDatabase.SaveAssets();
+            // WR-04 (05.1 review): persist ONLY this Volume — SaveAssets() flushes
+            // every dirty asset in the project (a Fit Look click or a Process with a
+            // fitted profile attached would force-commit unrelated unsaved user
+            // work). Same discipline as AssetGenerator.WriteMeshAsset (04.1 WR-04).
+            EditorUtility.SetDirty(volume);
+            AssetDatabase.SaveAssetIfDirty(volume);
 
             VolumeProfile loaded = AssetDatabase.LoadAssetAtPath<VolumeProfile>(path);
             AssetGenerator.Stamp(loaded);

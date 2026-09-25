@@ -1411,8 +1411,9 @@ namespace GraffitiEntertainment.Namer.Tests
                 Assert.IsTrue(extracted.IsExtracted, "fixture setup: a written fingerprint must mark the profile extracted");
                 Assert.IsFalse(notExtracted.IsExtracted, "fixture setup: a fresh profile must not read as extracted");
 
-                // W3 locked copy (05-UI-SPEC): "" for nothing attached (the popup's
-                // disabled hint carries that state), the honesty line otherwise.
+                // W3 + W8 locked copy (05/05.1 UI-SPEC): "" for nothing attached (the
+                // popup's disabled hint carries that state), the honesty line
+                // otherwise, now with the fit clause appended on extracted profiles.
                 Assert.AreEqual(string.Empty, NamerEditorWindow.DescribeProfileState(null));
 
                 Assert.AreEqual(
@@ -1420,7 +1421,15 @@ namespace GraffitiEntertainment.Namer.Tests
                     NamerEditorWindow.DescribeProfileState(notExtracted));
 
                 Assert.AreEqual(
-                    "Ink — palette extracted (2 anchors, 3 references)",
+                    "Ink — palette extracted (2 anchors, 3 references), post look not fitted",
+                    NamerEditorWindow.DescribeProfileState(extracted));
+
+                // W8 fitted clause: a written fit fingerprint + exemplar name flip
+                // the appended clause to the fitted truth (D-03 names the exemplar).
+                extracted.PostFitFingerprint = "synthetic-fit-fingerprint";
+                extracted.PostFitExemplarName = "InkExemplar";
+                Assert.AreEqual(
+                    "Ink — palette extracted (2 anchors, 3 references), post look fitted from InkExemplar",
                     NamerEditorWindow.DescribeProfileState(extracted));
             }
             finally

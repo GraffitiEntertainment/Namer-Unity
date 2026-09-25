@@ -21,6 +21,7 @@ You can select a GameObject (in the scene or a prefab), a prefab, a model (for e
 - [Preview/Debug](#previewdebug)
 - [Roughness Extraction](#roughness-extraction)
 - [AO](#ao)
+- [Stylization](#stylization)
 - [Decomposition](#decomposition)
 - [Output](#output)
 - [Action](#action)
@@ -131,6 +132,20 @@ Four sliders, all live:
 | AO Contrast | 0–4 | 1 | Contrast around a 0.5 pivot; 1 = identity. |
 
 All four sliders respond live without re-Process: each change recomputes the preview in memory after a 0.3 s debounce — an in-memory GPU recompute with nothing written to disk. The settings are baked in on the next Process run.
+
+## Stylization
+
+Stylization is driven by a `NamerStyleProfile` asset: you assign reference images, press **Extract Style Stats**, and the extracted palette drives the stylized After View and the Process output. The profile inspector — embedded in the Processor window or the Project window — is where the style is reviewed and fitted.
+
+### Fit Look
+
+The **Fitted Post Look** block fits the references' global post-processing grade — white balance, post-exposure, contrast, saturation, master + R/G/B color curves, and a bloom threshold — onto the profile, then regenerates it into a URP Volume asset (`{ProfileName}_Post.asset` under the configured destination). The workflow:
+
+1. Press **Extract Style Stats** and review the statistics (Fit Look stays disabled with a reason until statistics exist).
+2. Load the object to use as the fit exemplar into the Processor window (`Tools > NAMER > Processor`).
+3. Press **Fit Look**. The fitted parameters fill the block's read-only rows (`—` before the first fit; Tonemapping is fixed ACES and Bloom Intensity is defaulted — tweak it on the Volume), and the regenerated Volume asset is pinged.
+
+Fit Look is an explicit action — it never runs on the slider debounce and never automatically on Process. The profile is the source of truth: one fit per profile, and refitting with another object replaces the scene look; hand-tweaks made on the generated Volume are lost on re-fit. When the reference images change after a fit, the block warns `References changed since the fit — Fit Look again to refresh the post look.` Whenever Process runs with a fitted profile attached, the companion Volume is regenerated so the generated bundle never desyncs from profile truth.
 
 ## Decomposition
 

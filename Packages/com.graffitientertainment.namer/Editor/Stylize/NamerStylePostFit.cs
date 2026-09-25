@@ -28,6 +28,51 @@ namespace GraffitiEntertainment.Namer.Editor
     }
 
     /// <summary>
+    /// Result of one Fit Look run (05.1 plan 03): the fitted parameters plus the
+    /// exemplar object's display name on success, or the failure shape (cancelled /
+    /// unreadable reference texture / prerequisites unmet). Mirrors
+    /// <see cref="NamerStyleExtractResult"/>'s dual-ctor contract — no partial result
+    /// is ever written on cancel or failure.
+    /// </summary>
+    public sealed class NamerStylePostFitRunResult
+    {
+        /// <summary>Fitted post parameters; null when failed/cancelled.</summary>
+        public readonly NamerStylePostFitParams Params;
+
+        /// <summary>Display name of the exemplar object the fit was computed from; empty when failed/cancelled.</summary>
+        public readonly string ExemplarName;
+
+        /// <summary>True when the user cancelled before completion; no partial result is returned.</summary>
+        public readonly bool Cancelled;
+
+        /// <summary>Name of the first reference texture that could not be read; null otherwise.</summary>
+        public readonly string ErrorTextureName;
+
+        /// <summary>True when the profile (or the window prerequisites) were unmet — the prereq reason path.</summary>
+        public readonly bool NotExtracted;
+
+        /// <summary>Success shape (D-03: one per-profile fit, scene-coherent).</summary>
+        public NamerStylePostFitRunResult(NamerStylePostFitParams parameters, string exemplarName)
+        {
+            Params = parameters;
+            ExemplarName = exemplarName;
+            Cancelled = false;
+            ErrorTextureName = null;
+            NotExtracted = false;
+        }
+
+        /// <summary>Failure shape: cancelled, unreadable reference texture, or unmet prerequisites.</summary>
+        public NamerStylePostFitRunResult(bool cancelled, string errorTextureName, bool notExtracted)
+        {
+            Params = null;
+            ExemplarName = "";
+            Cancelled = cancelled;
+            ErrorTextureName = errorTextureName;
+            NotExtracted = notExtracted;
+        }
+    }
+
+    /// <summary>
     /// Accumulated pixel statistics for one distribution. Domains (RESEARCH Pattern 1,
     /// binding for the project's m_ColorGradingMode: 0 LDR asset):
     /// - Source stats: ACES-tonemapped (NamerStylePostMath.TonemapLdr) linear values in [0, 1].
@@ -275,6 +320,29 @@ namespace GraffitiEntertainment.Namer.Editor
             fitted.BloomThreshold = WeightedPercentile(reference.Max3SrgbHistogram, refTotal, kDefaultBloomHighlightPercentile);
 
             return fitted;
+        }
+
+        /// <summary>
+        /// Writes a successful fit onto the profile's serialized fitted-post block
+        /// (05.1 D-02 source of truth). Pure data write — no Undo, no SetDirty, no
+        /// Volume regeneration: the caller (the inspector's RunFitLook) owns the
+        /// transaction. The four curves are constructed from cloned key arrays, so
+        /// later curve edits can never alias the fit result.
+        /// </summary>
+        public static void ApplyToProfile(NamerStyleProfile profile, NamerStylePostFitParams fit, string exemplarName)
+        {
+            profile.PostTemperature = fit.Temperature;
+            profile.PostTint = fit.Tint;
+            profile.PostExposureEv = fit.PostExposureEv;
+            profile.PostContrast = fit.Contrast;
+            profile.PostSaturation = fit.Saturation;
+            profile.PostBloomThreshold = fit.BloomThreshold;
+            profile.PostMasterCurve = new AnimationCurve(fit.MasterKeys);
+            profile.PostRedCurve = new AnimationCurve(fit.RedKeys);
+            profile.PostGreenCurve = new AnimationCurve(fit.GreenKeys);
+            profile.PostBlueCurve = new AnimationCurve(fit.BlueKeys);
+            profile.PostFitFingerprint = fit.Fingerprint;
+            profile.PostFitExemplarName = exemplarName;
         }
 
         /// <summary>

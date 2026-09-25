@@ -123,6 +123,9 @@ namespace GraffitiEntertainment.Namer.Editor
         internal const int kAfterViewNamer = 0;
         internal const int kAfterViewStylized = 1;
 
+        /// <summary>Fit Look progress-bar stage count (05.1 plan 03): references, stylized preview, fit.</summary>
+        private const int kPostFitStageCount = 3;
+
         private NamerProcessorSettings _settings;
         private NamerPreviewRenderer _preview;
         private NamerComputePipeline _pipeline;
@@ -196,6 +199,13 @@ namespace GraffitiEntertainment.Namer.Editor
         // 05-03: set by RecomputePreview from the composed stylization context —
         // drives the Stylization section's Smoothing-skipped Info HelpBox (OQ-3).
         private bool _stylizeSmoothingSkipped;
+
+        // 05.1 plan 03: set only inside RunStylePostFit — ORs into the stylize lens
+        // for one synchronous recompute so the fit reads the palette-mapped stylized
+        // output REGARDLESS of the preview lens (D-03 exemplar contract). Always
+        // reset in a finally; the preview pane honestly keeps showing the stylized
+        // result that was just fitted.
+        internal bool _forceStylizeForFit;
 
         private string _status = string.Empty;
         private bool _statusIsError;
@@ -479,9 +489,11 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 // 05-03 W2/W4: the attached profile + the preview lens (mirrors the
                 // NamerProcessor composition; the lens only gates the PREVIEW — Process
-                // always bakes with the profile).
+                // always bakes with the profile). 05.1 plan 03: a forced fit pass
+                // (_forceStylizeForFit, set only inside RunStylePostFit) ORs into the
+                // lens so the fit reads the stylized output regardless of the popup.
                 NamerStyleProfile styleProfile = NamerProcessor.ResolveStyleProfile(_settings);
-                bool stylizeLens = styleProfile != null && _afterView == kAfterViewStylized;
+                bool stylizeLens = styleProfile != null && (_afterView == kAfterViewStylized || _forceStylizeForFit);
 
                 // 2026-09-21 contract follow-up: prime the bake mesh for the AO stage too,
                 // so AO on + decomposition off previews the bake Process actually generates
@@ -528,7 +540,8 @@ namespace GraffitiEntertainment.Namer.Editor
                     stylizeSplit = MeshVertexSplitter.Split(_previewMesh);
                 }
 
-                NamerStyleStylization stylization = ComposePreviewStylization(styleProfile, _afterView, stylizeSplit);
+                NamerStyleStylization stylization = ComposePreviewStylization(
+                    styleProfile, _forceStylizeForFit ? kAfterViewStylized : _afterView, stylizeSplit);
                 _stylizeSmoothingSkipped = stylization != null && stylization.SmoothingSkippedNoMesh;
                 NamerProcessor.ApplyStyleControls(inspection, stylization != null ? styleProfile : null);
 
@@ -2015,15 +2028,181 @@ namespace GraffitiEntertainment.Namer.Editor
                 }
 
                 _profileEditor = UnityEditor.Editor.CreateEditor(attached);
+
+                // 05.1 plan 03 host registration: the embedded inspector resolves its
+                // exemplar through this window (P17's "one visible, honest source of
+                // exemplar truth" — the planner-decision registration seam).
+                NamerStyleProfileEditor profileEditor = _profileEditor as NamerStyleProfileEditor;
+                if (profileEditor != null)
+                {
+                    profileEditor.HostWindow = this;
+                }
             }
 
             return _profileEditor;
         }
 
         /// <summary>
+        /// True when this window carries a loadable exemplar for Fit Look (05.1 D-03):
+        /// a picked Source whose inspection resolved at least one material. The profile
+        /// inspector's exemplar resolution (host window first, then any open window
+        /// with a loadable source) keys off this — one definition of "loadable".
+        /// </summary>
+        internal bool HasLoadableSource
+        {
+            get { return _selection != null && PrimaryInspection != null; }
+        }
+
+        /// <summary>
+        /// 05.1 plan 03 fit seam (D-01 explicit / D-03 exemplar): renders the
+        /// palette-mapped stylized output of the object currently loaded in this window
+        /// REGARDLESS of the preview lens — <see cref="_forceStylizeForFit"/> ORs into
+        /// the stylize lens for one synchronous recompute (the RequestBake
+        /// explicit-action precedent — never EditorApplication.delayCall) — reads the
+        /// live result's styled base back WITHOUT releasing it (the window keeps
+        /// managing <see cref="_liveResult"/>), accumulates the profile's references in
+        /// slot order with their weights, and runs the deterministic
+        /// <see cref="NamerStylePostFit.Fit"/>. Cancellable progress bar, extractor
+        /// read discipline (isReadable pre-check, per-texture failure name), and no
+        /// partial result on cancel or failure.
+        /// </summary>
+        internal NamerStylePostFitRunResult RunStylePostFit(NamerStyleProfile profile)
+        {
+            if (profile == null || !profile.IsExtracted)
+            {
+                return new NamerStylePostFitRunResult(cancelled: false, errorTextureName: null, notExtracted: true);
+            }
+
+            if (!HasLoadableSource || _pipeline == null)
+            {
+                return new NamerStylePostFitRunResult(cancelled: false, errorTextureName: null, notExtracted: true);
+            }
+
+            // Extract's first-line precedent (T-05-03): sanitize a hand-edited asset
+            // before any weight or reference is read.
+            profile.ClampToCaps();
+
+            string exemplarName = _selection.name;
+            try
+            {
+                // Stage 1 — read the references (extractor discipline: one at a time,
+                // isReadable pre-check so the failure is a named-texture result, buffer
+                // dropped before the next reference).
+                NamerStylePostStats referenceStats = new NamerStylePostStats();
+                for (int i = 0; i < profile.References.Count; i++)
+                {
+                    Texture2D reference = profile.References[i];
+                    if (reference == null)
+                    {
+                        continue;
+                    }
+
+                    float weight = i < profile.ReferenceWeights.Count
+                        ? profile.ReferenceWeights[i]
+                        : NamerEditorConstants.DefaultReferenceWeight;
+
+                    if (!reference.isReadable)
+                    {
+                        return new NamerStylePostFitRunResult(cancelled: false, errorTextureName: reference.name, notExtracted: false);
+                    }
+
+                    Color[] pixels;
+                    try
+                    {
+                        pixels = reference.GetPixels();
+                    }
+                    catch (Exception)
+                    {
+                        return new NamerStylePostFitRunResult(cancelled: false, errorTextureName: reference.name, notExtracted: false);
+                    }
+
+                    NamerStylePostFit.AccumulateReference(referenceStats, pixels, weight);
+                    pixels = null; // T-05-02 extractor precedent: drop the buffer before the next ref.
+
+                    if (EditorUtility.DisplayCancelableProgressBar(
+                            "Fitting NAMER Post Look",
+                            "Reading references (" + reference.name + ")",
+                            FitStageProgress(0, (float)(i + 1) / profile.References.Count)))
+                    {
+                        return new NamerStylePostFitRunResult(cancelled: true, errorTextureName: null, notExtracted: false);
+                    }
+                }
+
+                // Stage 2 — forced-stylized recompute + sync readback. The flag is
+                // ALWAYS reset in the finally; the side effect is honest (the preview
+                // pane keeps showing the stylized result that was just fitted).
+                if (EditorUtility.DisplayCancelableProgressBar(
+                        "Fitting NAMER Post Look",
+                        "Rendering stylized preview",
+                        FitStageProgress(1, 0f)))
+                {
+                    return new NamerStylePostFitRunResult(cancelled: true, errorTextureName: null, notExtracted: false);
+                }
+
+                _forceStylizeForFit = true;
+                try
+                {
+                    RecomputePreview();
+                }
+                finally
+                {
+                    _forceStylizeForFit = false;
+                }
+
+                RenderTexture stylizedBase = (RenderTexture)ResolveStylizePreviewBase(_liveResult);
+                if (stylizedBase == null)
+                {
+                    throw new InvalidOperationException(
+                        "the stylized preview of '" + exemplarName + "' produced no result; no fit was written");
+                }
+
+                AsyncGPUReadbackRequest request =
+                    NamerComputePipeline.RequestReadback(stylizedBase, 0, TextureFormat.RGBA32);
+                request.forcePlayerLoopUpdate = true;
+                request.WaitForCompletion();
+                if (request.hasError)
+                {
+                    throw new InvalidOperationException(
+                        "GPU readback of the stylized preview of '" + exemplarName + "' failed; no fit was written");
+                }
+
+                Color[] readbackColors = request.GetData<Color>().ToArray();
+
+                // Stage 3 — deterministic fit.
+                if (EditorUtility.DisplayCancelableProgressBar(
+                        "Fitting NAMER Post Look",
+                        "Fitting parameters",
+                        FitStageProgress(2, 0f)))
+                {
+                    return new NamerStylePostFitRunResult(cancelled: true, errorTextureName: null, notExtracted: false);
+                }
+
+                NamerStylePostStats sourceStats = NamerStylePostFit.AccumulateSource(readbackColors);
+                NamerStylePostFitParams fitted =
+                    NamerStylePostFit.Fit(sourceStats, referenceStats, profile.ComputeFingerprint());
+                return new NamerStylePostFitRunResult(fitted, exemplarName);
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+            }
+        }
+
+        /// <summary>
+        /// Overall Fit Look progress for one stage fraction (stage 0 = references,
+        /// 1 = stylized preview, 2 = the fit itself).
+        /// </summary>
+        private static float FitStageProgress(int stageIndex, float fraction)
+        {
+            return (stageIndex + Mathf.Clamp01(fraction)) / kPostFitStageCount;
+        }
+
+        /// <summary>
         /// 05-03 W3 attach-state copy (UI-SPEC locked): "" when nothing is attached
         /// (the W4 popup's disabled hint carries the null state), otherwise the
-        /// extraction honesty line. Internal for the formatting test.
+        /// extraction honesty line. 05.1-03 W8: extracted profiles append the fit
+        /// honesty clause — "post look fitted from {exemplar}" / "post look not
+        /// fitted". Internal for the formatting test.
         /// </summary>
         internal static string DescribeProfileState(NamerStyleProfile profile)
         {
@@ -2032,10 +2211,16 @@ namespace GraffitiEntertainment.Namer.Editor
                 return string.Empty;
             }
 
-            return profile.IsExtracted
-                ? profile.name + " — palette extracted (" + profile.PaletteAnchors.Count + " anchors, "
-                    + profile.Stats.ReferenceCount + " references)"
-                : profile.name + " — not extracted";
+            if (profile.IsExtracted)
+            {
+                return profile.name + " — palette extracted (" + profile.PaletteAnchors.Count + " anchors, "
+                    + profile.Stats.ReferenceCount + " references), "
+                    + (profile.HasPostFit
+                        ? "post look fitted from " + profile.PostFitExemplarName
+                        : "post look not fitted");
+            }
+
+            return profile.name + " — not extracted";
         }
 
         /// <summary>

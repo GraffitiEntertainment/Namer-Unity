@@ -288,7 +288,7 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>Fixed-float sRGB to linear conversion (EOTF), never a per-platform lookup.</summary>
-        private static float SrgbToLinear(float channel)
+        internal static float SrgbToLinear(float channel)
         {
             if (channel <= kSrgbLinearCutoff)
             {

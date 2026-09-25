@@ -12,8 +12,9 @@ namespace GraffitiEntertainment.Namer.Tests
     /// 05.1 plan 02 volume-writer tests (STYL-07/STYL-08): a fitted profile generates
     /// a five-component VolumeProfile (ACES tonemapping, fitted WB/CA/bloom values,
     /// curve round-trip) with every component wired as a real sub-asset (Pitfall 1),
-    /// the NamerGenerated stamp gates future overwrites, both refusal paths of the
-    /// D-02 locked overwrite discipline fire (non-generated target; opt-in off), and
+    /// the NamerGenerated stamp gates future overwrites, the non-generated refusal of
+    /// the D-02 overwrite discipline fires while the fit's own stamped companion is
+    /// re-writable with the opt-in OFF (CR-01, 05.1 review), and
     /// the composed path is profile-keyed at the destination ROOT (UI-SPEC section C —
     /// never a per-selection subfolder). Every writing test runs against a temp
     /// destination deleted in <c>finally</c>; the four touched NamerProcessor EditorPrefs
@@ -173,29 +174,29 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         [Test]
-        public void Write_RefusesWhenOptInOff()
+        public void Write_RefitOverwritesStampedVolumeWhenOptInOff()
         {
             NamerStyleProfile profile = CreateFittedProfile("VolumeWriterOptIn");
             PrefsSnapshot prefs = CapturePrefs();
             EnsureTempFolder();
+            // NewSettings leaves the opt-in OFF — the default-settings path CR-01 fixed.
             NamerProcessorSettings settings = NewSettings();
-            settings.OverwriteGenerated = true;
             try
             {
-                // First write succeeds and stamps the asset.
+                // First write succeeds and stamps the asset (fresh target — the
+                // opt-in is irrelevant when nothing exists at the path yet).
                 Assert.IsNotNull(NamerStyleVolumeWriter.Write(profile, settings));
 
-                settings.OverwriteGenerated = false;
-                InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-                    () => NamerStyleVolumeWriter.Write(profile, settings));
-                Assert.That(ex.Message, Does.Contain("Overwrite generated"),
-                    "the refusal must name the disabled opt-in (D-02 locked gate semantics)");
-
-                // Restoring the opt-in lets the re-write succeed with a FRESH profile
-                // instance — no "component already exists" throw (Pitfall 10).
-                settings.OverwriteGenerated = true;
+                // CR-01 (05.1 review), re-pinned from Write_RefusesWhenOptInOff: the
+                // companion Volume is auto-derived from profile truth (D-02) and the
+                // Fit Look contract promises refit-overwrite unconditionally, so a
+                // stamped Volume must be re-writable with the opt-in OFF — the old
+                // opt-in refusal broke every second Fit Look (and every Process-time
+                // regeneration) on default settings. The re-write still regenerates
+                // the Volume wholesale with a FRESH profile instance — no
+                // "component already exists" throw (Pitfall 10).
                 VolumeProfile rewritten = NamerStyleVolumeWriter.Write(profile, settings);
-                Assert.IsNotNull(rewritten, "re-fit with the opt-in restored regenerates the Volume wholesale");
+                Assert.IsNotNull(rewritten, "re-fit with the opt-in off regenerates the companion Volume");
                 Assert.AreEqual(5, rewritten.components.Count);
                 Assert.IsTrue(rewritten.TryGet(out Tonemapping tonemapping),
                     "the re-written Volume loads a full fresh component set from disk");

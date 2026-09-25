@@ -14,9 +14,11 @@ namespace GraffitiEntertainment.Namer.Editor
     /// every Fit Look; hand-tweaks made on the generated Volume are accepted-lost on
     /// re-fit. Every write rides the shared generated-asset discipline:
     /// <see cref="AssetGenerator.ValidateComposedPath"/> destination confinement,
-    /// <see cref="AssetGenerator.EnsureWritableTarget"/> (NamerGenerated-label check +
-    /// overwrite opt-in, GEN-03), and the <see cref="AssetGenerator.Stamp"/> that makes
-    /// the fresh asset overwritable by the next fit. Ping feedback belongs to the call
+    /// <see cref="AssetGenerator.EnsureWritableTarget"/> (NamerGenerated-label check;
+    /// the user's overwrite opt-in deliberately does NOT gate this auto-derived
+    /// companion — see <see cref="PreflightWriteGate"/>), and the
+    /// <see cref="AssetGenerator.Stamp"/> that makes the fresh asset overwritable by
+    /// the next fit. Ping feedback belongs to the call
     /// sites (Fit Look / Process), never here.
     /// </summary>
     public static class NamerStyleVolumeWriter
@@ -36,13 +38,34 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
+        /// CR-01 (05.1 review): the write gates <see cref="Write"/> will run, evaluated
+        /// WITHOUT writing — destination confinement plus the NamerGenerated-label
+        /// check. The Fit Look transaction calls this BEFORE mutating the profile, so a
+        /// refusal leaves the profile untouched instead of committing a fit whose
+        /// companion Volume then fails to regenerate (profile/Volume desync, and a
+        /// "Fit failed" report after the fit itself was committed). The user's
+        /// generated-asset overwrite opt-in (GEN-03) deliberately does not gate this
+        /// asset: the companion Volume is auto-derived from profile truth (D-02) and
+        /// the Fit Look contract promises refit-overwrite unconditionally (the P17
+        /// tooltip and USER_GUIDE both state it), so the opt-in would refuse every
+        /// second Fit Look — and every Process-time regeneration — on default
+        /// settings. Foreign (non-generated) assets at the path are still refused.
+        /// </summary>
+        internal static void PreflightWriteGate(NamerStyleProfile profile, NamerProcessorSettings settings)
+        {
+            string path = ComposeVolumePath(profile, settings);
+            AssetGenerator.ValidateComposedPath(path, settings.Destination);
+            AssetGenerator.EnsureWritableTarget(path, overwriteGenerated: true);
+        }
+
+        /// <summary>
         /// Generates the VolumeProfile asset for a fitted profile and returns the loaded,
         /// NamerGenerated-stamped asset. Throws <see cref="InvalidOperationException"/>
         /// when the profile is null or unfitted, when the composed path escapes the
-        /// configured destination, or when the overwrite discipline refuses the target
-        /// (non-generated asset at the path, or an existing generated asset while the
-        /// overwrite opt-in is off — D-02 locked gate semantics; the refusal text flows
-        /// to the "Fit failed: {message}" HelpBox in plan 03).
+        /// configured destination, or when a non-generated asset sits at the target
+        /// path (the overwrite opt-in does not gate this companion Volume —
+        /// <see cref="PreflightWriteGate"/>; the refusal text flows to the
+        /// "Fit failed: {message}" HelpBox in plan 03).
         /// </summary>
         public static VolumeProfile Write(NamerStyleProfile profile, NamerProcessorSettings settings)
         {
@@ -58,9 +81,9 @@ namespace GraffitiEntertainment.Namer.Editor
             // before any parameter is read.
             profile.ClampToCaps();
 
+            PreflightWriteGate(profile, settings);
+
             string path = ComposeVolumePath(profile, settings);
-            AssetGenerator.ValidateComposedPath(path, settings.Destination);
-            AssetGenerator.EnsureWritableTarget(path, settings.OverwriteGenerated);
 
             // Pitfall 10: a FRESH profile instance every write — never Add into a
             // loaded stale profile (that both orphans old TextureCurve sub-assets and

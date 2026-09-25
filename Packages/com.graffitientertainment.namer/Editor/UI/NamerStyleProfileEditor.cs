@@ -412,7 +412,10 @@ namespace GraffitiEntertainment.Namer.Editor
         /// Undo/SetDirty + <see cref="NamerStylePostFit.ApplyToProfile"/>, regenerates
         /// the Volume asset (pinging it), and finally raises
         /// <see cref="NamerStyleProfile.RaiseChanged"/> so the debounced preview
-        /// refresh sees the new fit. Failure paths surface the UI-SPEC HelpBox copy.
+        /// refresh sees the new fit. The companion-Volume write gates are pre-flighted
+        /// (<see cref="NamerStyleVolumeWriter.PreflightWriteGate"/>, CR-01) BEFORE the
+        /// profile is mutated, so a refusal never desyncs profile and Volume. Failure
+        /// paths surface the UI-SPEC HelpBox copy.
         /// </summary>
         private void RunFitLook()
         {
@@ -456,16 +459,27 @@ namespace GraffitiEntertainment.Namer.Editor
                     return;
                 }
 
+                // CR-01 (05.1 review): pre-flight the companion-Volume write gates
+                // BEFORE the profile is mutated, so a refusal (foreign asset at the
+                // path, destination escape) leaves the profile untouched — profile
+                // and generated Volume can never desync, and "Fit failed" never
+                // reports after the fit itself was committed. The gate exempts the
+                // fit's own companion from the overwrite opt-in (see
+                // NamerStyleVolumeWriter.PreflightWriteGate), so re-fits succeed on
+                // default settings as the P17 tooltip promises.
+                NamerProcessorSettings settings = new NamerProcessorSettings();
+                NamerStyleVolumeWriter.PreflightWriteGate(profile, settings);
+
                 Undo.RecordObject(profile, "Fit Look");
                 NamerStylePostFit.ApplyToProfile(profile, result.Params, result.ExemplarName);
                 EditorUtility.SetDirty(profile);
 
-                // D-02: regenerate the companion Volume from profile truth. The
-                // opt-in refusal (and any other write gate) surfaces here as the
-                // locked "Fit failed: {message}" copy.
+                // D-02: regenerate the companion Volume from profile truth. Any
+                // write-gate refusal surfaces here as the locked "Fit failed:
+                // {message}" copy.
                 try
                 {
-                    VolumeProfile volume = NamerStyleVolumeWriter.Write(profile, new NamerProcessorSettings());
+                    VolumeProfile volume = NamerStyleVolumeWriter.Write(profile, settings);
                     EditorGUIUtility.PingObject(volume);
                 }
                 catch (Exception exception)

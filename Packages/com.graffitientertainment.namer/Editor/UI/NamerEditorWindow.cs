@@ -131,7 +131,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private const float ChannelPaneSize = 48f;
         private const float ChannelPopupSize = 384f;
         private const float kCoverageSliderStep = 0.005f;
-        private const float kAlbedoPreviewHeight = 128f;
+        private const float kAlbedoPreviewHeight = 512f;
         private const float kCreateProfileButtonWidth = 110f;
 
         // 05-03 W4 "After View" popup indices (preview-only lens; 0 = the un-stylized
@@ -2226,8 +2226,9 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             EditorGUILayout.LabelField("Albedo Preview", EditorStyles.boldLabel);
 
-            float rowWidth = Mathf.Max(EditorGUIUtility.currentViewWidth - GUI.skin.verticalScrollbar.fixedWidth, 256f);
-            Rect rect = GUILayoutUtility.GetRect(rowWidth, kAlbedoPreviewHeight);
+            // Expand-to-content-width reservation (not an absolute row width): the row can
+            // never extend under the vertical scrollbar at narrow window widths.
+            Rect rect = GUILayoutUtility.GetRect(0f, kAlbedoPreviewHeight, GUILayout.ExpandWidth(true), GUILayout.Height(kAlbedoPreviewHeight));
 
             // Gamma projects sample the re-encoded cache built in RecomputePreview; Linear
             // projects bind the pool target directly.
@@ -2252,9 +2253,21 @@ namespace GraffitiEntertainment.Namer.Editor
                 _channelViewMaterial.SetTexture(BaseResidualMapId, stylizeBase);
                 _channelViewMaterial.SetFloat(OcclusionStrengthId, _namerMaterial.GetFloat(OcclusionStrengthId));
                 _channelViewMaterial.SetFloat(ChannelId, 0);
+
+                // Aspect-fit sub-rect inside the reserved row: uniform scale from the
+                // stylize base keeps its proportions (no stretch) and centers it in the
+                // dialog; vertical centering is a no-op when height is the binding side.
+                float fitScale = Mathf.Min(rect.width / stylizeBase.width, rect.height / stylizeBase.height);
+                float drawWidth = stylizeBase.width * fitScale;
+                float drawHeight = stylizeBase.height * fitScale;
+                Rect drawRect = new Rect(
+                    rect.x + (rect.width - drawWidth) * 0.5f,
+                    rect.y + (rect.height - drawHeight) * 0.5f,
+                    drawWidth,
+                    drawHeight);
                 if (Event.current.type == EventType.Repaint)
                 {
-                    Graphics.DrawTexture(rect, Texture2D.whiteTexture, _channelViewMaterial);
+                    Graphics.DrawTexture(drawRect, Texture2D.whiteTexture, _channelViewMaterial);
                 }
             }
             else

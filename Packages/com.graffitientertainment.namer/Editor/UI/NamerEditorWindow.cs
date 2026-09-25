@@ -2369,7 +2369,15 @@ namespace GraffitiEntertainment.Namer.Editor
                 return new NamerStylePostFitRunResult(cancelled: false, errorTextureName: null, notExtracted: true);
             }
 
-            if (!HasLoadableSource || _pipeline == null)
+            // WR-03 (05.1 review): no _pipeline pre-check here. _pipeline is created
+            // lazily by the debounced preview recompute, so in the window between
+            // loading a source and the first recompute the old check returned
+            // NotExtracted == true — a completely silent no-op (the button state has
+            // no locked reason for it, and the profile IS extracted). The stage-2
+            // forced RecomputePreview below runs EnsurePipeline() first, which
+            // creates the pipeline on demand; a source that still produces no live
+            // result fails loudly at the stylizedBase null check instead.
+            if (!HasLoadableSource)
             {
                 return new NamerStylePostFitRunResult(cancelled: false, errorTextureName: null, notExtracted: true);
             }

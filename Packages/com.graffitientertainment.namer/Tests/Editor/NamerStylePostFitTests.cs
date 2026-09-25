@@ -1,3 +1,4 @@
+using System;
 using GraffitiEntertainment.Namer.Editor;
 using NUnit.Framework;
 using UnityEngine;
@@ -90,6 +91,25 @@ namespace GraffitiEntertainment.Namer.Tests
             AssertKeysAreIdentical(first.RedKeys, second.RedKeys);
             AssertKeysAreIdentical(first.GreenKeys, second.GreenKeys);
             AssertKeysAreIdentical(first.BlueKeys, second.BlueKeys);
+        }
+
+        /// <summary>
+        /// WR-01 (05.1 review): a zero-mass reference distribution (every slot cleared
+        /// after extraction, or every weight 0) must be refused, not fitted — the old
+        /// path returned a maximal black grade (contrast/exposure/saturation railed,
+        /// every curve value 0) as success. The guard's message flows to the
+        /// "Fit failed: {message}" HelpBox via RunStylePostFit's existing catch.
+        /// </summary>
+        [Test]
+        public void Fit_ZeroReferenceMass_Throws()
+        {
+            NamerStylePostStats source = NamerStylePostFit.AccumulateSource(new[] { GrayPixel(0.5f) });
+            NamerStylePostStats emptyReference = new NamerStylePostStats();
+
+            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+                () => NamerStylePostFit.Fit(source, emptyReference, "zero-mass"));
+            Assert.That(ex.Message, Does.Contain("no weight"),
+                "the refusal must name the zero-mass reason (flows to the Fit failed HelpBox)");
         }
 
         /// <summary>

@@ -8,7 +8,8 @@ namespace GraffitiEntertainment.Namer.Tests
     /// <summary>
     /// 05.1 plan 03 lifecycle tests (STYL-08 tail): the Fit Look prerequisite seam
     /// (<see cref="NamerStyleProfileEditor.FitButtonState"/> — disabled with the locked
-    /// reasons while unextracted / exemplar-less, enabled otherwise), the
+    /// reasons while unextracted / exemplar-less / zero reference mass (WR-01),
+    /// enabled otherwise), the
     /// <see cref="NamerStylePostFit.ApplyToProfile"/> write (every fitted field lands on
     /// the profile, the fit is fresh, and re-fitting replaces wholesale with no
     /// accumulation), and the W8 attach-state honesty clauses of
@@ -27,6 +28,9 @@ namespace GraffitiEntertainment.Namer.Tests
 
         private const string NoExemplarReason =
             "Fit Look uses the object loaded in the Processor window (Tools > NAMER > Processor) — load a Source there first.";
+
+        private const string ZeroReferenceMassReason =
+            "Fit Look needs at least one reference with weight above 0 — all slots empty or every weight 0 leaves nothing to fit.";
 
         [Test]
         public void FitButtonState_NotExtracted_DisabledWithReason()
@@ -72,6 +76,11 @@ namespace GraffitiEntertainment.Namer.Tests
         {
             NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
             profile.ReferenceFingerprint = "hand-set-extract-fingerprint";
+            // WR-01: one weighted reference — the ready state now also requires
+            // positive reference mass, not just an extract fingerprint (an empty
+            // weight falls back to the default weight of 1).
+            Texture2D reference = new Texture2D(2, 2);
+            profile.References.Add(reference);
             try
             {
                 NamerStyleProfileEditor.FitLookButtonState state =
@@ -81,6 +90,32 @@ namespace GraffitiEntertainment.Namer.Tests
             }
             finally
             {
+                UnityEngine.Object.DestroyImmediate(reference);
+                UnityEngine.Object.DestroyImmediate(profile);
+            }
+        }
+
+        [Test]
+        public void FitButtonState_ZeroReferenceMass_DisabledWithReason()
+        {
+            NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            profile.ReferenceFingerprint = "hand-set-extract-fingerprint";
+            // WR-01: extracted but zero-mass — an assigned reference whose weight is
+            // clamped to 0 (the weight slider's range explicitly allows 0).
+            Texture2D reference = new Texture2D(2, 2);
+            profile.References.Add(reference);
+            profile.ReferenceWeights.Add(0f);
+            try
+            {
+                NamerStyleProfileEditor.FitLookButtonState state =
+                    NamerStyleProfileEditor.FitButtonState(profile, true);
+                Assert.IsTrue(state.Disabled, "an extracted profile whose references carry no weight disables Fit Look");
+                Assert.AreEqual(ZeroReferenceMassReason, state.ReasonMiniLabel,
+                    "the locked zero-mass prereq reason renders verbatim");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(reference);
                 UnityEngine.Object.DestroyImmediate(profile);
             }
         }

@@ -296,8 +296,11 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>
         /// P17 pure seam (05.1 plan 03, headless-testable): the Fit Look button is
         /// disabled while the profile carries no extracted statistics (locked
-        /// not-extracted reason) or while no exemplar window resolves (locked
-        /// no-exemplar reason); enabled otherwise. Busy state is not part of the seam.
+        /// not-extracted reason), while no exemplar window resolves (locked
+        /// no-exemplar reason), or while the references carry no positive weight (the
+        /// WR-01 mirror of NamerStylePostFit.Fit's zero-mass guard — the button
+        /// explains itself instead of failing on click); enabled otherwise. Busy state
+        /// is not part of the seam.
         /// </summary>
         internal static FitLookButtonState FitButtonState(NamerStyleProfile profile, bool exemplarAvailable)
         {
@@ -313,7 +316,41 @@ namespace GraffitiEntertainment.Namer.Editor
                     true, "Fit Look uses the object loaded in the Processor window (Tools > NAMER > Processor) — load a Source there first.");
             }
 
+            if (!HasPositiveReferenceWeight(profile))
+            {
+                return new FitLookButtonState(
+                    true, "Fit Look needs at least one reference with weight above 0 — all slots empty or every weight 0 leaves nothing to fit.");
+            }
+
             return new FitLookButtonState(false, null);
+        }
+
+        /// <summary>
+        /// WR-01 (05.1 review): true when any assigned reference slot carries a weight
+        /// above 0 — the profile-side mirror of the TotalWeight guard in
+        /// <see cref="NamerStylePostFit.Fit"/>. Null slots are skipped everywhere;
+        /// a missing weight entry falls back to the default weight (the shared
+        /// read discipline of RunStylePostFit / ClampToCaps / ComputeFingerprint).
+        /// </summary>
+        private static bool HasPositiveReferenceWeight(NamerStyleProfile profile)
+        {
+            for (int i = 0; i < profile.References.Count; i++)
+            {
+                if (profile.References[i] == null)
+                {
+                    continue;
+                }
+
+                float weight = i < profile.ReferenceWeights.Count
+                    ? profile.ReferenceWeights[i]
+                    : NamerEditorConstants.DefaultReferenceWeight;
+                if (weight > 0f)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>

@@ -240,9 +240,20 @@ namespace GraffitiEntertainment.Namer.Editor
         /// (5) master/R/G/B curves via histogram specification (channels composed with the
         /// master mapping), (6) bloom threshold as the p95 of the raw sRGB Max3 histogram.
         /// Every parameter is clamped to its named cap (threat T-05.1-01-01).
+        /// Throws <see cref="InvalidOperationException"/> when the reference
+        /// distribution carries no weight (WR-01, 05.1 review: every slot cleared after
+        /// extraction or every weight 0 is reachable through the UI, and a zero-mass
+        /// fit would rail every knob into a maximal black grade reported as success;
+        /// the message surfaces via the existing "Fit failed: {message}" path).
         /// </summary>
         public static NamerStylePostFitParams Fit(NamerStylePostStats source, NamerStylePostStats reference, string referenceFingerprint)
         {
+            if (reference.TotalWeight <= 0.0)
+            {
+                throw new InvalidOperationException(
+                    "The profile's references carry no weight (all slots empty or all weights 0) — no post look can be fitted.");
+            }
+
             NamerStylePostFitParams fitted = new NamerStylePostFitParams();
             fitted.Fingerprint = referenceFingerprint;
 

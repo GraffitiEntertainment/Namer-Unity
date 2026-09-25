@@ -138,6 +138,48 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>Fingerprint of the refs + weights the last Extract consumed (OQ-4; written only by Extract).</summary>
         public string ReferenceFingerprint = "";
 
+        // Fitted post look (05.1 D-02; written only by Fit Look — the profile is the
+        // source of truth, the generated Volume derives). An unfitted/neutral fit is
+        // identity post: zero white balance, zero EV, unity contrast/saturation, the
+        // neutral curve diagonal. Old profile assets deserialize the missing block to
+        // these neutral defaults (safe no-migration, UI-SPEC section C).
+
+        /// <summary>Fitted white-balance temperature in [-100,100] percent (05.1 D-02; written only by Fit Look).</summary>
+        public float PostTemperature = 0f;
+
+        /// <summary>Fitted white-balance tint in [-100,100] percent (05.1 D-02; written only by Fit Look).</summary>
+        public float PostTint = 0f;
+
+        /// <summary>Fitted post-exposure in EV stops (05.1 D-02; written only by Fit Look; sanitized to ±MaxFittedPostExposureEv).</summary>
+        public float PostExposureEv = 0f;
+
+        /// <summary>Fitted contrast in [-100,100] percent (05.1 D-02; written only by Fit Look).</summary>
+        public float PostContrast = 0f;
+
+        /// <summary>Fitted saturation in [-100,100] percent (05.1 D-02; written only by Fit Look).</summary>
+        public float PostSaturation = 0f;
+
+        /// <summary>Fitted bloom threshold, gamma-space like URP's own slider (05.1 STYL-08; default = URP Bloom's 0.9).</summary>
+        public float PostBloomThreshold = NamerEditorConstants.DefaultBloomThreshold;
+
+        /// <summary>Fitted master luma curve on the neutral [0,1] diagonal (05.1 D-02; written only by Fit Look).</summary>
+        public AnimationCurve PostMasterCurve = CreateNeutralCurve();
+
+        /// <summary>Fitted red channel curve on the neutral [0,1] diagonal (05.1 D-02; written only by Fit Look).</summary>
+        public AnimationCurve PostRedCurve = CreateNeutralCurve();
+
+        /// <summary>Fitted green channel curve on the neutral [0,1] diagonal (05.1 D-02; written only by Fit Look).</summary>
+        public AnimationCurve PostGreenCurve = CreateNeutralCurve();
+
+        /// <summary>Fitted blue channel curve on the neutral [0,1] diagonal (05.1 D-02; written only by Fit Look).</summary>
+        public AnimationCurve PostBlueCurve = CreateNeutralCurve();
+
+        /// <summary>Fingerprint of the refs + weights the last Fit Look consumed (05.1 D-02; written only by Fit Look).</summary>
+        public string PostFitFingerprint = "";
+
+        /// <summary>Display name of the exemplar object the last Fit Look was fitted from (05.1 D-03; written only by Fit Look).</summary>
+        public string PostFitExemplarName = "";
+
         /// <summary>
         /// Raised by <see cref="NamerStyleProfileEditor"/> after every value edit (OQ-2).
         /// The Processor window subscribes and routes the profile through its existing
@@ -177,6 +219,27 @@ namespace GraffitiEntertainment.Namer.Editor
         public bool IsStale
         {
             get { return IsExtracted && ComputeFingerprint() != ReferenceFingerprint; }
+        }
+
+        /// <summary>
+        /// True once a Fit Look has written a fit fingerprint onto the asset (05.1 D-02).
+        /// A profile with no serialized fit data reports false — old pre-05.1 assets take
+        /// this path (safe no-migration).
+        /// </summary>
+        public bool HasPostFit
+        {
+            get { return !string.IsNullOrEmpty(PostFitFingerprint); }
+        }
+
+        /// <summary>
+        /// True when the current refs + weights no longer match the fitted
+        /// <see cref="PostFitFingerprint"/> (05.1 UI-SPEC P19: drives the fit-staleness
+        /// warning). INDEPENDENT of the extract-staleness check <see cref="IsStale"/> —
+        /// the two warnings can fire separately. Only meaningful once fitted.
+        /// </summary>
+        public bool IsFitStale
+        {
+            get { return HasPostFit && ComputeFingerprint() != PostFitFingerprint; }
         }
 
         /// <summary>
@@ -254,6 +317,98 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             ToneMatch = Mathf.Clamp(ToneMatch, 0f, 1f);
+
+            // Fitted-post block (05.1 plan 02; the ToneMatch NaN-then-clamp precedent —
+            // Mathf.Clamp propagates NaN, so the fallback must run first on every float).
+            // NaN falls back to the neutral identity (0), except the bloom threshold,
+            // which falls back to its URP-default constant.
+            if (float.IsNaN(PostTemperature))
+            {
+                PostTemperature = 0f;
+            }
+
+            PostTemperature = Mathf.Clamp(PostTemperature, -100f, 100f);
+
+            if (float.IsNaN(PostTint))
+            {
+                PostTint = 0f;
+            }
+
+            PostTint = Mathf.Clamp(PostTint, -100f, 100f);
+
+            if (float.IsNaN(PostExposureEv))
+            {
+                PostExposureEv = 0f;
+            }
+
+            PostExposureEv = Mathf.Clamp(PostExposureEv, -NamerEditorConstants.MaxFittedPostExposureEv, NamerEditorConstants.MaxFittedPostExposureEv);
+
+            if (float.IsNaN(PostContrast))
+            {
+                PostContrast = 0f;
+            }
+
+            PostContrast = Mathf.Clamp(PostContrast, -100f, 100f);
+
+            if (float.IsNaN(PostSaturation))
+            {
+                PostSaturation = 0f;
+            }
+
+            PostSaturation = Mathf.Clamp(PostSaturation, -100f, 100f);
+
+            if (float.IsNaN(PostBloomThreshold))
+            {
+                PostBloomThreshold = NamerEditorConstants.DefaultBloomThreshold;
+            }
+
+            PostBloomThreshold = Mathf.Clamp(PostBloomThreshold, 0f, NamerEditorConstants.MaxBloomThreshold);
+
+            SanitizeCurve(ref PostMasterCurve);
+            SanitizeCurve(ref PostRedCurve);
+            SanitizeCurve(ref PostGreenCurve);
+            SanitizeCurve(ref PostBlueCurve);
+        }
+
+        /// <summary>
+        /// Neutral identity curve for the fitted-post block: the two-key diagonal
+        /// (0,0)→(1,1). Shared by the field initializers and the
+        /// <see cref="ClampToCaps"/> reset paths so a fresh profile and a sanitized
+        /// one agree on what "neutral" means.
+        /// </summary>
+        private static AnimationCurve CreateNeutralCurve()
+        {
+            return new AnimationCurve(new Keyframe(0f, 0f), new Keyframe(1f, 1f));
+        }
+
+        /// <summary>
+        /// Sanitizes one fitted-post curve (05.1 plan 02): null or zero-key curves reset
+        /// to the neutral diagonal; otherwise every key's time and value is clamped into
+        /// [0,1]. A NaN in any key's time or value resets the whole curve to the neutral
+        /// diagonal — Mathf.Clamp propagates NaN, so a clamp cannot repair it.
+        /// </summary>
+        private static void SanitizeCurve(ref AnimationCurve curve)
+        {
+            if (curve == null || curve.length == 0)
+            {
+                curve = CreateNeutralCurve();
+                return;
+            }
+
+            Keyframe[] keys = curve.keys;
+            for (int i = 0; i < keys.Length; i++)
+            {
+                if (float.IsNaN(keys[i].time) || float.IsNaN(keys[i].value))
+                {
+                    curve = CreateNeutralCurve();
+                    return;
+                }
+
+                keys[i].time = Mathf.Clamp(keys[i].time, 0f, 1f);
+                keys[i].value = Mathf.Clamp(keys[i].value, 0f, 1f);
+            }
+
+            curve.keys = keys;
         }
 
         /// <summary>

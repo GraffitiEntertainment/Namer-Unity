@@ -112,5 +112,20 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>Default hue mode popup index (D-05; 0 = Preserve, 1 = Replace).</summary>
         public const int DefaultHueMode = 0;
+
+        /// <summary>Default fitted bloom threshold (05.1 STYL-08; 0.9 = URP Bloom's own default, gamma-space).</summary>
+        public const float DefaultBloomThreshold = 0.9f;
+
+        /// <summary>Default bloom intensity written onto the generated Volume (05.1 STYL-08; the artist knob — tweakable on the Volume, never fitted).</summary>
+        public const float DefaultBloomIntensity = 1f;
+
+        /// <summary>Maximum key count per fitted post curve (05.1; TextureCurve bakes to a 128-texel texture, so more keys buy nothing).</summary>
+        public const int MaxCurveKeys = 16;
+
+        /// <summary>Maximum fitted post-exposure magnitude in EV (05.1). Value-pinned to plan 01's private fit-side cap NamerStylePostFit.kMaxFittedPostExposureEv (same 10f) — two deliberate same-value definitions because the plans are wave-1 parallel and each must pass its own standalone Roslyn gate.</summary>
+        public const float MaxFittedPostExposureEv = 10f;
+
+        /// <summary>Maximum fitted bloom threshold (05.1; URP Bloom threshold is Min 0 — upper bound for sanitized hand edits).</summary>
+        public const float MaxBloomThreshold = 10f;
     }
 }

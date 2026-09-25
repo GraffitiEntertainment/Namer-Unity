@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 Phase: 05.1 — COMPLETE
 Plan: 1 of 4
 Status: Phase 05.1 complete
-Last activity: 2026-09-25 -- Phase 05.1 marked complete
+Last activity: 2026-09-25 -- Completed quick task 260925-je1: NamerPostBloom magenta (URP Core.hlsl include) + albedo preview 512px aspect-fit
 
 Progress: [██████████] 100%
 
@@ -240,6 +240,7 @@ None yet.
 | 260921-l5s | docs/USER_GUIDE.md (TOC + 8 UI-region sections in draw order, verbatim labels, b75d925 AO semantics) + 11 section images under docs/images/ (user-supplied captures incl. bonus toggle-triangles) + README.md rewritten as project overview with NAMER-preview.png hero (reserved for README per user direction) | 2026-09-21 | 1d6d30d | [260921-l5s-docs-user-guide-section-images](./quick/260921-l5s-docs-user-guide-section-images/) |
 | 260924-ehm | NamerEditorWindow UX fixes: persistent editable Source pick (survives selection change + domain reload for asset picks), one-step Create Profile... create-and-attach, embedded profile inspector in the Stylization section (full P1–P14 editing, zero drawing-code duplication), lens-honest 2D albedo preview showing the styled SOURCE base pre-projection, View Stylized button retained when neutral; task-8 stylized-preview checkbox reverted as redundant with the After View popup (series ce99e81..e54d938) | 2026-09-24 | e54d938 | [260924-ehm-namereditorwindow-ux-fixes-persistent-so](./quick/260924-ehm-namereditorwindow-ux-fixes-persistent-so/) |
 | 260924-hk7 | Palette transfer redesign (supersedes absolute-snap operator): CSPaletteTransfer relative ramp — hue ramp unchanged (Preserve/Replace stay), saturation boost-only with achromatic texels (sat < 0.15) never tinted, luma moved out of StyleStrength into new Tone Match profile slider [0,1] default 0; NamerStyleStylization.Active ORs tone-only dispatch; _ToneMatch set unconditionally (Metal unbound-property silent-skip); old profiles deserialize ToneMatch = 0; live EditMode 54/54 targeted + 250/251 full (1 pre-existing AoContrast isolation leak) | 2026-09-24 | 2582b3b | [260924-hk7-palette-transfer-redesign-relative-palet](./quick/260924-hk7-palette-transfer-redesign-relative-palet/) |
+| 260925-je1 | Fix Stylized + Post magenta lens: NamerPostBloom core Common/SpaceTransforms includes swapped for the house URP Core.hlsl (UnityInput → UNITY_MATRIX_M for TransformObjectToHClip on Metal; 3-pass warm-draw verified clean via relay) + albedo preview 512px aspect-fit, horizontally centered, no scrollbar overflow (d951b05+16292eb) | 2026-09-25 | 16292eb | [260925-je1-fix-namerpostbloom-magenta-urp-core-incl](./quick/260925-je1-fix-namerpostbloom-magenta-urp-core-incl/) |
 
 ## Deferred Items
 

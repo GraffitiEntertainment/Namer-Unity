@@ -40,6 +40,19 @@ Shader "GraffitiEntertainment.Namer/NAMER"
         [HideInInspector] _DbgEnableNormal("__dbgEnableNormal", Float) = 1.0
         [HideInInspector] _DbgRoughnessNeutral("__dbgRoughnessNeutral", Float) = 0.5
 
+        // 05.1 D-04 in-shader post-preview uniforms (hidden — written by the
+        // processor window via Shader.PropertyToID as ONE full table when the
+        // After View lens reads "Stylized + Post"). _PostEnable defaults to 0 —
+        // the identity gate — so shipped runtime materials are byte-identical;
+        // the rest default to identity values (LMS (1,1,1), z = 1, s = 1,
+        // EV = 0, curve strip gray).
+        [HideInInspector] _PostEnable("__postEnable", Float) = 0.0
+        [HideInInspector] _PostLmsCoeffs("__postLmsCoeffs", Vector) = (1,1,1,1)
+        [HideInInspector] _PostExposureEv("__postExposureEv", Float) = 0.0
+        [HideInInspector] _PostContrastZ("__postContrastZ", Float) = 1.0
+        [HideInInspector] _PostSaturationS("__postSaturationS", Float) = 1.0
+        [HideInInspector] _PostCurveTex("__postCurveTex", 2D) = "gray" {}
+
         // Keyword-setting toggles: each checkbox writes its float AND sets the
         // matching shader keyword, so the keyword-gated code paths (AlphaDiscard,
         // emission, transparency) are reachable from the default inspector
@@ -134,6 +147,9 @@ Shader "GraffitiEntertainment.Namer/NAMER"
             #pragma multi_compile_instancing
 
             #include "NamerSurface.hlsl"
+            // 05.1: post-preview include — ForwardLit ONLY (beside NamerSurface);
+            // ShadowCaster/Depth/Meta passes stay post-free.
+            #include "NamerPostPreview.hlsl"
 
             // The NAMER shader always decodes a tangent-space normal from the packed
             // surface texture, so the tangent interpolator is always required.
@@ -281,6 +297,12 @@ Shader "GraffitiEntertainment.Namer/NAMER"
                 InitializeNamerBakedGIData(input, inputData);
 
                 half4 color = UniversalFragmentPBR(inputData, surfaceData);
+                // 05.1 D-04: in-shader post-preview grade (Stylized + Post lens
+                // ONLY, between the PBR compose and fog so the grade hits lit
+                // color, not fog/alpha). _PostEnable defaults to 0 — shipped
+                // runtime materials are byte-identical; the scene Volume stays
+                // the runtime truth.
+                ApplyNamerPostPreview(color.rgb);
                 color.rgb = MixFog(color.rgb, inputData.fogCoord);
                 color.a = OutputAlpha(color.a, IsSurfaceTypeTransparent(_Surface));
 

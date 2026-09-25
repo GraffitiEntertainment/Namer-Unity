@@ -337,7 +337,7 @@ Plans:
 
 **Wave 2** *(blocked on Waves 1)*
 
-- [ ] 05.1-03-PLAN.md — Fit Look lifecycle: window exemplar seam (forced-stylized recompute + readback + fit), profile inspector P15–P20, W8 attach-state, Process companion-Volume regeneration, lifecycle pins + USER_GUIDE
+- [x] 05.1-03-PLAN.md — Fit Look lifecycle: window exemplar seam (forced-stylized recompute + readback + fit), profile inspector P15–P20, W8 attach-state, Process companion-Volume regeneration, lifecycle pins + USER_GUIDE
 
 **Wave 3** *(blocked on Waves 1-2)*
 
@@ -357,4 +357,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 4. Vertex-Color Decomposition + Residual | 5/5 | Complete   | 2026-09-01 |
 | 04.1. Roughness Extraction + One-Texture (INSERTED) | 7/7 | Complete   | 2026-09-16 |
 | 5. Stylization | 3/3 | Complete   | 2026-09-24 |
-| 5.1. Reference-fitted URP Post-processing Look (INSERTED) | 2/4 | In Progress|  |
+| 5.1. Reference-fitted URP Post-processing Look (INSERTED) | 3/4 | In Progress|  |

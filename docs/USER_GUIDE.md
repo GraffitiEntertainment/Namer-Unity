@@ -147,6 +147,16 @@ The **Fitted Post Look** block fits the references' global post-processing grade
 
 Fit Look is an explicit action — it never runs on the slider debounce and never automatically on Process. The profile is the source of truth: one fit per profile, and refitting with another object replaces the scene look; hand-tweaks made on the generated Volume are lost on re-fit. When the reference images change after a fit, the block warns `References changed since the fit — Fit Look again to refresh the post look.` Whenever Process runs with a fitted profile attached, the companion Volume is regenerated so the generated bundle never desyncs from profile truth.
 
+### After View
+
+The **After View** popup (top of Preview/Debug) is a preview-only lens over the After pane; it never gates what Process bakes. Three entries:
+
+- `NAMER` — the un-stylized packed result, byte-identical to the no-profile baseline.
+- `Stylized NAMER` — applies the attached Style Profile (palette transfer, smoothing, and the profile's bake-side controls). The albedo preview below shows its own caption and the `View Stylized` flipper disappears.
+- `Stylized + Post` — the stylized base plus the profile's fitted post look (white balance, exposure, contrast, saturation, curves, bloom) applied in-shader to the After pane, matching the generated scene Volume so the look can be approved without play mode. The albedo preview caption reads `Stylized albedo — the fitted post look renders in the 3D After pane only` because the grade belongs to the lit 3D view, not the flat albedo strip.
+
+Without a fitted post look, `Stylized + Post` falls back to plain `Stylized NAMER` and an info box explains: `No fitted post look on {ProfileName} — showing Stylized NAMER. Press Fit Look in the profile's Fitted Post Look section.` Switching entries recomputes the preview in memory 0.3 s after the change; nothing is written to disk.
+
 ## Decomposition
 
 ![Decomposition foldout and statistics](images/decomposition-section.png)

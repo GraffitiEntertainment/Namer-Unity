@@ -1,6 +1,8 @@
 using System;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
 
 namespace GraffitiEntertainment.Namer.Editor
 {
@@ -530,7 +532,7 @@ namespace GraffitiEntertainment.Namer.Editor
             ReleasePostBloomTargets();
             if (_postBloomMaterial != null)
             {
-                DestroyImmediate(_postBloomMaterial);
+                UnityEngine.Object.DestroyImmediate(_postBloomMaterial);
                 _postBloomMaterial = null;
             }
         }

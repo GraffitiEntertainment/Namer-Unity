@@ -378,7 +378,7 @@ namespace GraffitiEntertainment.Namer.Editor
             }
         }
 
-        private static void ValidateComposedPath(string path, string destinationFolder)
+        internal static void ValidateComposedPath(string path, string destinationFolder)
         {
             string fullPath = Path.GetFullPath(path);
             string fullDestination = Path.GetFullPath(destinationFolder.TrimEnd('/', '\\'));
@@ -772,7 +772,7 @@ namespace GraffitiEntertainment.Namer.Editor
         // Overwrite gate + label stamping (D-04, T-03-02)
         // ---------------------------------------------------------------------
 
-        private static void EnsureWritableTarget(string path, bool overwriteGenerated)
+        internal static void EnsureWritableTarget(string path, bool overwriteGenerated)
         {
             UnityEngine.Object existing = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(path);
             if (existing == null)
@@ -796,7 +796,7 @@ namespace GraffitiEntertainment.Namer.Editor
             }
         }
 
-        private static void Stamp(UnityEngine.Object asset)
+        internal static void Stamp(UnityEngine.Object asset)
         {
             if (asset == null)
             {

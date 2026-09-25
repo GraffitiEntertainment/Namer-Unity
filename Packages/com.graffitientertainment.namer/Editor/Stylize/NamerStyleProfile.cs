@@ -382,14 +382,16 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Sanitizes one fitted-post curve (05.1 plan 02): null or zero-key curves reset
-        /// to the neutral diagonal; otherwise every key's time and value is clamped into
-        /// [0,1]. A NaN in any key's time or value resets the whole curve to the neutral
-        /// diagonal — Mathf.Clamp propagates NaN, so a clamp cannot repair it.
+        /// Sanitizes one fitted-post curve (05.1 plan 02): null or degenerate (&lt;2-key)
+        /// curves reset to the neutral diagonal; otherwise every key's time and value is
+        /// clamped into [0,1]. A NaN in any key's time or value resets the whole curve to
+        /// the neutral diagonal — Mathf.Clamp propagates NaN, so a clamp cannot repair it.
+        /// Unity's AnimationCurve constructor silently drops NaN keys, so a NaN authored
+        /// into a curve often surfaces here as a short curve rather than as a NaN.
         /// </summary>
         private static void SanitizeCurve(ref AnimationCurve curve)
         {
-            if (curve == null || curve.length == 0)
+            if (curve == null || curve.length < 2)
             {
                 curve = CreateNeutralCurve();
                 return;

@@ -186,5 +186,67 @@ namespace GraffitiEntertainment.Namer.Tests
                 Object.DestroyImmediate(fitted);
             }
         }
+        /// <summary>
+        /// Bloom threshold conversion (05.1 D-04): the pure helper applies URP's exact
+        /// render-time gamma-to-linear conversion to the fitted threshold and returns
+        /// the disabled sentinel 0 for null/unfitted profiles.
+        /// </summary>
+        [Test]
+        public void BloomThresholdLinear_MatchesUrpRenderTimeConversion()
+        {
+            Assert.AreEqual(0f, NamerEditorWindow.BloomThresholdLinear(null),
+                "no profile must disable the pane bloom chain (0 sentinel)");
+
+            NamerStyleProfile unfitted = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            NamerStyleProfile fitted = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            try
+            {
+                Assert.AreEqual(0f, NamerEditorWindow.BloomThresholdLinear(unfitted),
+                    "an unfitted profile must disable the pane bloom chain (0 sentinel)");
+
+                fitted.PostFitFingerprint = "synthetic-fit-fingerprint";
+                fitted.PostBloomThreshold = 0.9f;
+                Assert.AreEqual(
+                    Mathf.GammaToLinearSpace(0.9f),
+                    NamerEditorWindow.BloomThresholdLinear(fitted),
+                    "the fitted threshold must convert through the exact call URP's PostProcessPass applies at render time");
+            }
+            finally
+            {
+                Object.DestroyImmediate(unfitted);
+                Object.DestroyImmediate(fitted);
+            }
+        }
+
+        /// <summary>
+        /// Renderer state (05.1 D-04): SetPostBloom(0, 0) — and the never-set state —
+        /// keep the renderer on the disabled path (the Enabled probe stays false and
+        /// the lazily-created material is never created), so Render stays
+        /// byte-identical to the pre-05.1 renderer: zero extra RTs, zero blits.
+        /// </summary>
+        [Test]
+        public void SetPostBloom_Zero_DisablesPaneBloomChain()
+        {
+            NamerPreviewRenderer renderer = new NamerPreviewRenderer();
+            try
+            {
+                Assert.IsFalse(renderer.PostBloomEnabled,
+                    "a fresh renderer must sit on the disabled (byte-identical) path");
+                renderer.SetPostBloom(0f, 0f);
+                Assert.IsFalse(renderer.PostBloomEnabled,
+                    "SetPostBloom(0, 0) must leave the disabled path — no material, no RTs");
+
+                renderer.SetPostBloom(0.5f, 1f);
+                Assert.IsTrue(renderer.PostBloomEnabled, "arming the chain flips the probe");
+
+                renderer.SetPostBloom(0f, 0f);
+                Assert.IsFalse(renderer.PostBloomEnabled,
+                    "re-disabling must return to the disabled path (temporaries released)");
+            }
+            finally
+            {
+                renderer.Dispose();
+            }
+        }
     }
 }

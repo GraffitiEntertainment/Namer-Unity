@@ -759,6 +759,30 @@ namespace GraffitiEntertainment.Namer.Editor
             bool postActive = _afterView == kAfterViewPost;
             ApplyPostLook(_namerMaterial, profile, postActive);
             ApplyPostLook(_generatedMaterial, profile, postActive);
+
+            // Pane bloom rides the same funnel: armed only when the post lens is
+            // active AND the profile carries a fit (the W6 degrade falls back to
+            // plain Stylized NAMER — no bloom either). Disabled writes (0, 0),
+            // which keeps Render byte-identical (zero extra RTs/blits).
+            bool fitted = postActive && profile != null && profile.HasPostFit;
+            _preview.SetPostBloom(
+                BloomThresholdLinear(profile),
+                fitted ? NamerEditorConstants.DefaultBloomIntensity : 0f);
+        }
+
+        /// <summary>
+        /// 05.1 D-04: the bloom threshold in LINEAR space — the exact conversion
+        /// URP's PostProcessPass applies at render time to the gamma-space slider
+        /// value. A null or unfitted profile returns 0 (the disabled sentinel).
+        /// </summary>
+        internal static float BloomThresholdLinear(NamerStyleProfile profile)
+        {
+            if (profile == null || !profile.HasPostFit)
+            {
+                return 0f;
+            }
+
+            return Mathf.GammaToLinearSpace(profile.PostBloomThreshold);
         }
 
         /// <summary>

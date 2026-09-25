@@ -249,6 +249,16 @@ namespace GraffitiEntertainment.Namer.Editor
         // result that was just fitted.
         internal bool _forceStylizeForFit;
 
+        // 05.1 review WR-02: set only inside RunStylePostFit, always beside
+        // _forceStylizeForFit — this profile replaces ResolveStyleProfile(_settings)
+        // for that one forced recompute, so the stylized base the fit measures is
+        // computed with the profile BEING fitted. Without it, the standalone
+        // (Project window) inspector's fallback exemplar window may carry a
+        // different attached profile — or none, making _forceStylizeForFit a no-op —
+        // and the reference grade would silently absorb the missing/wrong
+        // stylization into the post knobs. Always reset in the same finally.
+        internal NamerStyleProfile _fitStyleProfileOverride;
+
         private string _status = string.Empty;
         private bool _statusIsError;
 
@@ -545,7 +555,12 @@ namespace GraffitiEntertainment.Namer.Editor
                 // always bakes with the profile). 05.1 plan 03: a forced fit pass
                 // (_forceStylizeForFit, set only inside RunStylePostFit) ORs into the
                 // lens so the fit reads the stylized output regardless of the popup.
-                NamerStyleProfile styleProfile = NamerProcessor.ResolveStyleProfile(_settings);
+                // 05.1 review WR-02: that forced pass stylizes with the profile being
+                // fitted (the inspector's target), not the window's attached profile —
+                // the fallback exemplar window may have a different profile or none.
+                NamerStyleProfile styleProfile = _fitStyleProfileOverride != null
+                    ? _fitStyleProfileOverride
+                    : NamerProcessor.ResolveStyleProfile(_settings);
                 bool stylizeLens = styleProfile != null
                     && (_afterView == kAfterViewStylized || _afterView == kAfterViewPost || _forceStylizeForFit);
 
@@ -2341,7 +2356,9 @@ namespace GraffitiEntertainment.Namer.Editor
         /// live result's styled base back WITHOUT releasing it (the window keeps
         /// managing <see cref="_liveResult"/>), accumulates the profile's references in
         /// slot order with their weights, and runs the deterministic
-        /// <see cref="NamerStylePostFit.Fit"/>. Cancellable progress bar, extractor
+        /// <see cref="NamerStylePostFit.Fit"/>. The stylized base is computed with the
+        /// passed profile itself (<see cref="_fitStyleProfileOverride"/>, WR-02) —
+        /// never the window's own attached profile. Cancellable progress bar, extractor
         /// read discipline (isReadable pre-check, per-texture failure name), and no
         /// partial result on cancel or failure.
         /// </summary>
@@ -2407,9 +2424,14 @@ namespace GraffitiEntertainment.Namer.Editor
                     }
                 }
 
-                // Stage 2 — forced-stylized recompute + sync readback. The flag is
+                // Stage 2 — forced-stylized recompute + sync readback. The flags are
                 // ALWAYS reset in the finally; the side effect is honest (the preview
                 // pane keeps showing the stylized result that was just fitted).
+                // WR-02 (05.1 review): the recompute stylizes with the profile being
+                // fitted — the override replaces the window's attached profile for
+                // this one pass, so a fallback exemplar window with a different (or
+                // no) attached profile can never skew or silently skip the
+                // stylization the post fit is decomposed against.
                 if (EditorUtility.DisplayCancelableProgressBar(
                         "Fitting NAMER Post Look",
                         "Rendering stylized preview",
@@ -2419,6 +2441,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 }
 
                 _forceStylizeForFit = true;
+                _fitStyleProfileOverride = profile;
                 try
                 {
                     RecomputePreview();
@@ -2426,6 +2449,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 finally
                 {
                     _forceStylizeForFit = false;
+                    _fitStyleProfileOverride = null;
                 }
 
                 RenderTexture stylizedBase = (RenderTexture)ResolveStylizePreviewBase(_liveResult);

@@ -16,7 +16,7 @@ The journey moves from the format contract outward. First we lock the NAMER pack
 - [x] **Phase 3: Asset Generation + Editor Workflow + Preview** - Generate NAMER assets non-destructively from an editor window with preview (completed 2026-08-27)
 - [x] **Phase 4: Vertex-Color Decomposition + Residual** - Fit low-frequency color into vertex colors with an adaptive residual texture (gap closure in progress; verification found 3 gaps) (completed 2026-09-01)
 - [x] **Phase 5: Stylization** - Apply reference-image-driven, hue-preserving stylization via NAMERStyleProfile (completed 2026-09-24)
-- [ ] **Phase 5.1: Reference-fitted URP post-processing look** - Fit the reference look's global grade into a generated URP Volume profile after the baked palette mapping (INSERTED)
+- [x] **Phase 5.1: Reference-fitted URP post-processing look** - Fit the reference look's global grade into a generated URP Volume profile after the baked palette mapping (INSERTED) (completed 2026-09-25)
 
 ## Phase Details
 
@@ -341,7 +341,7 @@ Plans:
 
 **Wave 3** *(blocked on Waves 1-2)*
 
-- [ ] 05.1-04-PLAN.md — Stylized + Post preview lens: NamerPostPreview.hlsl LDR-chain twin composed in ForwardLit, W5–W8 lens wiring + post uniform table, pane-level bloom approximation, lens pins + USER_GUIDE
+- [x] 05.1-04-PLAN.md — Stylized + Post preview lens: NamerPostPreview.hlsl LDR-chain twin composed in ForwardLit, W5–W8 lens wiring + post uniform table, pane-level bloom approximation, lens pins + USER_GUIDE
 
 ## Progress
 
@@ -357,4 +357,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 4. Vertex-Color Decomposition + Residual | 5/5 | Complete   | 2026-09-01 |
 | 04.1. Roughness Extraction + One-Texture (INSERTED) | 7/7 | Complete   | 2026-09-16 |
 | 5. Stylization | 3/3 | Complete   | 2026-09-24 |
-| 5.1. Reference-fitted URP Post-processing Look (INSERTED) | 3/4 | In Progress|  |
+| 5.1. Reference-fitted URP Post-processing Look (INSERTED) | 4/4 | Complete   | 2026-09-25 |

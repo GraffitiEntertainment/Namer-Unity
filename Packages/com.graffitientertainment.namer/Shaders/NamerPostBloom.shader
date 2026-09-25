@@ -38,8 +38,7 @@ Shader "Hidden/NamerPostBloom"
         ZTest Always
 
         HLSLINCLUDE
-        #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
-        #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/SpaceTransforms.hlsl"
+        #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
         TEXTURE2D(_MainTex);   SAMPLER(sampler_MainTex);
         TEXTURE2D(_BloomTex);  SAMPLER(sampler_BloomTex);

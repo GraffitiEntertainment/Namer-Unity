@@ -1,6 +1,7 @@
 using System;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace GraffitiEntertainment.Namer.Editor
 {
@@ -37,6 +38,8 @@ namespace GraffitiEntertainment.Namer.Editor
         private bool advancedFoldout;
         private bool isExtracting;
         private string extractError;
+        private bool isFitting;
+        private string fitError;
 
         /// <summary>
         /// Host Processor window of the embedded-inspector context (05.1 plan 03 P17):
@@ -46,6 +49,29 @@ namespace GraffitiEntertainment.Namer.Editor
         /// resolves any open window with a loadable source instead.
         /// </summary>
         internal NamerEditorWindow HostWindow;
+
+        /// <summary>
+        /// Pure prerequisite state of the P17 Fit Look button (05.1 plan 03):
+        /// <see cref="Disabled"/> plus the locked prereq reason rendered as a
+        /// miniLabel under the disabled button (null when enabled). Busy state is
+        /// deliberately NOT part of this seam — the "Fitting…" label swap covers it;
+        /// the seam is about prerequisites only.
+        /// </summary>
+        internal readonly struct FitLookButtonState
+        {
+            /// <summary>Creates the button state from the prereq evaluation.</summary>
+            public FitLookButtonState(bool disabled, string reasonMiniLabel)
+            {
+                Disabled = disabled;
+                ReasonMiniLabel = reasonMiniLabel;
+            }
+
+            /// <summary>True when the Fit Look button must render disabled.</summary>
+            public bool Disabled { get; }
+
+            /// <summary>Locked prereq reason shown under the disabled button; null when enabled.</summary>
+            public string ReasonMiniLabel { get; }
+        }
 
         private static string DebounceSuffix
         {
@@ -78,6 +104,7 @@ namespace GraffitiEntertainment.Namer.Editor
 
             DrawExtractButton();
             DrawStatistics();
+            DrawFittedPostLookBlock();
         }
 
         /// <summary>P2 slot rows, or the empty-state block when the list has no slots.</summary>
@@ -264,6 +291,229 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             EditorGUILayout.Space();
+        }
+
+        /// <summary>
+        /// P17 pure seam (05.1 plan 03, headless-testable): the Fit Look button is
+        /// disabled while the profile carries no extracted statistics (locked
+        /// not-extracted reason) or while no exemplar window resolves (locked
+        /// no-exemplar reason); enabled otherwise. Busy state is not part of the seam.
+        /// </summary>
+        internal static FitLookButtonState FitButtonState(NamerStyleProfile profile, bool exemplarAvailable)
+        {
+            if (profile == null || !profile.IsExtracted)
+            {
+                return new FitLookButtonState(
+                    true, "Fit Look needs extracted statistics first — press Extract Style Stats.");
+            }
+
+            if (!exemplarAvailable)
+            {
+                return new FitLookButtonState(
+                    true, "Fit Look uses the object loaded in the Processor window (Tools > NAMER > Processor) — load a Source there first.");
+            }
+
+            return new FitLookButtonState(false, null);
+        }
+
+        /// <summary>
+        /// P15-P20: the Fitted Post Look block — header + help line (P15), the
+        /// fit-source status line (P16, D-03 one-fit-per-profile honesty), the explicit
+        /// Fit Look button with the verbatim CTA tooltip and prereq reasons (P17, D-01:
+        /// never on the debounce, never automatically on Process), the read-only
+        /// fitted-parameter rows with "—" placeholders before the first fit (P18), and
+        /// the fit staleness warning (P19, independent of the extract-staleness box).
+        /// Read-only is deliberate: the artist-tweak surface is the generated Volume
+        /// (D-02); the profile stays the regeneration truth.
+        /// </summary>
+        private void DrawFittedPostLookBlock()
+        {
+            EditorGUILayout.LabelField("Fitted Post Look", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(
+                "Fitted URP post parameters — regenerated into a Volume profile asset; this profile is the source of truth.",
+                EditorStyles.miniLabel);
+
+            // P16: fit-source status line (D-03).
+            EditorGUILayout.LabelField(
+                profile.HasPostFit
+                    ? "Fitted from: " + profile.PostFitExemplarName + " — one fit per profile; refitting with another object replaces the scene look."
+                    : "Not fitted — load a source in the Processor window, then press Fit Look.",
+                EditorStyles.miniLabel);
+
+            // P17: the button. Exemplar resolution per the planner decision — the host
+            // window (embedded context), else the first open Processor window with a
+            // loadable source; no candidate leaves the button disabled with the locked
+            // no-exemplar reason.
+            FitLookButtonState buttonState = FitButtonState(profile, ResolveExemplarWindow() != null);
+            bool disabled = isFitting || buttonState.Disabled;
+            using (new EditorGUI.DisabledScope(disabled))
+            {
+                if (GUILayout.Button(new GUIContent(
+                        isFitting ? "Fitting…" : "Fit Look",
+                        "Fits the reference look's global grade (white balance, post-exposure, contrast, saturation, master/RGB curves, bloom threshold) from the palette-mapped preview of the object currently loaded in the Processor window onto this profile, then regenerates the URP Volume asset. Explicit action — never runs on the slider debounce or on Process. Re-fitting replaces the fit and overwrites the generated Volume; hand-tweaks to the generated Volume are lost (the profile is the truth).")))
+                {
+                    RunFitLook();
+                }
+            }
+
+            if (!isFitting && buttonState.ReasonMiniLabel != null)
+            {
+                EditorGUILayout.LabelField(buttonState.ReasonMiniLabel, EditorStyles.miniLabel);
+            }
+
+            if (!string.IsNullOrEmpty(fitError))
+            {
+                EditorGUILayout.HelpBox(fitError, MessageType.Error);
+            }
+
+            DrawFittedPostRows();
+
+            // P19: fit staleness — fires independently of the extract-staleness box.
+            if (profile.IsFitStale)
+            {
+                EditorGUILayout.HelpBox(
+                    "References changed since the fit — Fit Look again to refresh the post look.",
+                    MessageType.Warning);
+            }
+
+            EditorGUILayout.Space();
+        }
+
+        /// <summary>
+        /// P17 exemplar resolution (05.1 planner decision): the host window when drawn
+        /// embedded AND its Source is loaded, else the first open Processor window with
+        /// a loadable source — the "one visible, honest source of exemplar truth"
+        /// contract. The P16 line names the exemplar used after the fact. Null when no
+        /// candidate resolves.
+        /// </summary>
+        private NamerEditorWindow ResolveExemplarWindow()
+        {
+            if (HostWindow != null && HostWindow.HasLoadableSource)
+            {
+                return HostWindow;
+            }
+
+            NamerEditorWindow[] windows = Resources.FindObjectsOfTypeAll<NamerEditorWindow>();
+            for (int i = 0; i < windows.Length; i++)
+            {
+                if (windows[i].HasLoadableSource)
+                {
+                    return windows[i];
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Runs one explicit Fit Look (D-01: synchronous, cancellable, never on the
+        /// debounce): resolves the exemplar window, runs the window's fit seam inside
+        /// try/catch, and on success writes the fit onto the profile via
+        /// Undo/SetDirty + <see cref="NamerStylePostFit.ApplyToProfile"/>, regenerates
+        /// the Volume asset (pinging it), and finally raises
+        /// <see cref="NamerStyleProfile.RaiseChanged"/> so the debounced preview
+        /// refresh sees the new fit. Failure paths surface the UI-SPEC HelpBox copy.
+        /// </summary>
+        private void RunFitLook()
+        {
+            fitError = null;
+            isFitting = true;
+            try
+            {
+                NamerEditorWindow exemplarWindow = ResolveExemplarWindow();
+                if (exemplarWindow == null)
+                {
+                    return;
+                }
+
+                NamerStylePostFitRunResult result;
+                try
+                {
+                    result = exemplarWindow.RunStylePostFit(profile);
+                }
+                catch (Exception exception)
+                {
+                    fitError = "Fit failed: " + exception.Message;
+                    return;
+                }
+
+                if (result.Cancelled)
+                {
+                    return;
+                }
+
+                if (result.NotExtracted)
+                {
+                    // Prereq reason path: the next repaint re-evaluates FitButtonState
+                    // and renders the active locked reason under the disabled button.
+                    return;
+                }
+
+                if (!string.IsNullOrEmpty(result.ErrorTextureName))
+                {
+                    fitError = "Fit failed: " + result.ErrorTextureName
+                        + " could not be read. Check the texture's Read/Write import setting.";
+                    return;
+                }
+
+                Undo.RecordObject(profile, "Fit Look");
+                NamerStylePostFit.ApplyToProfile(profile, result.Params, result.ExemplarName);
+                EditorUtility.SetDirty(profile);
+
+                // D-02: regenerate the companion Volume from profile truth. The
+                // opt-in refusal (and any other write gate) surfaces here as the
+                // locked "Fit failed: {message}" copy.
+                try
+                {
+                    VolumeProfile volume = NamerStyleVolumeWriter.Write(profile, new NamerProcessorSettings());
+                    EditorGUIUtility.PingObject(volume);
+                }
+                catch (Exception exception)
+                {
+                    fitError = "Fit failed: " + exception.Message;
+                }
+            }
+            finally
+            {
+                isFitting = false;
+                NamerStyleProfile.RaiseChanged(profile);
+            }
+        }
+
+        /// <summary>
+        /// P18: read-only fitted-parameter rows in the Statistics idiom ("—" before
+        /// the first fit). Each row's tooltip names the fit statistic behind it (von
+        /// Kries / EV ratio / percentile spread / chroma ratio / histogram spec).
+        /// Tonemapping and Bloom Intensity are constants (never fitted), so they never
+        /// take the placeholder.
+        /// </summary>
+        private void DrawFittedPostRows()
+        {
+            bool fitted = profile.HasPostFit;
+            EditorGUILayout.LabelField(
+                new GUIContent("Tonemapping", "Fixed ACES — URP's curve is parameter-free; the fit shapes exposure/contrast/curves around it."),
+                new GUIContent("ACES (default)"));
+            EditorGUILayout.LabelField(
+                new GUIContent("White Balance", "Von Kries fit of the source mean chromaticity onto the references' (temperature / tint)."),
+                new GUIContent(fitted ? profile.PostTemperature.ToString("F1") + " / " + profile.PostTint.ToString("F1") : kStatPlaceholder));
+            EditorGUILayout.LabelField(
+                new GUIContent("Post Exposure", "Mean-luma EV ratio of the tonemapped source onto the decoded references."),
+                new GUIContent(fitted ? profile.PostExposureEv.ToString("F2") + " EV" : kStatPlaceholder));
+            EditorGUILayout.LabelField(
+                new GUIContent("Contrast", "LogC p90-p10 percentile-spread ratio between source and references."),
+                new GUIContent(fitted ? profile.PostContrast.ToString("F2") : kStatPlaceholder));
+            EditorGUILayout.LabelField(
+                new GUIContent("Saturation", "Perceptual mean-chroma ratio between source and references (plain URP Saturation)."),
+                new GUIContent(fitted ? profile.PostSaturation.ToString("F2") : kStatPlaceholder));
+            EditorGUILayout.LabelField(
+                new GUIContent("Bloom Threshold", "Reference highlight percentile (p95 of raw sRGB Max3), written gamma-space like URP's own slider."),
+                new GUIContent(fitted ? profile.PostBloomThreshold.ToString("F2") : kStatPlaceholder));
+            EditorGUILayout.LabelField(
+                new GUIContent("Bloom Intensity", "Artist knob — defaulted, never fitted; tweak it on the generated Volume."),
+                new GUIContent(NamerEditorConstants.DefaultBloomIntensity.ToString("F2") + " (tweak on the Volume)"));
+            EditorGUILayout.LabelField(
+                new GUIContent("Color Curves", "Histogram specification (CDF matching) of source luma/channels onto the references'."),
+                new GUIContent(fitted ? "master + R/G/B, " + profile.PostMasterCurve.length + " keys" : kStatPlaceholder));
         }
 
         /// <summary>P7-P11 + Tone Match: the six parameter sliders, each with its decision tooltip.</summary>

@@ -35,6 +35,18 @@ CBUFFER_START(UnityPerMaterial)
     half   _DbgEnableVertexColor;
     half   _DbgEnableNormal;
     half   _DbgRoughnessNeutral;
+    // 05.1 D-04 in-shader post-preview uniforms (ForwardLit compose only). All
+    // five are written as ONE full unconditional table by the processor window
+    // (ApplyPostLook — the ApplyDebugGates Metal silent-skip discipline),
+    // including the neutral/inactive case. _PostEnable defaults to 0 so
+    // shipped runtime materials decode byte-identically; the rest default to
+    // identity (LMS (1,1,1), z = 1, s = 1, EV = 0). Consumed by
+    // NamerPostPreview.hlsl's ApplyNamerPostPreview.
+    half    _PostEnable;
+    float3  _PostLmsCoeffs;
+    half    _PostExposureEv;
+    half    _PostContrastZ;
+    half    _PostSaturationS;
 CBUFFER_END
 
 // _SurfaceMap:  LINEAR (non-sRGB) R8G8B8A8_UNorm packed surface texture.
@@ -44,6 +56,11 @@ CBUFFER_END
 TEXTURE2D(_SurfaceMap);        SAMPLER(sampler_SurfaceMap);
 TEXTURE2D(_BaseResidualMap);   SAMPLER(sampler_BaseResidualMap);
 TEXTURE2D(_RoughnessOffsetMap); SAMPLER(sampler_RoughnessOffsetMap);
+// _PostCurveTex: 05.1 window-built 128x1 RGBA float curve strip — .r/.g/.b are
+// the fitted R/G/B channel curves, .a the master curve (linear filter, clamp
+// wrap; the LinearClamp sampling URP's LUT-builder EvaluateCurve uses).
+// Sampled by ApplyNamerPostPreview in the ForwardLit pass only.
+TEXTURE2D(_PostCurveTex);      SAMPLER(sampler_PostCurveTex);
 
 // ------------------------------------------------------------------
 // NAMER octahedral decode — mirrors NamerFormat.OctahedralDecode EXACTLY.

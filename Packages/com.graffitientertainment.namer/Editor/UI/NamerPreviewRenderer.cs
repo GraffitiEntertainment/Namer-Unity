@@ -1,6 +1,8 @@
 using System;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
 
 namespace GraffitiEntertainment.Namer.Editor
 {
@@ -69,6 +71,12 @@ namespace GraffitiEntertainment.Namer.Editor
         private const float MinZoomScale = 0.05f;
         private const float MaxZoomScale = 10f;
 
+        private const string PostBloomShaderName = "Hidden/NamerPostBloom";
+        private static readonly int BloomThresholdId = Shader.PropertyToID("_BloomThreshold");
+        private static readonly int BloomIntensityId = Shader.PropertyToID("_BloomIntensity");
+        private static readonly int BlurDirectionId = Shader.PropertyToID("_BlurDirection");
+        private static readonly int BloomTexId = Shader.PropertyToID("_BloomTex");
+
         private PreviewRenderUtility _preview;
         private Mesh _framedMesh;
         private float _yaw;
@@ -86,6 +94,19 @@ namespace GraffitiEntertainment.Namer.Editor
         // on rect-size change, released in Cleanup). Never PreviewRenderUtility's cached RT.
         private RenderTexture _beforePaneTexture;
         private RenderTexture _afterPaneTexture;
+
+        // 05.1 D-04 After-pane bloom (STYL-09): the Stylized + Post lens's
+        // approximation of the fitted URP Bloom volume. The material is created
+        // LAZILY and only on the active path, the temporaries only while active —
+        // an unset or disabled SetPostBloom keeps Render byte-identical to the
+        // pre-05.1 renderer (zero extra RTs, zero blits). All owned here and
+        // released in Cleanup (T-05.1-04-02).
+        private Material _postBloomMaterial;
+        private RenderTexture _bloomTempA;
+        private RenderTexture _bloomTempB;
+        private RenderTexture _afterPaneFinalTexture;
+        private float _bloomThresholdLinear;
+        private float _bloomIntensity;
 
         /// <summary>True when the preview camera is orthographic (false before the preview scene exists).</summary>
         public bool IsOrthographic => _preview != null && _preview.camera.orthographic;
@@ -176,6 +197,15 @@ namespace GraffitiEntertainment.Namer.Editor
 
             Texture beforeRT = RenderPane(beforeMesh, before, rect, orthoSize, meshRotation, rotatedBoundsCenter, drawOffsets.x, null, null, -1, ref _beforePaneTexture);
             Texture afterRT = RenderPane(afterMesh, after, rect, orthoSize, meshRotation, rotatedBoundsCenter, drawOffsets.y, wireMesh, wireMaterial, wireSubmesh, ref _afterPaneTexture);
+
+            // 05.1 D-04: with the bloom state active, the AFTER pane's final
+            // texture is the composited bloom chain result instead of the raw
+            // pane RT; disabled, this line is never reached (byte-identical).
+            if (PostBloomEnabled)
+            {
+                afterRT = ApplyPostBloom(afterRT);
+            }
+
             return new PreviewRenderResult(beforeRT, afterRT);
         }
 
@@ -234,6 +264,132 @@ namespace GraffitiEntertainment.Namer.Editor
             Graphics.Blit(source, pane);
             RenderTexture.active = null;   // restore EndPreview's post-condition — Render runs mid-OnGUI (C-3)
             return pane;
+        }
+
+        /// <summary>
+        /// True when the After-pane bloom chain will run on the next
+        /// <see cref="Render(Mesh, Material, Material, Rect)"/> — the internal
+        /// probe the editor tests assert against (SetPostBloom(0, 0) must leave
+        /// this false with no material ever created).
+        /// </summary>
+        internal bool PostBloomEnabled => _bloomIntensity > 0f && _bloomThresholdLinear > 0f;
+
+        /// <summary>
+        /// 05.1 D-04: arms or disarms the After-pane bloom approximation. The
+        /// threshold must already be LINEAR (the caller converts the profile's
+        /// gamma-space value — the conversion URP's PostProcessPass applies at
+        /// render time). (0, 0) disables and releases the temporaries, so the
+        /// disabled path keeps Render byte-identical to the pre-05.1 renderer:
+        /// zero extra RTs, zero blits, no shader load.
+        /// </summary>
+        internal void SetPostBloom(float thresholdLinear, float intensity)
+        {
+            _bloomThresholdLinear = thresholdLinear;
+            _bloomIntensity = intensity;
+            if (!PostBloomEnabled)
+            {
+                ReleasePostBloomTargets();
+            }
+        }
+
+        /// <summary>
+        /// Runs the bloom chain over the After pane's RT: bright-pass at half
+        /// resolution, separable 9-tap gaussian (horizontal then vertical), then
+        /// a full-resolution composite into the persistent after-pane-final RT —
+        /// the texture the window draws for the After pane while the lens is
+        /// active. Called ONLY from the Render cycle (never OnGUI layout/events
+        /// — the 260919-fp3 lesson); <c>RenderTexture.active</c> is restored to
+        /// null after the chain, matching <see cref="BlitToPane"/>'s
+        /// post-condition. Every uniform each pass references is set before its
+        /// dispatch on every call — the Metal silent-skip law.
+        /// </summary>
+        private Texture ApplyPostBloom(Texture paneSource)
+        {
+            EnsurePostBloomMaterial();
+            int halfWidth = Mathf.Max(paneSource.width / 2, 1);
+            int halfHeight = Mathf.Max(paneSource.height / 2, 1);
+            EnsurePostBloomTarget(ref _bloomTempA, halfWidth, halfHeight, paneSource.graphicsFormat, "NamerBloomA");
+            EnsurePostBloomTarget(ref _bloomTempB, halfWidth, halfHeight, paneSource.graphicsFormat, "NamerBloomB");
+            EnsurePostBloomTarget(
+                ref _afterPaneFinalTexture, paneSource.width, paneSource.height, paneSource.graphicsFormat, "NamerAfterPaneFinal");
+
+            // Pass 0 — bright-pass (the shader derives URP's knee from the threshold).
+            _postBloomMaterial.SetFloat(BloomThresholdId, _bloomThresholdLinear);
+            Graphics.Blit(paneSource, _bloomTempA, _postBloomMaterial, 0);
+
+            // Pass 1 — separable blur, horizontal then vertical.
+            _postBloomMaterial.SetVector(BlurDirectionId, new Vector4(1f, 0f, 0f, 0f));
+            Graphics.Blit(_bloomTempA, _bloomTempB, _postBloomMaterial, 1);
+            _postBloomMaterial.SetVector(BlurDirectionId, new Vector4(0f, 1f, 0f, 0f));
+            Graphics.Blit(_bloomTempB, _bloomTempA, _postBloomMaterial, 1);
+
+            // Pass 2 — composite source + bloom * intensity into the final RT.
+            _postBloomMaterial.SetFloat(BloomIntensityId, _bloomIntensity);
+            _postBloomMaterial.SetTexture(BloomTexId, _bloomTempA);
+            Graphics.Blit(paneSource, _afterPaneFinalTexture, _postBloomMaterial, 2);
+
+            RenderTexture.active = null;   // restore EndPreview's post-condition (C-3)
+            return _afterPaneFinalTexture;
+        }
+
+        /// <summary>Creates the hidden bloom material on first active use (never on the disabled path).</summary>
+        private void EnsurePostBloomMaterial()
+        {
+            if (_postBloomMaterial != null)
+            {
+                return;
+            }
+
+            Shader shader = Shader.Find(PostBloomShaderName);
+            if (shader == null)
+            {
+                throw new InvalidOperationException(
+                    "Shader '" + PostBloomShaderName + "' was not found. Ensure the NamerPostBloom shader compiled and imported.");
+            }
+
+            _postBloomMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+        }
+
+        /// <summary>(Re)allocates one bloom temporary at the requested size, matching the pane's format.</summary>
+        private static void EnsurePostBloomTarget(ref RenderTexture target, int width, int height, GraphicsFormat format, string targetName)
+        {
+            if (target != null && target.width == width && target.height == height)
+            {
+                return;
+            }
+
+            if (target != null)
+            {
+                target.Release();
+            }
+
+            target = new RenderTexture(width, height, 0, format)
+            {
+                name = targetName,
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+        }
+
+        /// <summary>Releases the bloom temporaries and the after-pane-final RT (disable + Cleanup path).</summary>
+        private void ReleasePostBloomTargets()
+        {
+            if (_bloomTempA != null)
+            {
+                _bloomTempA.Release();
+                _bloomTempA = null;
+            }
+
+            if (_bloomTempB != null)
+            {
+                _bloomTempB.Release();
+                _bloomTempB = null;
+            }
+
+            if (_afterPaneFinalTexture != null)
+            {
+                _afterPaneFinalTexture.Release();
+                _afterPaneFinalTexture = null;
+            }
         }
 
         /// <summary>
@@ -369,6 +525,15 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 _afterPaneTexture.Release();
                 _afterPaneTexture = null;
+            }
+
+            // 05.1 D-04 bloom chain state (T-05.1-04-02: the renderer owns every
+            // temporary it allocates).
+            ReleasePostBloomTargets();
+            if (_postBloomMaterial != null)
+            {
+                UnityEngine.Object.DestroyImmediate(_postBloomMaterial);
+                _postBloomMaterial = null;
             }
         }
 

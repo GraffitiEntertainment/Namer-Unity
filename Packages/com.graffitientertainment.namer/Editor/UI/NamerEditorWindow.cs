@@ -1,4 +1,6 @@
 using System;
+using System.Globalization;
+using System.Text;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
@@ -89,6 +91,14 @@ namespace GraffitiEntertainment.Namer.Editor
         internal const string AlbedoPreviewNoResultCaption = "no preview yet — waiting for recompute";
 
         /// <summary>
+        /// Albedo preview caption when the preview lens is Stylized + Post (05.1 W7,
+        /// D-04 lens honesty): the 2D albedo preview stays post-free — no simulation
+        /// this phase. Locked copy, em-dash verbatim; read via reflection by
+        /// <c>NamerPostPreviewTests</c>.
+        /// </summary>
+        internal const string AlbedoPreviewPostCaption = "Stylized albedo — the fitted post look renders in the 3D After pane only";
+
+        /// <summary>
         /// Albedo preview button label that flips the After View lens to Stylized NAMER.
         /// Locked copy; read via reflection by <c>NamerEditorWindowSmokeTests</c>.
         /// </summary>
@@ -108,6 +118,12 @@ namespace GraffitiEntertainment.Namer.Editor
         private static readonly int DbgEnableVertexColorId = Shader.PropertyToID("_DbgEnableVertexColor");
         private static readonly int DbgEnableNormalId = Shader.PropertyToID("_DbgEnableNormal");
         private static readonly int DbgRoughnessNeutralId = Shader.PropertyToID("_DbgRoughnessNeutral");
+        private static readonly int PostEnableId = Shader.PropertyToID("_PostEnable");
+        private static readonly int PostLmsCoeffsId = Shader.PropertyToID("_PostLmsCoeffs");
+        private static readonly int PostExposureEvId = Shader.PropertyToID("_PostExposureEv");
+        private static readonly int PostContrastZId = Shader.PropertyToID("_PostContrastZ");
+        private static readonly int PostSaturationSId = Shader.PropertyToID("_PostSaturationS");
+        private static readonly int PostCurveTexId = Shader.PropertyToID("_PostCurveTex");
         private static readonly int ChannelId = Shader.PropertyToID("_Channel");
         private static readonly int WireColorId = Shader.PropertyToID("_WireColor");
         private static readonly Color TriangleWireframeColor = new Color(0f, 1f, 1f, 1f);
@@ -119,9 +135,35 @@ namespace GraffitiEntertainment.Namer.Editor
         private const float kCreateProfileButtonWidth = 110f;
 
         // 05-03 W4 "After View" popup indices (preview-only lens; 0 = the un-stylized
-        // NAMER baseline, the shipped default).
+        // NAMER baseline, the shipped default). 05.1 W5: 2 = Stylized + Post — the
+        // fitted post grade applied in-shader (D-04: the ONLY post-carrying lens).
         internal const int kAfterViewNamer = 0;
         internal const int kAfterViewStylized = 1;
+        internal const int kAfterViewPost = 2;
+
+        /// <summary>
+        /// 05-03 W4 / 05.1 W5 "After View" popup entries, index-parallel to
+        /// <see cref="kAfterViewNamer"/>/<see cref="kAfterViewStylized"/>/
+        /// <see cref="kAfterViewPost"/>. Read by <c>NamerPostPreviewTests</c> for the
+        /// three-entry order pin.
+        /// </summary>
+        internal static readonly string[] AfterViewOptions =
+        {
+            "NAMER", "Stylized NAMER", "Stylized + Post",
+        };
+
+        /// <summary>
+        /// Curve-strip texel count for the post-preview <c>_PostCurveTex</c> (05.1):
+        /// URP's own TextureCurve bakes the same 128-texel width (k_Precision).
+        /// </summary>
+        private const int kPostCurveTexelCount = 128;
+
+        // 05.1 one-slot curve-strip cache (T-05.1-04-02): rebuilt when the profile
+        // instance OR any of its four fitted curves changes (the cache key folds in
+        // every key of every curve), released in OnDisable. HideAndDontSave texture —
+        // transient preview state, never persisted.
+        private static Texture2D _postCurveTexture;
+        private static string _postCurveTextureKey;
 
         /// <summary>Fit Look progress-bar stage count (05.1 plan 03): references, stylized preview, fit.</summary>
         private const int kPostFitStageCount = 3;
@@ -307,6 +349,16 @@ namespace GraffitiEntertainment.Namer.Editor
                 _namerMaterial = null;
             }
 
+            // 05.1 T-05.1-04-02: the post-preview curve-strip cache must not leak
+            // across lens flips / domain reloads.
+            if (_postCurveTexture != null)
+            {
+                DestroyImmediate(_postCurveTexture);
+                _postCurveTexture = null;
+            }
+
+            _postCurveTextureKey = null;
+
             if (_channelViewMaterial != null)
             {
                 DestroyImmediate(_channelViewMaterial);
@@ -425,6 +477,7 @@ namespace GraffitiEntertainment.Namer.Editor
 
             _afterPanelState.GeneratedAvailable = true;
             ApplyDebugGates();
+            ApplyPreviewPostLook();
         }
 
         private void Tick()
@@ -493,7 +546,8 @@ namespace GraffitiEntertainment.Namer.Editor
                 // (_forceStylizeForFit, set only inside RunStylePostFit) ORs into the
                 // lens so the fit reads the stylized output regardless of the popup.
                 NamerStyleProfile styleProfile = NamerProcessor.ResolveStyleProfile(_settings);
-                bool stylizeLens = styleProfile != null && (_afterView == kAfterViewStylized || _forceStylizeForFit);
+                bool stylizeLens = styleProfile != null
+                    && (_afterView == kAfterViewStylized || _afterView == kAfterViewPost || _forceStylizeForFit);
 
                 // 2026-09-21 contract follow-up: prime the bake mesh for the AO stage too,
                 // so AO on + decomposition off previews the bake Process actually generates
@@ -607,6 +661,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 }
 
                 ApplyDebugGates();
+                ApplyPreviewPostLook();
 
                 _status = string.Empty;
                 _statusIsError = false;
@@ -689,6 +744,209 @@ namespace GraffitiEntertainment.Namer.Editor
                 _generatedMaterial.SetFloat(DbgEnableNormalId, normal);
                 _generatedMaterial.SetFloat(DbgRoughnessNeutralId, roughnessNeutral);
             }
+        }
+
+        /// <summary>
+        /// 05.1 D-04 (STYL-09): pushes the fitted post look onto the live preview
+        /// material and (when present) the generated After material, following every
+        /// <see cref="ApplyDebugGates"/> call site. The Stylized + Post lens ONLY —
+        /// the other two After Views write the neutral table, so switching lenses
+        /// restores the identity grade (in-shader default).
+        /// </summary>
+        private void ApplyPreviewPostLook()
+        {
+            NamerStyleProfile profile = NamerProcessor.ResolveStyleProfile(_settings);
+            bool postActive = _afterView == kAfterViewPost;
+            ApplyPostLook(_namerMaterial, profile, postActive);
+            ApplyPostLook(_generatedMaterial, profile, postActive);
+
+            // Pane bloom rides the same funnel: armed only when the post lens is
+            // active AND the profile carries a fit (the W6 degrade falls back to
+            // plain Stylized NAMER — no bloom either). Disabled writes (0, 0),
+            // which keeps Render byte-identical (zero extra RTs/blits).
+            bool fitted = postActive && profile != null && profile.HasPostFit;
+            _preview.SetPostBloom(
+                BloomThresholdLinear(profile),
+                fitted ? NamerEditorConstants.DefaultBloomIntensity : 0f);
+        }
+
+        /// <summary>
+        /// 05.1 D-04: the bloom threshold in LINEAR space — the exact conversion
+        /// URP's PostProcessPass applies at render time to the gamma-space slider
+        /// value. A null or unfitted profile returns 0 (the disabled sentinel).
+        /// </summary>
+        internal static float BloomThresholdLinear(NamerStyleProfile profile)
+        {
+            if (profile == null || !profile.HasPostFit)
+            {
+                return 0f;
+            }
+
+            return Mathf.GammaToLinearSpace(profile.PostBloomThreshold);
+        }
+
+        /// <summary>
+        /// Writes the FULL post-preview uniform table onto one material — the
+        /// ApplyDebugGates unconditional-binding discipline (Metal silently skips
+        /// dispatches when a referenced property is unbound). Even the neutral/
+        /// inactive case writes every uniform: _PostEnable 0 (shader-side identity
+        /// early-out) with identity LMS/EV/z/s and a null curve strip. Active case
+        /// derives the CPU-side twins exactly like URP's own passes:
+        /// ColorUtils.ColorBalanceToLMSCoeffs (the function ColorGradingLutPass
+        /// calls) and z/s = value/100 + 1.
+        /// </summary>
+        internal static void ApplyPostLook(Material material, NamerStyleProfile profile, bool postActive)
+        {
+            if (material == null)
+            {
+                return;
+            }
+
+            bool enable = postActive && profile != null && profile.HasPostFit;
+            material.SetFloat(PostEnableId, enable ? 1f : 0f);
+            material.SetVector(
+                PostLmsCoeffsId,
+                profile != null
+                    ? (Vector4)UnityEngine.Rendering.ColorUtils.ColorBalanceToLMSCoeffs(profile.PostTemperature, profile.PostTint)
+                    : Vector4.one);
+            material.SetFloat(PostExposureEvId, profile != null ? profile.PostExposureEv : 0f);
+            material.SetFloat(PostContrastZId, profile != null ? profile.PostContrast / 100f + 1f : 1f);
+            material.SetFloat(PostSaturationSId, profile != null ? profile.PostSaturation / 100f + 1f : 1f);
+            material.SetTexture(PostCurveTexId, enable ? GetOrCreatePostCurveTexture(profile) : null);
+        }
+
+        /// <summary>
+        /// One-slot static cache for the 128x1 curve strip: rebuilt only when the
+        /// profile's identity or any curve key changes (a re-fit can land on the
+        /// same fingerprint while editing keys, so the key dump — not the
+        /// fingerprint — is the cache key). Released in <see cref="OnDisable"/>.
+        /// </summary>
+        private static Texture2D GetOrCreatePostCurveTexture(NamerStyleProfile profile)
+        {
+            string key = ComputePostCurveCacheKey(profile);
+            if (_postCurveTexture != null && _postCurveTextureKey == key)
+            {
+                return _postCurveTexture;
+            }
+
+            if (_postCurveTexture != null)
+            {
+                DestroyImmediate(_postCurveTexture);
+            }
+
+            _postCurveTexture = BuildPostCurveTexture(profile);
+            _postCurveTextureKey = key;
+            return _postCurveTexture;
+        }
+
+        /// <summary>
+        /// Cache identity: the profile's instance ID plus every key (time, value)
+        /// of all four fitted curves, invariant-culture formatted. Null curves
+        /// contribute nothing (the texture builder falls back to the diagonal).
+        /// </summary>
+        private static string ComputePostCurveCacheKey(NamerStyleProfile profile)
+        {
+            StringBuilder builder = new StringBuilder();
+            builder.Append(profile.GetInstanceID());
+            AppendCurveKey(builder, "M", profile.PostMasterCurve);
+            AppendCurveKey(builder, "R", profile.PostRedCurve);
+            AppendCurveKey(builder, "G", profile.PostGreenCurve);
+            AppendCurveKey(builder, "B", profile.PostBlueCurve);
+            return builder.ToString();
+        }
+
+        /// <summary>
+        /// Appends one curve's tag + keys to the cache-key builder. Empty curves
+        /// append just the tag so a null curve and an empty curve stay distinct
+        /// from a curve with keys.
+        /// </summary>
+        private static void AppendCurveKey(StringBuilder builder, string tag, AnimationCurve curve)
+        {
+            builder.Append('|');
+            builder.Append(tag);
+            if (curve == null)
+            {
+                return;
+            }
+
+            Keyframe[] keys = curve.keys;
+            for (int i = 0; i < keys.Length; i++)
+            {
+                builder.Append(':');
+                builder.Append(keys[i].time.ToString("R", CultureInfo.InvariantCulture));
+                builder.Append(',');
+                builder.Append(keys[i].value.ToString("R", CultureInfo.InvariantCulture));
+            }
+        }
+
+        /// <summary>
+        /// Builds the 128x1 RGBA float strip the shader samples as the YRGB curve
+        /// bank: .r/.g/.b are the fitted R/G/B curves, .a the master curve — the
+        /// same packing URP's LUT-builder curve baker uses. Linear filter + clamp
+        /// wrap so in-shader bilinear fetches land between texels exactly like
+        /// the LUT builder's LinearClamp sampling of its curve textures.
+        /// </summary>
+        private static Texture2D BuildPostCurveTexture(NamerStyleProfile profile)
+        {
+            Color[] pixels = new Color[kPostCurveTexelCount];
+            for (int i = 0; i < kPostCurveTexelCount; i++)
+            {
+                float t = (float)i / (kPostCurveTexelCount - 1);
+                pixels[i] = new Color(
+                    EvaluatePostCurveChannel(profile.PostRedCurve, t),
+                    EvaluatePostCurveChannel(profile.PostGreenCurve, t),
+                    EvaluatePostCurveChannel(profile.PostBlueCurve, t),
+                    EvaluatePostCurveChannel(profile.PostMasterCurve, t));
+            }
+
+            Texture2D strip = new Texture2D(kPostCurveTexelCount, 1, TextureFormat.RGBAFloat, false, true)
+            {
+                name = "NamerPostCurveStrip",
+                hideFlags = HideFlags.HideAndDontSave,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+            };
+            strip.SetPixels(pixels);
+            strip.Apply(false, false);
+            return strip;
+        }
+
+        /// <summary>
+        /// Evaluates one fitted curve channel at t. A null curve falls back to the
+        /// identity diagonal (t) so a hand-broken asset still previews a defined
+        /// grade; values are clamped to [0,1] like the shader's saturate.
+        /// </summary>
+        private static float EvaluatePostCurveChannel(AnimationCurve curve, float t)
+        {
+            if (curve == null)
+            {
+                return t;
+            }
+
+            return Mathf.Clamp01(curve.Evaluate(t));
+        }
+
+        /// <summary>
+        /// Resolves the albedo-preview caption row for the current After View
+        /// (05.1 D-04). The un-stylized view draws the Before/After flipper; both
+        /// stylized lenses replace it with their locked caption.
+        /// </summary>
+        internal static string ResolveAlbedoPreviewCaption(int afterView, out bool drawFlipper)
+        {
+            if (afterView == kAfterViewPost)
+            {
+                drawFlipper = false;
+                return AlbedoPreviewPostCaption;
+            }
+
+            if (afterView == kAfterViewStylized)
+            {
+                drawFlipper = false;
+                return AlbedoPreviewStylizedCaption;
+            }
+
+            drawFlipper = true;
+            return AlbedoPreviewUnstylizedCaption;
         }
 
         /// <summary>
@@ -1074,6 +1332,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 _metallicContributionEnabled = newMetallic;
                 _settings.MetallicContributionEnabled = newMetallic;
                 ApplyDebugGates();
+                ApplyPreviewPostLook();
                 Repaint();
             }
 
@@ -1086,6 +1345,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 _emissiveContributionEnabled = newEmissive;
                 _settings.EmissiveContributionEnabled = newEmissive;
                 ApplyDebugGates();
+                ApplyPreviewPostLook();
                 Repaint();
             }
 
@@ -1157,6 +1417,8 @@ namespace GraffitiEntertainment.Namer.Editor
             // 05-03 W4: preview-only lens above the Before/After caption row. NEVER
             // gates Process — the bake always applies the attached profile; only the
             // preview's computation swaps between the un-stylized and stylized bases.
+            // 05.1 W5: the third entry (Stylized + Post) keeps the stylized base and
+            // grades the After pane in-shader (ApplyPreviewPostLook + pane bloom).
             NamerStyleProfile lensProfile = NamerProcessor.ResolveStyleProfile(_settings);
             EditorGUI.BeginDisabledGroup(_busy || lensProfile == null);
             int newAfterView = EditorGUILayout.Popup(
@@ -1164,11 +1426,14 @@ namespace GraffitiEntertainment.Namer.Editor
                     "After View",
                     "Preview-only lens: NAMER computes the un-stylized packed result; Stylized NAMER "
                         + "applies the attached Style Profile (palette transfer, smoothing, and the "
-                        + "profile's bake-side controls). Process always bakes with the attached profile "
+                        + "profile's bake-side controls). Stylized + Post additionally applies the "
+                        + "profile's fitted post look (white balance, exposure, contrast, saturation, "
+                        + "curves, bloom) in-shader, matching the generated scene Volume so the look "
+                        + "is approved without play mode. Process always bakes with the attached profile "
                         + "regardless of this popup. Recomputes the preview in memory "
                         + NamerEditorConstants.DebounceSeconds + " s after the change — nothing is written to disk."),
                 _afterView,
-                new[] { "NAMER", "Stylized NAMER" });
+                AfterViewOptions);
             if (newAfterView != _afterView)
             {
                 _afterView = newAfterView;
@@ -1185,6 +1450,19 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             EditorGUI.EndDisabledGroup();
+
+            // 05.1 W6: the post lens needs a FITTED post look; without one the pane
+            // silently degrades to plain Stylized NAMER (ApplyPostLook's enable
+            // gate), so say so. Only meaningful with an attached profile — the
+            // null-profile case already shows the attach hint above.
+            if (_afterView == kAfterViewPost && lensProfile != null && !lensProfile.HasPostFit)
+            {
+                EditorGUILayout.HelpBox(
+                    "No fitted post look on " + lensProfile.name
+                        + " — showing Stylized NAMER. Press Fit Look in the profile's "
+                        + "Fitted Post Look section.",
+                    MessageType.Info);
+            }
 
             if (_previewMesh == null || inspection == null)
             {
@@ -1314,6 +1592,7 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 enabled = newValue;
                 ApplyDebugGates();
+                ApplyPreviewPostLook();
                 Repaint();
             }
         }
@@ -1972,14 +2251,14 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             // Caption row renders ALWAYS — lens honesty plus the preview-side lens flipper.
+            // 05.1 W6: routed through ResolveAlbedoPreviewCaption so the post lens gets
+            // its own locked caption (no flipper — the flipper only flips BETWEEN the
+            // un-stylized and stylized bases).
             EditorGUILayout.BeginHorizontal();
-            if (_afterView == kAfterViewStylized)
+            string caption = ResolveAlbedoPreviewCaption(_afterView, out bool drawFlipper);
+            EditorGUILayout.LabelField(caption, EditorStyles.miniLabel);
+            if (drawFlipper)
             {
-                EditorGUILayout.LabelField(AlbedoPreviewStylizedCaption, EditorStyles.miniLabel);
-            }
-            else
-            {
-                EditorGUILayout.LabelField(AlbedoPreviewUnstylizedCaption, EditorStyles.miniLabel);
                 using (new EditorGUI.DisabledScope(!hasProfile))
                 {
                     if (GUILayout.Button(AlbedoPreviewViewStylizedButton, EditorStyles.miniButton))
@@ -2226,13 +2505,16 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>
         /// 05-03 W4 lens composition: the stylization handed to
         /// <see cref="NamerComputePipeline.Process"/> for the PREVIEW — null unless a
-        /// profile is attached AND After View reads Stylized NAMER. Internal for the
-        /// lens logic test (the smallest honest seam).
+        /// profile is attached AND After View reads a stylized-side lens. 05.1 W5:
+        /// Stylized + Post composes the SAME stylization (the post grade rides the
+        /// preview material's uniform table, not the pipeline — nothing
+        /// post-processed touches the compute output). Internal for the lens logic
+        /// test (the smallest honest seam).
         /// </summary>
         internal static NamerStyleStylization ComposePreviewStylization(
             NamerStyleProfile profile, int afterView, NamerSplitResult split)
         {
-            if (profile == null || afterView != kAfterViewStylized)
+            if (profile == null || (afterView != kAfterViewStylized && afterView != kAfterViewPost))
             {
                 return null;
             }

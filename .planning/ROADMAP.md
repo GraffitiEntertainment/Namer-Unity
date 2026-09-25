@@ -331,9 +331,9 @@ Plans:
 
 **Wave 1** *(parallel — disjoint files)*
 
-- [ ] 05.1-01-PLAN.md — CPU fit core: NamerStylePostMath (LogC/LMS/ACES port) + NamerStylePostFit estimator suite (von Kries WB solve, EV ratio, LogC contrast, chroma saturation, histogram-spec curves, bloom percentile) + golden/determinism/known-answer pins
+- [x] 05.1-01-PLAN.md — CPU fit core: NamerStylePostMath (LogC/LMS/ACES port) + NamerStylePostFit estimator suite (von Kries WB solve, EV ratio, LogC contrast, chroma saturation, histogram-spec curves, bloom percentile) + golden/determinism/known-answer pins
 
-- [ ] 05.1-02-PLAN.md — NamerStyleProfile fitted-post block (D-02 source of truth + ClampToCaps) + NamerStyleVolumeWriter (generated VolumeProfile with named overrides, sub-asset wiring, GEN-01/GEN-03 gates) + asset tests
+- [x] 05.1-02-PLAN.md — NamerStyleProfile fitted-post block (D-02 source of truth + ClampToCaps) + NamerStyleVolumeWriter (generated VolumeProfile with named overrides, sub-asset wiring, GEN-01/GEN-03 gates) + asset tests
 
 **Wave 2** *(blocked on Waves 1)*
 
@@ -357,4 +357,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 4. Vertex-Color Decomposition + Residual | 5/5 | Complete   | 2026-09-01 |
 | 04.1. Roughness Extraction + One-Texture (INSERTED) | 7/7 | Complete   | 2026-09-16 |
 | 5. Stylization | 3/3 | Complete   | 2026-09-24 |
-| 5.1. Reference-fitted URP Post-processing Look (INSERTED) | 0/4 | In Progress | — |
+| 5.1. Reference-fitted URP Post-processing Look (INSERTED) | 2/4 | In Progress|  |

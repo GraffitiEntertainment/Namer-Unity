@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 5.1 UI-SPEC approved
-last_updated: "2026-09-24T23:37:50.191Z"
-last_activity: 2026-09-24 -- Phase 5.1 planning complete
+last_updated: "2026-09-24T23:56:57.236Z"
+last_activity: 2026-09-24 -- Phase 05.1 execution started
 progress:
   total_phases: 10
   completed_phases: 9
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-25)
 
 **Core value:** A user can select a textured FBX in Unity, run `Process with NAMER`, and get a correctly rendering, source-compatible NAMER material without ever modifying the imported source assets or leaving the Unity Editor.
-**Current focus:** Phase 5 — stylization
+**Current focus:** Phase 05.1 — reference-fitted-urp-post-processing-look-inserted
 
 ## Current Position
 
-Phase: 5 (stylization) — EXECUTING
-Plan: 3 of 3
-Status: Ready to execute
-Last activity: 2026-09-24 -- Phase 5.1 planning complete
+Phase: 05.1 (reference-fitted-urp-post-processing-look-inserted) — EXECUTING
+Plan: 1 of 4
+Status: Executing Phase 05.1
+Last activity: 2026-09-24 -- Phase 05.1 execution started
 
 Progress: [██████████] 100%
 

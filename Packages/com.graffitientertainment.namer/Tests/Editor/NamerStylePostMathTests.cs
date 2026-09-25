@@ -24,9 +24,10 @@ namespace GraffitiEntertainment.Namer.Tests
         // Gray-in -> gray-out spread. Derivation: the verbatim sRGB_2_AP0 rows sum to
         // (0.949272, 1.035371, 1.087374) instead of (1, 1, 1) — a 1.4e-5 deviation the
         // Academy matrix carries by design — and the ACES chain amplifies it to a
-        // worst-case R/B spread of 1.272e-4 over 1025 gray levels (measured, float64).
+        // worst-case R/B spread of 1.261e-4 over 1025 gray levels (measured, float64,
+        // corrected darkSurround derivation).
         // 2e-4 therefore pins "gray stays gray" without being so tight it fires on
-        // legitimate float32 rounding. (The plan text said 1e-4; 1.27e-4 > 1e-4, so the
+        // legitimate float32 rounding. (The plan text said 1e-4; 1.26e-4 > 1e-4, so the
         // honest bar is 2e-4 — see SUMMARY deviations.)
         private const double kGrayPreservationTolerance = 2e-4;
 
@@ -172,7 +173,8 @@ namespace GraffitiEntertainment.Namer.Tests
 
         /// <summary>
         /// Gray-in stays gray-out: R=G=B in, R=G=B out (channel spread bounded by
-        /// kGrayPreservationTolerance; worst measured spread 1.272e-4 at gray 0.623).
+        /// kGrayPreservationTolerance; worst measured spread 1.261e-4, corrected
+        /// darkSurround derivation).
         /// </summary>
         [Test]
         public void TonemapLdr_GrayInStaysGrayOut()
@@ -190,16 +192,18 @@ namespace GraffitiEntertainment.Namer.Tests
         /// <summary>
         /// Hand-derived golden triple through the full fitted-ACES port. Computed once
         /// from the transcribed constants (unity_to_ACES -> glow -> red modifier ->
-        /// rational fit -> dim surround -> D60->D65 -> Rec.709 -> saturate):
-        /// TonemapLdr((0.25, 0.5, 0.75)) = (0.29495645, 0.54965522, 0.74837768).
+        /// rational fit -> dim surround (xyY.z = XYZ.y) -> D60->D65 -> Rec.709 ->
+        /// saturate): TonemapLdr((0.25, 0.5, 0.75)) = (0.20396616, 0.38009362,
+        /// 0.51751275). (First derivation had a Y/Z slot swap in darkSurround_to_dimSurround;
+        /// the corrected derivation agrees with the C# port to 1e-7 — see SUMMARY.)
         /// </summary>
         [Test]
         public void TonemapLdr_AbsoluteGolden_MatchesAcesFit()
         {
             float3 output = NamerStylePostMath.TonemapLdr(new float3(0.25f, 0.5f, 0.75f));
-            Assert.AreEqual(0.29495645, (double)output.x, kGoldenTolerance);
-            Assert.AreEqual(0.54965522, (double)output.y, kGoldenTolerance);
-            Assert.AreEqual(0.74837768, (double)output.z, kGoldenTolerance);
+            Assert.AreEqual(0.20396616, (double)output.x, kGoldenTolerance);
+            Assert.AreEqual(0.38009362, (double)output.y, kGoldenTolerance);
+            Assert.AreEqual(0.51751275, (double)output.z, kGoldenTolerance);
         }
 
         /// <summary>

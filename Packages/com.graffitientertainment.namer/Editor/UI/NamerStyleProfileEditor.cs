@@ -38,6 +38,15 @@ namespace GraffitiEntertainment.Namer.Editor
         private bool isExtracting;
         private string extractError;
 
+        /// <summary>
+        /// Host Processor window of the embedded-inspector context (05.1 plan 03 P17):
+        /// the exemplar source for Fit Look. Set by
+        /// <see cref="NamerEditorWindow.EnsureProfileEditor"/> right after
+        /// CreateEditor; null in the standalone Project-inspector context, which
+        /// resolves any open window with a loadable source instead.
+        /// </summary>
+        internal NamerEditorWindow HostWindow;
+
         private static string DebounceSuffix
         {
             get { return "Recomputes the preview in memory " + NamerEditorConstants.DebounceSeconds + " s after the slider stops — nothing is written to disk."; }

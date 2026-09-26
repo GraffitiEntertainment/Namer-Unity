@@ -2480,8 +2480,16 @@ namespace GraffitiEntertainment.Namer.Editor
                         "the stylized preview of '" + exemplarName + "' produced no result; no fit was written");
                 }
 
+                // RGBAFloat (not RGBA32): the buffer is viewed with GetData<Color>
+                // (16 bytes/element). A 4-byte-per-pixel RGBA32 request pairs with
+                // GetData<Color32> only — mixing them hands the fit w*h/4 sixteen-byte
+                // garbage "pixels" (texel byte-quads reinterpreted as ~-1e38 floats)
+                // that tonemap to 0 and rail every fitted knob (fit-look-rails fix).
+                // RGBAFloat also matches AccumulateSource's HDR-linear input domain
+                // (the AO un-multiply divide can exceed 1) and the decomp/roughness
+                // float-RT readback convention.
                 AsyncGPUReadbackRequest request =
-                    NamerComputePipeline.RequestReadback(stylizedBase, 0, TextureFormat.RGBA32);
+                    NamerComputePipeline.RequestReadback(stylizedBase, 0, TextureFormat.RGBAFloat);
                 request.forcePlayerLoopUpdate = true;
                 request.WaitForCompletion();
                 if (request.hasError)

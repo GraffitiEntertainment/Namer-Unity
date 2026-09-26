@@ -173,11 +173,13 @@ namespace GraffitiEntertainment.Namer.Editor
         private const float kStatEpsilon = 1e-6f;                // denominator floor for means/chroma/LMS gains
         private const float kChromaNoiseFloor = 1e-3f;           // deadband for chroma differences (5x the ACES gray-spread noise)
         private const float kParamRangeLimit = 100f;             // URP percent-knob clamp and percent scale
+        private const float kFittedWhiteBalanceLimit = 15f;      // hue-preserving clamp on the FITTED white-balance knobs; the solve still searches [-100, 100]
         private const float kMaxFittedPostExposureEv = 10f;      // EV clamp; plan 02 pins MaxFittedPostExposureEv to this value
         private const float kWhiteBalanceRange = 100f;           // temperature/tint search bounds [-100, 100]
         private const int kWhiteBalanceSolveSweeps = 32;         // alternating-axis golden-section sweeps (fixed)
         private const int kWhiteBalanceLineProbes = 24;          // golden-section probes per line (fixed)
         private const int kWhiteBalanceAxisCount = 2;            // temperature and tint axes alternate
+        private const int kWhiteBalanceGridSteps = 21;           // coarse multistart grid points per axis (step 10, endpoint-inclusive — line-slice minima are non-unimodal, so a seed farther than ~5 from the optimum can stall in a neighbor basin)
         private const float kGoldenSectionConjugate = 0.6180339887f; // (sqrt(5) - 1) / 2
         private const float kCubeRootExponent = 1f / 3f;         // geometric-mean normalization
         private const float kBinCenterOffset = 0.5f;             // occupied-bin center = (i + 0.5) / bins
@@ -235,17 +237,21 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>
         /// Fit the full post-processing parameter set from a source distribution onto a
         /// reference distribution. Knob order: (1) von Kries white balance via a
-        /// deterministic alternating-axis golden-section solve over temperature/tint,
+        /// deterministic dual-start (0-seed + grid-seed) alternating-axis
+        /// golden-section solve over temperature/tint,
         /// (2) post-exposure as the log2 post-tonemap linear mean-luma ratio, (3) contrast
         /// as the LogC p90-p10 spread ratio, (4) saturation as the mean-chroma ratio,
-        /// (5) master/R/G/B curves via histogram specification (channels composed with the
-        /// master mapping), (6) bloom threshold as the p95 of the raw sRGB Max3 histogram.
+        /// (5) master curve via histogram specification (R/G/B stay identity
+        /// diagonals), (6) bloom threshold as the p95 of the raw sRGB Max3 histogram.
         /// Every parameter is clamped to its named cap (threat T-05.1-01-01).
         /// Throws <see cref="InvalidOperationException"/> when the reference
         /// distribution carries no weight (WR-01, 05.1 review: every slot cleared after
         /// extraction or every weight 0 is reachable through the UI, and a zero-mass
         /// fit would rail every knob into a maximal black grade reported as success;
         /// the message surfaces via the existing "Fit failed: {message}" path).
+        /// Throws likewise when the source distribution is near-black or NaN
+        /// (fit-look-rails: a failed source readback previously railed every knob
+        /// at its cap and reported success instead of failing).
         /// </summary>
         public static NamerStylePostFitParams Fit(NamerStylePostStats source, NamerStylePostStats reference, string referenceFingerprint)
         {
@@ -255,6 +261,16 @@ namespace GraffitiEntertainment.Namer.Editor
                     "The profile's references carry no weight (all slots empty or all weights 0) — no post look can be fitted.");
             }
 
+            // WR-01 mirror on the source side (fit-look-rails): a near-black or NaN
+            // source mean luma means the render or its GPU readback failed; the fit
+            // would rail every knob at its cap and still report success. The negated
+            // comparison also catches NaN, which compares false to any threshold.
+            if (!(source.MeanLuma > kStatEpsilon))
+            {
+                throw new InvalidOperationException(
+                    "The stylized source read back as near-black (mean luma at or below 1e-6, or NaN) — the render or its GPU readback failed, so no post look can be fitted.");
+            }
+
             NamerStylePostFitParams fitted = new NamerStylePostFitParams();
             fitted.Fingerprint = referenceFingerprint;
 
@@ -262,14 +278,16 @@ namespace GraffitiEntertainment.Namer.Editor
             float3 refMean = ToFloat3(reference.MeanLinear);
 
             // (1) White balance: von Kries gains on LMS means, unit-geometric-mean
-            // normalized (the overall-gain axis belongs to post-exposure).
+            // normalized (the overall-gain axis belongs to post-exposure). The fitted
+            // knobs clamp to ±kFittedWhiteBalanceLimit (hue preservation — extreme
+            // von Kries gains rotate hue, not just warmth).
             float3 srcLms = NamerStylePostMath.LinearToLms(srcMean);
             float3 refLms = NamerStylePostMath.LinearToLms(refMean);
             float3 gains = refLms / max(srcLms, kStatEpsilon);
             float3 target = NormalizeGeometricMean(gains);
             SolveWhiteBalance(target, out float temperature, out float tint);
-            fitted.Temperature = clamp(temperature, -kParamRangeLimit, kParamRangeLimit);
-            fitted.Tint = clamp(tint, -kParamRangeLimit, kParamRangeLimit);
+            fitted.Temperature = clamp(temperature, -kFittedWhiteBalanceLimit, kFittedWhiteBalanceLimit);
+            fitted.Tint = clamp(tint, -kFittedWhiteBalanceLimit, kFittedWhiteBalanceLimit);
 
             // (2) Post-exposure: log2 ratio of post-tonemap linear mean luma
             // (reference is sRGB-decoded linear). Accepted v1 behavior: tonemap
@@ -292,6 +310,9 @@ namespace GraffitiEntertainment.Namer.Editor
             fitted.Contrast = clamp((spreadRatio - 1f) * kParamRangeLimit, -kParamRangeLimit, kParamRangeLimit);
 
             // (4) Saturation: plain URP Saturation from the mean-chroma ratio (D-05).
+            // Rendered art carries lower mean chroma than painted albedo, so a
+            // negative fit is a domain bias, not a look decision — the fit never
+            // desaturates (floor at 0).
             // Two degenerate guards (Rule 1 fixes found by the neutrality fixture):
             // - Deadband: a tonemapped near-gray image carries mean chroma up to
             //   ~3.5e-4 purely from float32 channel spread in the ACES chain (see the
@@ -316,16 +337,18 @@ namespace GraffitiEntertainment.Namer.Editor
                 }
             }
 
-            fitted.Saturation = clamp(saturationValue, -kParamRangeLimit, kParamRangeLimit);
+            fitted.Saturation = clamp(saturationValue, 0f, kParamRangeLimit);
 
-            // (5) Curves: histogram specification y = Fref^-1(Fsrc(x)) on the uniform key
-            // grid; R/G/B CDFs are composed with the master mapping (sequential
-            // specification — RGB corrects the residual left after master).
+            // (5) Curves: master-only histogram specification y = Fref^-1(Fsrc(x)) on
+            // the uniform key grid; R/G/B stay identity diagonals (per-channel
+            // specification fought the master map and shifted hue). The masterValues
+            // composition parameter of FitCurveValues/MasterInverse stays in place —
+            // the master path passes null; no refactor.
             float[] masterValues = FitCurveValues(source.LumaHistogram, srcTotal, reference.LumaHistogram, refTotal, null);
             fitted.MasterKeys = BuildKeys(masterValues);
-            fitted.RedKeys = BuildKeys(FitCurveValues(source.RedHistogram, srcTotal, reference.RedHistogram, refTotal, masterValues));
-            fitted.GreenKeys = BuildKeys(FitCurveValues(source.GreenHistogram, srcTotal, reference.GreenHistogram, refTotal, masterValues));
-            fitted.BlueKeys = BuildKeys(FitCurveValues(source.BlueHistogram, srcTotal, reference.BlueHistogram, refTotal, masterValues));
+            fitted.RedKeys = BuildIdentityKeys();
+            fitted.GreenKeys = BuildIdentityKeys();
+            fitted.BlueKeys = BuildIdentityKeys();
 
             // (6) Bloom threshold: p95 of the reference raw sRGB Max3 histogram,
             // written as-is (gamma space, matching URP's default threshold domain).
@@ -541,16 +564,80 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Deterministic white-balance solve: alternating-axis golden-section over
-        /// (temperature, tint) in [-100, 100], minimizing the squared distance between
-        /// the unit-geometric-mean-normalized ColorUtils.ColorBalanceToLMSCoeffs
-        /// candidates and the normalized target gains. Fixed sweep and probe counts;
-        /// strict less-than comparisons; no early exit on data values.
+        /// Exact identity diagonal on the uniform key grid (value == time), used for
+        /// the R/G/B curves so only the master curve carries the histogram fit.
         /// </summary>
-        private static void SolveWhiteBalance(float3 target, out float temperature, out float tint)
+        private static Keyframe[] BuildIdentityKeys()
         {
-            float t = 0f;
-            float ti = 0f;
+            float[] values = new float[kCurveKeyCount];
+            for (int i = 0; i < kCurveKeyCount; i++)
+            {
+                values[i] = i / (float)(kCurveKeyCount - 1);
+            }
+
+            return BuildKeys(values);
+        }
+
+        /// <summary>
+        /// Deterministic white-balance solve (dual start): a 0-seeded and a
+        /// grid-seeded alternating-axis golden-section solve over (temperature, tint)
+        /// in [-100, 100], each minimizing the squared distance between the
+        /// unit-geometric-mean-normalized ColorUtils.ColorBalanceToLMSCoeffs
+        /// candidates and the normalized target gains; the candidate with the lower
+        /// WhiteBalanceResidual on the same target wins (strict less-than; ties keep
+        /// the zero-seeded result). A single 0-seeded start stalls in a wrong basin on
+        /// diagonal targets — e.g. it converges to ~(-44.1, +30.2) for a (-40, +40)
+        /// target — so the coarse grid scan seeds the second start. Fixed grid, sweep
+        /// and probe counts; strict comparisons; no early exit on data values.
+        /// </summary>
+        internal static void SolveWhiteBalance(float3 target, out float temperature, out float tint)
+        {
+            SolveWhiteBalanceSeeded(target, 0f, 0f, out float zeroTemperature, out float zeroTint);
+
+            // Coarse grid scan (temperature outer, tint inner, endpoint-inclusive);
+            // the first grid point seeds the best, later points replace it only under
+            // strict less-than, so exact ties keep the first point in scan order.
+            float bestTemperature = -kWhiteBalanceRange;
+            float bestTint = -kWhiteBalanceRange;
+            float bestResidual = WhiteBalanceResidual(bestTemperature, bestTint, target);
+            for (int i = 0; i < kWhiteBalanceGridSteps; i++)
+            {
+                float gridTemperature = -kWhiteBalanceRange + (2f * kWhiteBalanceRange * i) / (kWhiteBalanceGridSteps - 1);
+                for (int j = 0; j < kWhiteBalanceGridSteps; j++)
+                {
+                    float gridTint = -kWhiteBalanceRange + (2f * kWhiteBalanceRange * j) / (kWhiteBalanceGridSteps - 1);
+                    float residual = WhiteBalanceResidual(gridTemperature, gridTint, target);
+                    if (residual < bestResidual)
+                    {
+                        bestResidual = residual;
+                        bestTemperature = gridTemperature;
+                        bestTint = gridTint;
+                    }
+                }
+            }
+
+            SolveWhiteBalanceSeeded(target, bestTemperature, bestTint, out float seededTemperature, out float seededTint);
+
+            if (WhiteBalanceResidual(seededTemperature, seededTint, target) < WhiteBalanceResidual(zeroTemperature, zeroTint, target))
+            {
+                temperature = seededTemperature;
+                tint = seededTint;
+            }
+            else
+            {
+                temperature = zeroTemperature;
+                tint = zeroTint;
+            }
+        }
+
+        /// <summary>
+        /// Alternating-axis golden-section solve seeded at (seedTemperature, seedTint):
+        /// the loop body of the pre-multistart SolveWhiteBalance, unchanged.
+        /// </summary>
+        private static void SolveWhiteBalanceSeeded(float3 target, float seedTemperature, float seedTint, out float temperature, out float tint)
+        {
+            float t = seedTemperature;
+            float ti = seedTint;
             for (int sweep = 0; sweep < kWhiteBalanceSolveSweeps; sweep++)
             {
                 if (sweep % kWhiteBalanceAxisCount == 0)
@@ -612,8 +699,16 @@ namespace GraffitiEntertainment.Namer.Editor
         /// </summary>
         private static float WhiteBalanceDistance(bool solveTemperature, float candidate, float t, float ti, float3 target)
         {
-            float temperature = solveTemperature ? candidate : t;
-            float tint = solveTemperature ? ti : candidate;
+            return WhiteBalanceResidual(solveTemperature ? candidate : t, solveTemperature ? ti : candidate, target);
+        }
+
+        /// <summary>
+        /// Squared distance between the normalized ColorUtils coefficients at
+        /// (temperature, tint) and the normalized target gains — identical float op
+        /// sequence to the former inline tail of WhiteBalanceDistance.
+        /// </summary>
+        private static float WhiteBalanceResidual(float temperature, float tint, float3 target)
+        {
             Vector3 coeffs = ColorUtils.ColorBalanceToLMSCoeffs(temperature, tint);
             float3 normalized = NormalizeGeometricMean(new float3(coeffs.x, coeffs.y, coeffs.z));
             return distancesq(normalized, target);

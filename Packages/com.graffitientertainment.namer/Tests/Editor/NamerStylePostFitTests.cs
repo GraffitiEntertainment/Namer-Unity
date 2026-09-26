@@ -2,6 +2,7 @@ using System;
 using GraffitiEntertainment.Namer.Editor;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Rendering;
 using Unity.Mathematics;
 using static Unity.Mathematics.math;
 
@@ -22,7 +23,7 @@ namespace GraffitiEntertainment.Namer.Tests
         private const float kFixtureEncodeScale = 1.055f;
         private const float kFixtureEncodeExponent = 1f / 2.4f;
 
-        // --- pinned ColorUtils.ColorBalanceToLMSCoeffs(20, -5), derived below at Fit_WhiteBalance_RecoversKnownCast ---
+        // --- pinned ColorUtils.ColorBalanceToLMSCoeffs(20, -5), the FitSyntheticPair determinism cast ---
         private const float kPinnedWbRed = 1.023302972f;
         private const float kPinnedWbGreen = 1.006599730f;
         private const float kPinnedWbBlue = 0.857412236f;
@@ -227,13 +228,12 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         /// <summary>
-        /// Reference = source white-balanced by ColorUtils.ColorBalanceToLMSCoeffs(20, -5):
-        /// the solve must recover (20, -5). Coefficients pinned from ColorUtils.cs:67-82
-        /// (t1 = 20/65, t2 = -5/65; x = 0.31271 - t1*0.05 = 0.297325385;
-        /// y = StandardIlluminantY(x) + t2*0.05 = 0.309175477; CIExyToLMS(x, y) =
-        /// (0.927620683, 1.028631310, 1.268094801); w1/w2 = (1.023302970, 1.006599731,
-        /// 0.857412237)). The FIT itself calls the live ColorUtils — this pin makes any
-        /// upstream grading-math change fail loudly instead of silently mis-fitting.
+        /// Reference = source white-balanced by ColorUtils.ColorBalanceToLMSCoeffs(12, -5):
+        /// the solve must recover (12, -5). The cast is constructed live from ColorUtils
+        /// so any upstream grading-math change fails loudly instead of silently
+        /// mis-fitting. The fixture moved in-band (12 inside the clamp) because the
+        /// fitted knobs now clamp to ±kFittedWhiteBalanceLimit — a (20, -5) fixture
+        /// would assert the clamp, not the solve.
         /// </summary>
         [Test]
         public void Fit_WhiteBalance_RecoversKnownCast()
@@ -241,7 +241,8 @@ namespace GraffitiEntertainment.Namer.Tests
             const int kFixturePixelCount = 64;
             Color[] source = new Color[kFixturePixelCount];
             Color[] reference = new Color[kFixturePixelCount];
-            float3 cast = new float3(kPinnedWbRed, kPinnedWbGreen, kPinnedWbBlue);
+            Vector3 coeffs = ColorUtils.ColorBalanceToLMSCoeffs(12f, -5f);
+            float3 cast = new float3(coeffs.x, coeffs.y, coeffs.z);
             for (int i = 0; i < kFixturePixelCount; i++)
             {
                 float3 tonemapped = NamerStylePostMath.TonemapLdr(new float3(0.5f, 0.5f, 0.5f));
@@ -255,8 +256,58 @@ namespace GraffitiEntertainment.Namer.Tests
                 AccumulateReferencePixels(reference, 1f),
                 "wb");
 
-            Assert.AreEqual(20.0, (double)fitted.Temperature, kWhiteBalanceRecoveryTolerance);
+            Assert.AreEqual(12.0, (double)fitted.Temperature, kWhiteBalanceRecoveryTolerance);
             Assert.AreEqual(-5.0, (double)fitted.Tint, kWhiteBalanceRecoveryTolerance);
+        }
+
+        /// <summary>
+        /// Extreme cast stays hue-preserving: the solver recovers ~(-100, +100) but the
+        /// fitted knobs clamp to exactly (-15, +15) = ±kFittedWhiteBalanceLimit. No
+        /// tolerance — the clamp yields exactly ±15 as floats.
+        /// </summary>
+        [Test]
+        public void Fit_WhiteBalance_ExtremeCast_ClampsToFifteen()
+        {
+            const int kFixturePixelCount = 64;
+            Color[] source = new Color[kFixturePixelCount];
+            Color[] reference = new Color[kFixturePixelCount];
+            Vector3 coeffs = ColorUtils.ColorBalanceToLMSCoeffs(-100f, 100f);
+            float3 cast = new float3(coeffs.x, coeffs.y, coeffs.z);
+            for (int i = 0; i < kFixturePixelCount; i++)
+            {
+                float3 tonemapped = NamerStylePostMath.TonemapLdr(new float3(0.5f, 0.5f, 0.5f));
+                source[i] = GrayPixel(0.5f);
+                float3 balanced = NamerStylePostMath.LmsToLinear(NamerStylePostMath.LinearToLms(tonemapped) * cast);
+                reference[i] = EncodePixel(balanced);
+            }
+
+            NamerStylePostFitParams fitted = NamerStylePostFit.Fit(
+                NamerStylePostFit.AccumulateSource(source),
+                AccumulateReferencePixels(reference, 1f),
+                "wb-clamp");
+
+            Assert.AreEqual(-15.0, (double)fitted.Temperature);
+            Assert.AreEqual(15.0, (double)fitted.Tint);
+        }
+
+        /// <summary>
+        /// Stall regression: the pre-multistart 0-seeded alternating-axis solve
+        /// converged to ~(-44.1, +30.2) on this diagonal coeffs(-40, +40) target; the
+        /// grid-seeded second start must recover (-40, +40) within 2.0. Calls the
+        /// internal NamerStylePostFit.SolveWhiteBalance directly (InternalsVisibleTo in
+        /// Editor/AssemblyInfo.cs); the target is geometric-mean normalized with a
+        /// test-local mirror of the production helper.
+        /// </summary>
+        [Test]
+        public void SolveWhiteBalance_Multistart_EscapesStallBasin()
+        {
+            Vector3 coeffs = ColorUtils.ColorBalanceToLMSCoeffs(-40f, 40f);
+            float3 target = NormalizeGeometricMeanForTest(new float3(coeffs.x, coeffs.y, coeffs.z));
+
+            NamerStylePostFit.SolveWhiteBalance(target, out float temperature, out float tint);
+
+            Assert.AreEqual(-40.0, (double)temperature, 2.0);
+            Assert.AreEqual(40.0, (double)tint, 2.0);
         }
 
         /// <summary>
@@ -264,7 +315,8 @@ namespace GraffitiEntertainment.Namer.Tests
         /// chroma(TonemapLdr((0.6, 0.35, 0.15))) (computed from the twin), reference
         /// sRGB (0.03, 0.02, 0.01) decodes exactly on the linear segment (v / 12.92),
         /// so reference chroma = (0.03 - 0.01) / 0.03 = 2/3 exactly. Expected
-        /// saturation = clamp((ratio - 1) * 100, -100, 100).
+        /// saturation = max(0f, (ratio - 1) * 100) — the floored formula per the
+        /// saturation floor (the fit never desaturates).
         /// </summary>
         [Test]
         public void Fit_Saturation_ChromaRatio()
@@ -287,9 +339,37 @@ namespace GraffitiEntertainment.Namer.Tests
             float3 tonemapped = NamerStylePostMath.TonemapLdr(srcLinear);
             float srcChroma = (cmax(tonemapped) - cmin(tonemapped)) / cmax(tonemapped);
             const float kRefChromaExact = 2f / 3f; // (0.03 - 0.01) / 0.03 after the exact linear-segment decode
-            float expectedSaturation = (kRefChromaExact / srcChroma - 1f) * 100f;
+            float expectedSaturation = max(0f, (kRefChromaExact / srcChroma - 1f) * 100f);
 
             Assert.AreEqual((double)expectedSaturation, (double)fitted.Saturation, kEstimatorTolerance);
+        }
+
+        /// <summary>
+        /// The fit never desaturates: a saturated source (0.6, 0.35, 0.15) onto a
+        /// near-gray reference (0.05, 0.048, 0.046) — all reference channels decode on
+        /// the exact linear segment v / 12.92, so reference chroma = (0.05 - 0.046) /
+        /// 0.05 = 0.08, far above the 1e-3 deadband, and the ratio path runs. The raw
+        /// ratio ~ (0.08 / srcChroma - 1) * 100 is strongly negative; the floor pins
+        /// fitted.Saturation at exactly 0.
+        /// </summary>
+        [Test]
+        public void Fit_Saturation_NeverDesaturates_FloorsAtZero()
+        {
+            const int kFixturePixelCount = 64;
+            Color[] source = new Color[kFixturePixelCount];
+            Color[] reference = new Color[kFixturePixelCount];
+            for (int i = 0; i < kFixturePixelCount; i++)
+            {
+                source[i] = new Color(0.6f, 0.35f, 0.15f, 1f);
+                reference[i] = new Color(0.05f, 0.048f, 0.046f, 1f);
+            }
+
+            NamerStylePostFitParams fitted = NamerStylePostFit.Fit(
+                NamerStylePostFit.AccumulateSource(source),
+                AccumulateReferencePixels(reference, 1f),
+                "sat-floor");
+
+            Assert.AreEqual(0.0, (double)fitted.Saturation);
         }
 
         /// <summary>
@@ -441,6 +521,22 @@ namespace GraffitiEntertainment.Namer.Tests
                 Assert.AreEqual(expected[i].time, actual[i].time, $"key {i} time");
                 Assert.AreEqual(expected[i].value, actual[i].value, $"key {i} value");
             }
+        }
+
+        /// <summary>
+        /// Test-local mirror of NamerStylePostFit.NormalizeGeometricMean (kept private
+        /// there): v / pow(|x|*|y|*|z|, 1/3); a degenerate (zero) geometric mean
+        /// returns v unchanged.
+        /// </summary>
+        private static float3 NormalizeGeometricMeanForTest(float3 v)
+        {
+            float geometricMean = pow(abs(v.x) * abs(v.y) * abs(v.z), 1f / 3f);
+            if (geometricMean <= 0f)
+            {
+                return v;
+            }
+
+            return v / geometricMean;
         }
     }
 }

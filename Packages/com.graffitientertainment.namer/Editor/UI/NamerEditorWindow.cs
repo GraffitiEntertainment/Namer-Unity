@@ -125,6 +125,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private static readonly int PostSaturationSId = Shader.PropertyToID("_PostSaturationS");
         private static readonly int PostCurveTexId = Shader.PropertyToID("_PostCurveTex");
         private static readonly int ChannelId = Shader.PropertyToID("_Channel");
+        private static readonly int UvRectId = Shader.PropertyToID("_UvRect");
         private static readonly int WireColorId = Shader.PropertyToID("_WireColor");
         private static readonly Color TriangleWireframeColor = new Color(0f, 1f, 1f, 1f);
 
@@ -231,6 +232,8 @@ namespace GraffitiEntertainment.Namer.Editor
         private NamerDipSource _dipSource;
         private bool _writeResidual;
         private Vector2 _scrollPosition;
+        // Scroll-view WIDGET rect (captured after EndScrollView) for the visible-band math in DrawAlbedoPreview; default height 0 makes the first-frame guard skip the draw.
+        private Rect _scrollViewRect = new Rect(0f, 0f, 0f, 0f);
 
         private bool _dirty;
         private double _lastChange;
@@ -1286,6 +1289,12 @@ namespace GraffitiEntertainment.Namer.Editor
             DrawDecompositionSection(inspection);
             DrawOutputSection();
             EditorGUILayout.EndScrollView();
+            // Widget rect captured AFTER EndScrollView feeds the visible-band math in DrawAlbedoPreview; rects INSIDE the scroll view are content-space, so the band is expressed in the same coords as the row rect.
+            // GetLastRect() returns a degenerate 1x1 rect during Layout events (probe-verified 2026-09-26), so capture only on Repaint; an unconditional capture would hand every Repaint pass the Layout pass's rect and the band math would collapse (preview invisible).
+            if (Event.current.type == EventType.Repaint)
+            {
+                _scrollViewRect = GUILayoutUtility.GetLastRect();
+            }
 
             DrawActionSection(inspection);
         }
@@ -2254,20 +2263,34 @@ namespace GraffitiEntertainment.Namer.Editor
                 _channelViewMaterial.SetFloat(OcclusionStrengthId, _namerMaterial.GetFloat(OcclusionStrengthId));
                 _channelViewMaterial.SetFloat(ChannelId, 0);
 
-                // Aspect-fit sub-rect inside the reserved row: uniform scale from the
-                // stylize base keeps its proportions (no stretch) and centers it in the
-                // dialog; vertical centering is a no-op when height is the binding side.
-                float fitScale = Mathf.Min(rect.width / stylizeBase.width, rect.height / stylizeBase.height);
-                float drawWidth = stylizeBase.width * fitScale;
-                float drawHeight = stylizeBase.height * fitScale;
-                Rect drawRect = new Rect(
-                    rect.x + (rect.width - drawWidth) * 0.5f,
-                    rect.y + (rect.height - drawHeight) * 0.5f,
-                    drawWidth,
-                    drawHeight);
-                if (Event.current.type == EventType.Repaint)
+                // GUILayout rects inside the scroll view are CONTENT-space and the expand
+                // row stretches to the CONTENT width (the widest fixed row), not the
+                // visible panel width — center against the visible band and clip
+                // explicitly because Graphics.DrawTexture does not clip to the scroll
+                // view (it overdraws the horizontal scrollbar and the action header).
+                if (_scrollViewRect.height > 0f)
                 {
-                    Graphics.DrawTexture(drawRect, Texture2D.whiteTexture, _channelViewMaterial);
+                    float vbarW = GUI.skin.verticalScrollbar.fixedWidth;
+                    float hbarH = GUI.skin.horizontalScrollbar.fixedHeight;
+                    // The vertical scrollbar is always shown in this window (the foldout
+                    // content is always far taller than the view), so the subtract is
+                    // unconditional by design.
+                    float viewWidth = _scrollViewRect.width - vbarW;
+                    // Exact overflow detector: an expand row pins at exactly viewWidth
+                    // when the content fits and stretches to contentWidth past it
+                    // (probe-verified); 0.5f is a float-noise epsilon.
+                    bool hbarShown = rect.width > viewWidth + 0.5f;
+                    float viewHeight = _scrollViewRect.height - (hbarShown ? hbarH : 0f);
+                    ComputeAlbedoPreviewGeometry(rect, stylizeBase.width, stylizeBase.height, viewWidth, viewHeight, _scrollPosition, out Rect drawRect, out Rect uvRect);
+                    if (drawRect.width > 0f && drawRect.height > 0f && Event.current.type == EventType.Repaint)
+                    {
+                        _channelViewMaterial.SetVector(UvRectId, new Vector4(uvRect.x, uvRect.y, uvRect.width, uvRect.height));
+                        Graphics.DrawTexture(drawRect, Texture2D.whiteTexture, _channelViewMaterial);
+                        // The material is shared with DrawChannelPanes (panes draw earlier
+                        // in the frame than the preview); a stale _UvRect would corrupt
+                        // pane draws next frame.
+                        _channelViewMaterial.SetVector(UvRectId, new Vector4(0f, 0f, 1f, 1f));
+                    }
                 }
             }
             else
@@ -2309,6 +2332,56 @@ namespace GraffitiEntertainment.Namer.Editor
                     EditorGUILayout.LabelField(reason, EditorStyles.miniLabel);
                 }
             }
+        }
+
+        /// <summary>
+        /// Pure view-band geometry for the albedo preview: aspect-fits the texture into
+        /// the visible scroll band, centers on the VISIBLE width (the reserved row
+        /// stretches to the scroll content width, not the panel width), clips the quad
+        /// to the band, and reports the visible fraction as a UV sub-rect for the
+        /// <c>_UvRect</c> shader window (texture-space; the v offset is measured from
+        /// the quad bottom, matching the shader's bottom-origin window). Headless
+        /// -testable, no GUI state.
+        /// </summary>
+        internal static void ComputeAlbedoPreviewGeometry(Rect rowRect, float textureWidth, float textureHeight, float viewWidth, float viewHeight, Vector2 scroll, out Rect drawRect, out Rect uvRect)
+        {
+            float fitScale = Mathf.Min(viewWidth / Mathf.Max(1f, textureWidth), rowRect.height / Mathf.Max(1f, textureHeight));
+            float drawWidth = textureWidth * fitScale;
+            float drawHeight = textureHeight * fitScale;
+
+            // Unclipped fit rect: horizontal center on the VISIBLE band (scroll.x +
+            // viewWidth/2 — NOT the content-width row center, which was the bug);
+            // vertical centering within the row, unchanged.
+            Rect fit = new Rect(
+                scroll.x + (viewWidth - drawWidth) * 0.5f,
+                rowRect.y + (rowRect.height - drawHeight) * 0.5f,
+                drawWidth,
+                drawHeight);
+
+            Rect band = new Rect(scroll.x, scroll.y, viewWidth, viewHeight);
+            Rect clipped = Rect.MinMaxRect(
+                Mathf.Max(fit.xMin, band.xMin),
+                Mathf.Max(fit.yMin, band.yMin),
+                Mathf.Min(fit.xMax, band.xMax),
+                Mathf.Min(fit.yMax, band.yMax));
+
+            // Visible fraction of the UNCLIPPED fit rect (guarded denominators:
+            // degenerate fits must not divide by zero). _UvRect windows in TEXTURE
+            // space where v == 0 is the quad's BOTTOM edge (probe-verified
+            // 2026-09-26: window (0,0,1,0.5) shows the texture's bottom half), so
+            // the v offset is measured from the quad bottom, not the GUI top —
+            // a top-based offset would sample the mirrored slice when clipped.
+            float fitW = Mathf.Max(1f, fit.width);
+            float fitH = Mathf.Max(1f, fit.height);
+            uvRect = new Rect(
+                (clipped.xMin - fit.xMin) / fitW,
+                1f - (clipped.yMax - fit.yMin) / fitH,
+                clipped.width / fitW,
+                clipped.height / fitH);
+
+            // A fully-out-of-band row yields an inverted/empty rect (width or
+            // height <= 0) — the caller's degenerate check skips the draw.
+            drawRect = clipped;
         }
 
         /// <summary>

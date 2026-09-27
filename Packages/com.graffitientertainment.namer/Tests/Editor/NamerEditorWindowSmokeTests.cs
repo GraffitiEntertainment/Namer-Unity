@@ -246,6 +246,98 @@ namespace GraffitiEntertainment.Namer.Tests
             }
         }
 
+        /// <summary>
+        /// 260926-mtv: the preview quad's horizontal center is the VISIBLE band center
+        /// (scroll.x + viewWidth/2), never the reserved row's center — the expand row
+        /// stretches to the scroll CONTENT width (900 here), and centering on the row
+        /// was the pre-fix behavior. The row is intentionally below the vertical band
+        /// here, so the vertical clip inverts and is irrelevant to the horizontal claim.
+        /// </summary>
+        [Test]
+        public void CentersInViewWidth_NotRowWidth()
+        {
+            // fitScale = min(488/1024, 512/1024) = 61/128 -> drawWidth == drawHeight == 488;
+            // unclipped fit x = 0 + (488 - 488) * 0.5 = 0, so the clipped center x == 244.
+            NamerEditorWindow.ComputeAlbedoPreviewGeometry(
+                new Rect(0f, 1000f, 900f, 512f), 1024f, 1024f, 488f, 400f, new Vector2(0f, 0f),
+                out Rect drawRect, out Rect uvRect);
+
+            Assert.AreEqual(488f * 0.5f, drawRect.center.x, 0.0001f,
+                "The quad must center on the visible band (scroll.x + viewWidth/2 == 244), not the 900px row center (450) — the pre-fix behavior");
+        }
+
+        /// <summary>
+        /// 260926-mtv: a wide texture can never draw wider than the visible band — the
+        /// fit is width-bound (drawWidth == viewWidth exactly) and the x-extent is
+        /// unclipped, so the full texture width stays visible (uvRect.width == 1).
+        /// </summary>
+        [Test]
+        public void NeverWiderThanView_WideTexture()
+        {
+            // fitScale = 488/4096 = 61/512 -> drawWidth == 488 exact, drawHeight == 61;
+            // unclipped x-range [0, 488] == band x-range [0, 488] — no horizontal cut.
+            NamerEditorWindow.ComputeAlbedoPreviewGeometry(
+                new Rect(0f, 0f, 900f, 512f), 4096f, 512f, 488f, 400f, new Vector2(0f, 0f),
+                out Rect drawRect, out Rect uvRect);
+
+            Assert.AreEqual(488f, drawRect.width, 0.0001f,
+                "A width-bound fit pins drawWidth at exactly the view width");
+            Assert.AreEqual(1f, uvRect.width, 0.0001f,
+                "An uncut x-extent samples the full texture width (uvRect.width == 1)");
+        }
+
+        /// <summary>
+        /// 260926-mtv: a quad extending above the band top is cut at the band edge and
+        /// uvRect reports the matching visible fraction — the clipped-off region is
+        /// removed from sampling, not stretched to fill the clipped rect. The quad
+        /// bottom (2012 + 488 == 2500) aligns exactly with the band bottom
+        /// (2200 + 300 == 2500), so only the top is cut: the visible v-range is
+        /// [0, 300/488] — uvRect.y == 0 (v == 0 is the quad BOTTOM, probe-verified
+        /// 2026-09-26) and height == 300/488 &lt; 1.
+        /// </summary>
+        [Test]
+        public void BandClip_CutsQuadAndReportsUvSubRect()
+        {
+            // fit 488x488 at y = 2000 + (512 - 488) * 0.5 = 2012; band y [2200, 2500] ->
+            // top cut at 2200: visible v [0, 300/488], clipped-off top 188/488.
+            NamerEditorWindow.ComputeAlbedoPreviewGeometry(
+                new Rect(0f, 2000f, 900f, 512f), 1024f, 1024f, 488f, 300f, new Vector2(0f, 2200f),
+                out Rect drawRect, out Rect uvRect);
+
+            Assert.AreEqual(2200f, drawRect.yMin, 0.0001f,
+                "The quad must be cut at the band top edge");
+            Assert.AreEqual(0f, uvRect.y, 0.0001f,
+                "The quad bottom aligns exactly with the band bottom — v starts at 0 exactly (bottom-origin window)");
+            Assert.AreEqual(300f / 488f, uvRect.height, 0.0001f,
+                "uvRect.height must report the visible fraction (300/488 < 1)");
+            Assert.AreEqual(300f / 488f, uvRect.yMax, 0.0001f,
+                "The clipped-off top (188/488) is removed from sampling — yMax < 1");
+        }
+
+        /// <summary>
+        /// 260926-mtv: a fully visible row (scroll.y == rowRect.y here) is never cut —
+        /// the helper returns the uncut fit rect and an exact identity uvRect. 0/488 and
+        /// 488/488 are exact binary floats, so the uvRect assertions carry NO tolerance.
+        /// </summary>
+        [Test]
+        public void FullyVisible_PassesIdentityUv()
+        {
+            // fit 488x488 at y 1012..1500 inside band [1000, 1600]; x [0, 488] inside
+            // band [0, 488] — uncut, so uvRect == (0, 0, 1, 1) exactly.
+            NamerEditorWindow.ComputeAlbedoPreviewGeometry(
+                new Rect(0f, 1000f, 900f, 512f), 1024f, 1024f, 488f, 600f, new Vector2(0f, 1000f),
+                out Rect drawRect, out Rect uvRect);
+
+            Assert.AreEqual(0f, uvRect.x, "A fully visible quad starts sampling at u == 0 exactly");
+            Assert.AreEqual(0f, uvRect.y, "A fully visible quad starts sampling at v == 0 exactly");
+            Assert.AreEqual(1f, uvRect.width, "A fully visible quad samples the full texture width exactly");
+            Assert.AreEqual(1f, uvRect.height, "A fully visible quad samples the full texture height exactly");
+            Assert.AreEqual(1012f, drawRect.yMin, 0.0001f,
+                "Vertical centering within the row is unchanged: y = 1000 + (512 - 488) * 0.5 == 1012");
+            Assert.AreEqual(488f, drawRect.height, 0.0001f,
+                "The uncut fit keeps its full square height");
+        }
+
         // -- EditorPrefs isolation for the foldout keys -----------------------
 
         private sealed class PrefsSnapshot

@@ -11,6 +11,8 @@ Shader "GraffitiEntertainment.Namer/NamerChannelView"
 
         _Channel("Channel", Float) = 0
         _OcclusionStrength("Occlusion Strength", Range(0.0, 1.0)) = 1.0
+        // Immediate-mode per-draw window set by the albedo preview clip; identity default keeps every other consumer byte-identical.
+        [HideInInspector] _UvRect("UV Rect", Vector) = (0,0,1,1)
 
         // The shared CBUFFER in NamerSurface.hlsl also carries these; declare them
         // (hidden) so the SRP-batcher material layout stays complete.
@@ -52,6 +54,7 @@ Shader "GraffitiEntertainment.Namer/NamerChannelView"
             #include "NamerSurface.hlsl"
 
             float _Channel;
+            float4 _UvRect;
 
             struct Attributes
             {
@@ -65,13 +68,14 @@ Shader "GraffitiEntertainment.Namer/NamerChannelView"
                 float4 positionCS : SV_POSITION;
             };
 
-            // Standard Graphics.Blit quad vertex — raw UVs, no TRANSFORM_TEX (the panes
-            // show the raw texture).
+            // Standard Graphics.Blit quad vertex — no TRANSFORM_TEX; the identity-default
+            // _UvRect sub-rect window used by the albedo preview's band clip passes raw
+            // UVs through when _UvRect == (0,0,1,1) (the panes show the raw texture).
             Varyings ChannelVert(Attributes input)
             {
                 Varyings output;
                 output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
-                output.uv = input.uv;
+                output.uv = input.uv * _UvRect.zw + _UvRect.xy;
                 return output;
             }
 

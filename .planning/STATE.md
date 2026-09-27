@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 Phase: 05.1 — COMPLETE
 Plan: 1 of 4
 Status: Phase 05.1 complete
-Last activity: 2026-09-26 -- Completed quick task 260926-lqr: hue-preserving post look (WB ±15, sat floor 0, identity RGB curves, multistart WB solve); closed debug session fit-look-rails-black-source
+Last activity: 2026-09-26 -- Completed quick task 260926-mtv: albedo preview view-band centering + _UvRect clip window + Repaint-gated scroll-rect capture
 
 Progress: [██████████] 100%
 
@@ -242,6 +242,7 @@ None yet.
 | 260924-hk7 | Palette transfer redesign (supersedes absolute-snap operator): CSPaletteTransfer relative ramp — hue ramp unchanged (Preserve/Replace stay), saturation boost-only with achromatic texels (sat < 0.15) never tinted, luma moved out of StyleStrength into new Tone Match profile slider [0,1] default 0; NamerStyleStylization.Active ORs tone-only dispatch; _ToneMatch set unconditionally (Metal unbound-property silent-skip); old profiles deserialize ToneMatch = 0; live EditMode 54/54 targeted + 250/251 full (1 pre-existing AoContrast isolation leak) | 2026-09-24 | 2582b3b | [260924-hk7-palette-transfer-redesign-relative-palet](./quick/260924-hk7-palette-transfer-redesign-relative-palet/) |
 | 260925-je1 | Fix Stylized + Post magenta lens: NamerPostBloom core Common/SpaceTransforms includes swapped for the house URP Core.hlsl (UnityInput → UNITY_MATRIX_M for TransformObjectToHClip on Metal; 3-pass warm-draw verified clean via relay) + albedo preview 512px aspect-fit, horizontally centered, no scrollbar overflow (d951b05+16292eb) | 2026-09-25 | 16292eb | [260925-je1-fix-namerpostbloom-magenta-urp-core-incl](./quick/260925-je1-fix-namerpostbloom-magenta-urp-core-incl/) |
 | 260926-lqr | Hue-preserving post look redesign in NamerStylePostFit.cs: fitted WB Temperature/Tint clamped ±15 (kFittedWhiteBalanceLimit), Saturation floored at 0, R/G/B curves identity diagonals (master-only histogram fit), dual-start SolveWhiteBalance (21-point step-10 grid seed escapes the non-unimodal stall basin); NamerStylePostFitTests 13 tests — live 13/13 targeted, 298/299 full (1 pre-existing AO drift); rides the fit-look-rails degenerate-source guard (debug set in 8839042) | 2026-09-26 | 5db4179 | [260926-lqr-hue-preserving-post-look-redesign-in-nam](./quick/260926-lqr-hue-preserving-post-look-redesign-in-nam/) |
+| 260926-mtv | Albedo preview quad centers on the VISIBLE scroll band (scroll.x + viewWidth/2, not content-width row center) and clips via identity-default _UvRect shader sub-rect window; pure geometry seam NamerEditorWindow.ComputeAlbedoPreviewGeometry + 4 headless tests; post-execution fixes: uvRect bottom-origin (probe-verified) and Repaint-gated scroll-view rect capture (GetLastRect returns degenerate 1x1 during Layout — probe-verified root cause of the user-reported invisible preview); NamerEditorWindowSmokeTests 12/12 targeted after fix, 301/303 full (2 pre-existing: AO drift + AO-pref isolation) | 2026-09-26 | d26004a | [260926-mtv-albedo-preview-view-band-centering](./quick/260926-mtv-albedo-preview-view-band-centering/) |
 
 ## Deferred Items
 

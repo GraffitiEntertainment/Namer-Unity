@@ -235,6 +235,19 @@ namespace GraffitiEntertainment.Namer.Editor
         // Scroll-view WIDGET rect (captured after EndScrollView) for the visible-band math in DrawAlbedoPreview; default height 0 makes the first-frame guard skip the draw.
         private Rect _scrollViewRect = new Rect(0f, 0f, 0f, 0f);
 
+        // W14: last Repaint's shaded-view toggle row rect (captured at the top of
+        // DrawChannelPanes, immediately after the row's EndHorizontal) — the
+        // content-width detector for the horizontal scrollbar in the pane band
+        // math. Default width 0 keeps the detector quiet until the first Repaint.
+        private Rect _channelToggleRowRect = new Rect(0f, 0f, 0f, 0f);
+
+        // W14 gap fix: zero-MARGIN copy of EditorStyles.toggle for the pane-slot
+        // reservations (lazily created — EditorStyles needs the editor skin).
+        // Measurement is untouched (same content, same padding), so the pane
+        // columns stay aligned with the toggle row; only the style-owned vertical
+        // margin stacking is removed.
+        private GUIStyle _channelPaneSlotStyle;
+
         private bool _dirty;
         private double _lastChange;
         private bool _busy;
@@ -612,8 +625,12 @@ namespace GraffitiEntertainment.Namer.Editor
                     stylizeSplit = MeshVertexSplitter.Split(_previewMesh);
                 }
 
+                // 260926-qlb: the fit pass composes its base tone-neutral (WR-02's
+                // forced lens keeps its profile override; the solver now also fits
+                // the FULL tonal distance, so params stay ToneMatch-knob-independent).
                 NamerStyleStylization stylization = ComposePreviewStylization(
-                    styleProfile, _forceStylizeForFit ? kAfterViewStylized : _afterView, stylizeSplit);
+                    styleProfile, _forceStylizeForFit ? kAfterViewStylized : _afterView, stylizeSplit,
+                    forcePostOwnsTone: _forceStylizeForFit);
                 _stylizeSmoothingSkipped = stylization != null && stylization.SmoothingSkippedNoMesh;
                 NamerProcessor.ApplyStyleControls(inspection, stylization != null ? styleProfile : null);
 
@@ -780,12 +797,16 @@ namespace GraffitiEntertainment.Namer.Editor
 
             // Pane bloom rides the same funnel: armed only when the post lens is
             // active AND the profile carries a fit (the W6 degrade falls back to
-            // plain Stylized NAMER — no bloom either). Disabled writes (0, 0),
-            // which keeps Render byte-identical (zero extra RTs/blits).
+            // plain Stylized NAMER — no bloom either). The bloom intensity scales
+            // by Tone Match like every other fitted post param (the threshold is
+            // deliberately unscaled — it is a separability floor, not a strength);
+            // s=0 yields intensity 0, and the renderer's enabled gate
+            // (intensity > 0 AND threshold > 0) keeps Render byte-identical to
+            // the disabled path.
             bool fitted = postActive && profile != null && profile.HasPostFit;
             _preview.SetPostBloom(
                 BloomThresholdLinear(profile),
-                fitted ? NamerEditorConstants.DefaultBloomIntensity : 0f);
+                fitted ? NamerPostLookScale.Scale(NamerEditorConstants.DefaultBloomIntensity, profile.ToneMatch) : 0f);
         }
 
         /// <summary>
@@ -811,7 +832,11 @@ namespace GraffitiEntertainment.Namer.Editor
         /// early-out) with identity LMS/EV/z/s and a null curve strip. Active case
         /// derives the CPU-side twins exactly like URP's own passes:
         /// ColorUtils.ColorBalanceToLMSCoeffs (the function ColorGradingLutPass
-        /// calls) and z/s = value/100 + 1.
+        /// calls) and z/s = value/100 + 1. The fitted values are lerped toward
+        /// neutral by the profile's Tone Match (0 = fully off with _PostEnable 0
+        /// and the exact neutral table, 1 = full strength) via the shared
+        /// NamerPostLookScale — the neutral/unconditional-binding discipline is
+        /// unchanged.
         /// </summary>
         internal static void ApplyPostLook(Material material, NamerStyleProfile profile, bool postActive)
         {
@@ -820,26 +845,36 @@ namespace GraffitiEntertainment.Namer.Editor
                 return;
             }
 
-            bool enable = postActive && profile != null && profile.HasPostFit;
+            float toneMatch = profile != null ? profile.ToneMatch : 0f;
+            bool enable = postActive && profile != null && profile.HasPostFit && NamerPostLookScale.IsActive(toneMatch);
             material.SetFloat(PostEnableId, enable ? 1f : 0f);
             material.SetVector(
                 PostLmsCoeffsId,
                 profile != null
-                    ? (Vector4)UnityEngine.Rendering.ColorUtils.ColorBalanceToLMSCoeffs(profile.PostTemperature, profile.PostTint)
+                    ? (Vector4)UnityEngine.Rendering.ColorUtils.ColorBalanceToLMSCoeffs(
+                        NamerPostLookScale.Scale(profile.PostTemperature, toneMatch),
+                        NamerPostLookScale.Scale(profile.PostTint, toneMatch))
                     : Vector4.one);
-            material.SetFloat(PostExposureEvId, profile != null ? profile.PostExposureEv : 0f);
-            material.SetFloat(PostContrastZId, profile != null ? profile.PostContrast / 100f + 1f : 1f);
-            material.SetFloat(PostSaturationSId, profile != null ? profile.PostSaturation / 100f + 1f : 1f);
-            material.SetTexture(PostCurveTexId, enable ? GetOrCreatePostCurveTexture(profile) : null);
+            material.SetFloat(
+                PostExposureEvId,
+                profile != null ? NamerPostLookScale.Scale(profile.PostExposureEv, toneMatch) : 0f);
+            material.SetFloat(
+                PostContrastZId,
+                profile != null ? NamerPostLookScale.Scale(profile.PostContrast, toneMatch) / 100f + 1f : 1f);
+            material.SetFloat(
+                PostSaturationSId,
+                profile != null ? NamerPostLookScale.Scale(profile.PostSaturation, toneMatch) / 100f + 1f : 1f);
+            material.SetTexture(PostCurveTexId, enable ? GetOrCreatePostCurveTexture(profile, toneMatch) : null);
         }
 
         /// <summary>
         /// One-slot static cache for the 128x1 curve strip: rebuilt only when the
-        /// profile's identity or any curve key changes (a re-fit can land on the
-        /// same fingerprint while editing keys, so the key dump — not the
-        /// fingerprint — is the cache key). Released in <see cref="OnDisable"/>.
+        /// profile's identity, its Tone Match, or any curve key changes (a re-fit
+        /// can land on the same fingerprint while editing keys, so the key dump —
+        /// not the fingerprint — is the cache key). Released in
+        /// <see cref="OnDisable"/>.
         /// </summary>
-        private static Texture2D GetOrCreatePostCurveTexture(NamerStyleProfile profile)
+        private static Texture2D GetOrCreatePostCurveTexture(NamerStyleProfile profile, float toneMatch)
         {
             string key = ComputePostCurveCacheKey(profile);
             if (_postCurveTexture != null && _postCurveTextureKey == key)
@@ -852,13 +887,14 @@ namespace GraffitiEntertainment.Namer.Editor
                 DestroyImmediate(_postCurveTexture);
             }
 
-            _postCurveTexture = BuildPostCurveTexture(profile);
+            _postCurveTexture = BuildPostCurveTexture(profile, toneMatch);
             _postCurveTextureKey = key;
             return _postCurveTexture;
         }
 
         /// <summary>
-        /// Cache identity: the profile's instance ID plus every key (time, value)
+        /// Cache identity: the profile's instance ID plus its Tone Match (the
+        /// strip derives from the live scale) plus every key (time, value)
         /// of all four fitted curves, invariant-culture formatted. Null curves
         /// contribute nothing (the texture builder falls back to the diagonal).
         /// </summary>
@@ -866,6 +902,7 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             StringBuilder builder = new StringBuilder();
             builder.Append(profile.GetInstanceID());
+            builder.Append("|T:").Append(profile.ToneMatch.ToString("R", CultureInfo.InvariantCulture));
             AppendCurveKey(builder, "M", profile.PostMasterCurve);
             AppendCurveKey(builder, "R", profile.PostRedCurve);
             AppendCurveKey(builder, "G", profile.PostGreenCurve);
@@ -900,21 +937,28 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>
         /// Builds the 128x1 RGBA float strip the shader samples as the YRGB curve
         /// bank: .r/.g/.b are the fitted R/G/B curves, .a the master curve — the
-        /// same packing URP's LUT-builder curve baker uses. Linear filter + clamp
-        /// wrap so in-shader bilinear fetches land between texels exactly like
-        /// the LUT builder's LinearClamp sampling of its curve textures.
+        /// same packing URP's LUT-builder curve baker uses. The four fitted
+        /// curves are scaled toward the identity diagonal by
+        /// NamerPostLookScale.ScaleCurve at the live Tone Match before
+        /// evaluation. Linear filter + clamp wrap so in-shader bilinear fetches
+        /// land between texels exactly like the LUT builder's LinearClamp
+        /// sampling of its curve textures.
         /// </summary>
-        private static Texture2D BuildPostCurveTexture(NamerStyleProfile profile)
+        private static Texture2D BuildPostCurveTexture(NamerStyleProfile profile, float toneMatch)
         {
+            AnimationCurve masterCurve = NamerPostLookScale.ScaleCurve(profile.PostMasterCurve, toneMatch);
+            AnimationCurve redCurve = NamerPostLookScale.ScaleCurve(profile.PostRedCurve, toneMatch);
+            AnimationCurve greenCurve = NamerPostLookScale.ScaleCurve(profile.PostGreenCurve, toneMatch);
+            AnimationCurve blueCurve = NamerPostLookScale.ScaleCurve(profile.PostBlueCurve, toneMatch);
             Color[] pixels = new Color[kPostCurveTexelCount];
             for (int i = 0; i < kPostCurveTexelCount; i++)
             {
                 float t = (float)i / (kPostCurveTexelCount - 1);
                 pixels[i] = new Color(
-                    EvaluatePostCurveChannel(profile.PostRedCurve, t),
-                    EvaluatePostCurveChannel(profile.PostGreenCurve, t),
-                    EvaluatePostCurveChannel(profile.PostBlueCurve, t),
-                    EvaluatePostCurveChannel(profile.PostMasterCurve, t));
+                    EvaluatePostCurveChannel(redCurve, t),
+                    EvaluatePostCurveChannel(greenCurve, t),
+                    EvaluatePostCurveChannel(blueCurve, t),
+                    EvaluatePostCurveChannel(masterCurve, t));
             }
 
             Texture2D strip = new Texture2D(kPostCurveTexelCount, 1, TextureFormat.RGBAFloat, false, true)
@@ -1452,7 +1496,7 @@ namespace GraffitiEntertainment.Namer.Editor
                         + "applies the attached Style Profile (palette transfer, smoothing, and the "
                         + "profile's bake-side controls). Stylized + Post additionally applies the "
                         + "profile's fitted post look (white balance, exposure, contrast, saturation, "
-                        + "curves, bloom) in-shader, matching the generated scene Volume so the look "
+                        + "curves, bloom) scaled by Tone Match in-shader, matching the generated scene Volume so the look "
                         + "is approved without play mode. Process always bakes with the attached profile "
                         + "regardless of this popup. Recomputes the preview in memory "
                         + NamerEditorConstants.DebounceSeconds + " s after the change — nothing is written to disk."),
@@ -2385,6 +2429,51 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
+        /// Pure band-intersection clip for one channel pane (W14 — the mtv
+        /// 260926-mtv defect class): intersects <paramref name="paneRect"/> with
+        /// the scroll view's visible band (content-space, derived from the
+        /// captured widget rect exactly like <see cref="DrawAlbedoPreview"/>'s
+        /// band) and reports the visible fraction as a UV sub-rect for the
+        /// <c>_UvRect</c> shader window so the clipped-off region is REMOVED from
+        /// sampling, never stretched. A pane fully outside the band — or a
+        /// degenerate band (the first-frame default) — returns a zero-area rect
+        /// so the caller skips the draw, label, cursor, and hit-test entirely.
+        /// Headless-testable, no GUI state.
+        /// </summary>
+        internal static Rect ComputeChannelPaneClip(Rect paneRect, Rect visibleBand, out Rect uvRect)
+        {
+            Rect clipped = Rect.MinMaxRect(
+                Mathf.Max(paneRect.xMin, visibleBand.xMin),
+                Mathf.Max(paneRect.yMin, visibleBand.yMin),
+                Mathf.Min(paneRect.xMax, visibleBand.xMax),
+                Mathf.Min(paneRect.yMax, visibleBand.yMax));
+
+            if (clipped.xMin >= clipped.xMax || clipped.yMin >= clipped.yMax)
+            {
+                // No overlap (or a degenerate band): zero-area, not an inverted
+                // rect — the caller's width/height check skips everything, so no
+                // pane pixels render under or into the horizontal scrollbar.
+                uvRect = Rect.zero;
+                return Rect.zero;
+            }
+
+            // Visible fraction of the pane (guarded denominators: a zero-size
+            // pane must not divide by zero). _UvRect windows in TEXTURE space
+            // where v == 0 is the quad's BOTTOM edge (probe-verified 2026-09-26),
+            // so the v offset is measured from the quad bottom, not the GUI top —
+            // a top-based offset would sample the mirrored slice when the pane
+            // is clipped at the band bottom (the mtv bottom-origin lesson).
+            float paneW = Mathf.Max(1f, paneRect.width);
+            float paneH = Mathf.Max(1f, paneRect.height);
+            uvRect = new Rect(
+                (clipped.xMin - paneRect.xMin) / paneW,
+                1f - (clipped.yMax - paneRect.yMin) / paneH,
+                clipped.width / paneW,
+                clipped.height / paneH);
+            return clipped;
+        }
+
+        /// <summary>
         /// Ensures the embedded inspector for the attached style profile exists and
         /// targets <paramref name="attached"/> — creating or recreating the cached
         /// <see cref="UnityEditor.Editor"/> for that target via CreateEditor — or returns
@@ -2634,18 +2723,32 @@ namespace GraffitiEntertainment.Namer.Editor
         /// profile is attached AND After View reads a stylized-side lens. 05.1 W5:
         /// Stylized + Post composes the SAME stylization (the post grade rides the
         /// preview material's uniform table, not the pipeline — nothing
-        /// post-processed touches the compute output). Internal for the lens logic
-        /// test (the smallest honest seam).
+        /// post-processed touches the compute output) EXCEPT the palette luma pull
+        /// is zeroed when the profile carries a fit (260926-qlb) — the fitted post
+        /// grade owns tonality as the only tone mechanism. An unfitted profile at
+        /// the post lens keeps the pull (the W6 degrade falls back to plain
+        /// Stylized NAMER — no post exists to own tone). <paramref name="forcePostOwnsTone"/>
+        /// is the RunStylePostFit forced pass (a fit is being CREATED — the solver
+        /// fits the full tonal distance from a tone-neutral base regardless of lens
+        /// or existing HasPostFit state). Internal for the lens logic test (the
+        /// smallest honest seam).
         /// </summary>
         internal static NamerStyleStylization ComposePreviewStylization(
-            NamerStyleProfile profile, int afterView, NamerSplitResult split)
+            NamerStyleProfile profile, int afterView, NamerSplitResult split,
+            bool forcePostOwnsTone = false)
         {
             if (profile == null || (afterView != kAfterViewStylized && afterView != kAfterViewPost))
             {
                 return null;
             }
 
-            return NamerStyleStylization.Create(profile, split);
+            // 260926-qlb: the base-side predicate is HasPostFit ALONE, deliberately
+            // NOT NamerPostLookScale.IsActive — HasPostFit + ToneMatch = 0 must read
+            // as tone entirely untouched (pull zeroed AND post scaled to nothing).
+            // Do not "fix" this to IsActive.
+            bool postOwnsTone = forcePostOwnsTone
+                || (afterView == kAfterViewPost && profile.HasPostFit);
+            return NamerStyleStylization.Create(profile, split, postOwnsTone);
         }
 
         /// <summary>

@@ -338,6 +338,111 @@ namespace GraffitiEntertainment.Namer.Tests
                 "The uncut fit keeps its full square height");
         }
 
+        /// <summary>
+        /// W14: a pane fully inside the visible band is returned unchanged with an
+        /// exact identity uvRect — the common case (the strip is a mid-content row
+        /// fully on screen) must behave exactly like the pre-clip draw. All values
+        /// are exact binary floats, so the assertions carry NO tolerance.
+        /// </summary>
+        [Test]
+        public void ChannelPaneClip_FullContainment_ReturnsPaneAndIdentityUv()
+        {
+            // Pane (100, 200, 48, 48) sits strictly inside band (0, 0, 600, 500).
+            Rect clipped = NamerEditorWindow.ComputeChannelPaneClip(
+                new Rect(100f, 200f, 48f, 48f), new Rect(0f, 0f, 600f, 500f), out Rect uvRect);
+
+            Assert.AreEqual(100f, clipped.xMin, "A contained pane keeps its left edge");
+            Assert.AreEqual(200f, clipped.yMin, "A contained pane keeps its top edge");
+            Assert.AreEqual(48f, clipped.width, "A contained pane keeps its full width");
+            Assert.AreEqual(48f, clipped.height, "A contained pane keeps its full height");
+            Assert.AreEqual(0f, uvRect.x, "A fully visible pane starts sampling at u == 0 exactly");
+            Assert.AreEqual(0f, uvRect.y, "A fully visible pane starts sampling at v == 0 exactly");
+            Assert.AreEqual(1f, uvRect.width, "A fully visible pane samples the full texture width exactly");
+            Assert.AreEqual(1f, uvRect.height, "A fully visible pane samples the full texture height exactly");
+        }
+
+        /// <summary>
+        /// W14: a pane crossing the band's RIGHT edge (the vertical-scrollbar side)
+        /// is trimmed to the covered side and uvRect windows the surviving half —
+        /// the clipped-off right half is removed from sampling, not squeezed into
+        /// the trimmed rect. 24/48 == 0.5 is an exact binary float.
+        /// </summary>
+        [Test]
+        public void ChannelPaneClip_PartialOverlap_TrimsRightEdgeExactly()
+        {
+            // Pane (100, 200, 48, 48) vs band (0, 0, 124, 500): x trimmed to
+            // [100, 124] — 24 px visible; y untouched.
+            Rect clipped = NamerEditorWindow.ComputeChannelPaneClip(
+                new Rect(100f, 200f, 48f, 48f), new Rect(0f, 0f, 124f, 500f), out Rect uvRect);
+
+            Assert.AreEqual(124f, clipped.xMax, "The pane is cut at the band right edge");
+            Assert.AreEqual(24f, clipped.width, "Exactly the covered width survives (48 - 24 == 24)");
+            Assert.AreEqual(48f, clipped.height, "The vertical extent is untouched");
+            Assert.AreEqual(0f, uvRect.x, "The left edge is uncut — u starts at 0 exactly");
+            Assert.AreEqual(0.5f, uvRect.width, "The visible fraction is exactly half the pane");
+            Assert.AreEqual(1f, uvRect.height, "The full vertical texture extent stays sampled");
+        }
+
+        /// <summary>
+        /// W14: a pane crossing the band's BOTTOM edge (the horizontal-scrollbar
+        /// strip) is trimmed to the covered top portion; uvRect's v offset is
+        /// measured from the quad BOTTOM (probe-verified mtv lesson), so a
+        /// 30/48-px survivor reads v == [1 - 30/48, 1] — the clipped-off bottom is
+        /// removed, never stretched. 30/48 == 5/8 == 0.625 is an exact binary float.
+        /// </summary>
+        [Test]
+        public void ChannelPaneClip_PartialOverlap_TrimsBottomEdgeExactly()
+        {
+            // Pane (100, 200, 48, 48) vs band (0, 0, 600, 230): y trimmed to
+            // [200, 230] — 30 px visible; x untouched.
+            Rect clipped = NamerEditorWindow.ComputeChannelPaneClip(
+                new Rect(100f, 200f, 48f, 48f), new Rect(0f, 0f, 600f, 230f), out Rect uvRect);
+
+            Assert.AreEqual(230f, clipped.yMax, "The pane is cut at the band bottom edge (the horizontal scrollbar strip)");
+            Assert.AreEqual(30f, clipped.height, "Exactly the covered height survives (48 - 18 == 30)");
+            Assert.AreEqual(48f, clipped.width, "The horizontal extent is untouched");
+            Assert.AreEqual(0.375f, uvRect.y, "Bottom-origin window: v starts at 1 - 30/48 == 0.375 exactly");
+            Assert.AreEqual(0.625f, uvRect.height, "The visible fraction is exactly 30/48 of the pane");
+            Assert.AreEqual(1f, uvRect.yMax, "The quad top (v == 1) is the visible edge — nothing is mirrored");
+            Assert.AreEqual(1f, uvRect.width, "The full horizontal texture extent stays sampled");
+        }
+
+        /// <summary>
+        /// W14: a pane fully outside the band returns a zero-area rect (draw,
+        /// label, cursor, and hit-test all skipped by the caller) — never an
+        /// inverted rect that could sneak a draw through a negative-size check.
+        /// </summary>
+        [Test]
+        public void ChannelPaneClip_ZeroIntersection_ReturnsZeroArea()
+        {
+            // Pane (100, 200, 48, 48) lies entirely below band (0, 300, 600, 200).
+            Rect clipped = NamerEditorWindow.ComputeChannelPaneClip(
+                new Rect(100f, 200f, 48f, 48f), new Rect(0f, 300f, 600f, 200f), out Rect uvRect);
+
+            Assert.AreEqual(Rect.zero, clipped,
+                "A fully out-of-band pane must resolve to the exact zero rect (scrolled-out strip draws nothing)");
+            Assert.AreEqual(Rect.zero, uvRect,
+                "A skipped pane reports the zero window, never a sampling fraction");
+        }
+
+        /// <summary>
+        /// W14: a degenerate band — the first-frame default before the Repaint
+        /// capture fills <c>_scrollViewRect</c> — is a miss like any other
+        /// (zero-area clip, draw skipped): the mtv first-frame guard class. The
+        /// pane never renders before the band is known.
+        /// </summary>
+        [Test]
+        public void ChannelPaneClip_DegenerateBand_SkipsDraw()
+        {
+            Rect clipped = NamerEditorWindow.ComputeChannelPaneClip(
+                new Rect(100f, 200f, 48f, 48f), new Rect(0f, 0f, 0f, 0f), out Rect uvRect);
+
+            Assert.AreEqual(Rect.zero, clipped,
+                "A degenerate (first-frame) band must skip the pane draw entirely");
+            Assert.AreEqual(Rect.zero, uvRect,
+                "A skipped pane reports the zero window");
+        }
+
         // -- EditorPrefs isolation for the foldout keys -----------------------
 
         private sealed class PrefsSnapshot

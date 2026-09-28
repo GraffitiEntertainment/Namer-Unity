@@ -757,6 +757,31 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
+        /// Resolves the selected <see cref="NamerPostLook"/> from the settings'
+        /// persisted GUID (05.2 plan 04 W9 — mirrors <see cref="ResolveStyleProfile"/>
+        /// field-for-field). Empty GUID, a deleted/unresolvable asset, or a GUID that
+        /// no longer points at a post look all return null — the silent detach
+        /// (T-05.2-04-01) — so the Stylized + Post lens degrades to plain Stylized
+        /// NAMER with the locked fallback reason instead of throwing.
+        /// </summary>
+        internal static NamerPostLook ResolvePostLook(NamerProcessorSettings settings)
+        {
+            string guid = settings.PostLookGuid;
+            if (string.IsNullOrEmpty(guid))
+            {
+                return null;
+            }
+
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            if (string.IsNullOrEmpty(path))
+            {
+                return null;
+            }
+
+            return AssetDatabase.LoadAssetAtPath<NamerPostLook>(path);
+        }
+
+        /// <summary>
         /// True when the attached profile requests island-gated smoothing and therefore
         /// needs the source mesh split (05-03): profile != null &amp;&amp; Smoothing &gt; 0.
         /// A null profile (or palette-only) never primes a mesh — the identity path adds

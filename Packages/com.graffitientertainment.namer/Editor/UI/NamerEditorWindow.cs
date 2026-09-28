@@ -262,18 +262,10 @@ namespace GraffitiEntertainment.Namer.Editor
         // for one synchronous recompute so the fit reads the palette-mapped stylized
         // output REGARDLESS of the preview lens (D-03 exemplar contract). Always
         // reset in a finally; the preview pane honestly keeps showing the stylized
-        // result that was just fitted.
+        // result that was just fitted. 05.2 plan 04 (D-04): the forced pass is
+        // composed with the window's ATTACHED profile — the references come from
+        // the NamerPostLook being fitted, the stylization always from the window.
         internal bool _forceStylizeForFit;
-
-        // 05.1 review WR-02: set only inside RunStylePostFit, always beside
-        // _forceStylizeForFit — this profile replaces ResolveStyleProfile(_settings)
-        // for that one forced recompute, so the stylized base the fit measures is
-        // computed with the profile BEING fitted. Without it, the standalone
-        // (Project window) inspector's fallback exemplar window may carry a
-        // different attached profile — or none, making _forceStylizeForFit a no-op —
-        // and the reference grade would silently absorb the missing/wrong
-        // stylization into the post knobs. Always reset in the same finally.
-        internal NamerStyleProfile _fitStyleProfileOverride;
 
         private string _status = string.Empty;
         private bool _statusIsError;
@@ -336,6 +328,7 @@ namespace GraffitiEntertainment.Namer.Editor
 
             EditorApplication.update += Tick;
             NamerStyleProfile.Changed += OnProfileChanged;
+            NamerPostLook.Changed += OnPostLookChanged;
 
             // Seed-only-when-null: a fresh window opens on the current editor pick,
             // but a persisted pick (domain reload) is never clobbered. Unity's
@@ -353,6 +346,7 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             EditorApplication.update -= Tick;
             NamerStyleProfile.Changed -= OnProfileChanged;
+            NamerPostLook.Changed -= OnPostLookChanged;
 
             ReleaseLiveResult();
             ReleaseDecompPreview();
@@ -429,6 +423,18 @@ namespace GraffitiEntertainment.Namer.Editor
         /// focus change required.
         /// </summary>
         private void OnProfileChanged(NamerStyleProfile profile)
+        {
+            _afterPanelState.MarkTweaking();
+            MarkDirty();
+        }
+
+        /// <summary>
+        /// 05.2 plan 04 (W10): any edit to the SELECTED post-look asset (the asset
+        /// editor's sliders/curves raise <see cref="NamerPostLook.Changed"/>) routes
+        /// through the same debounced recompute as a profile edit — the Stylized +
+        /// Post pane grades from the asset live, with no focus change required.
+        /// </summary>
+        private void OnPostLookChanged(NamerPostLook look)
         {
             _afterPanelState.MarkTweaking();
             MarkDirty();
@@ -571,12 +577,12 @@ namespace GraffitiEntertainment.Namer.Editor
                 // always bakes with the profile). 05.1 plan 03: a forced fit pass
                 // (_forceStylizeForFit, set only inside RunStylePostFit) ORs into the
                 // lens so the fit reads the stylized output regardless of the popup.
-                // 05.1 review WR-02: that forced pass stylizes with the profile being
-                // fitted (the inspector's target), not the window's attached profile —
-                // the fallback exemplar window may have a different profile or none.
-                NamerStyleProfile styleProfile = _fitStyleProfileOverride != null
-                    ? _fitStyleProfileOverride
-                    : NamerProcessor.ResolveStyleProfile(_settings);
+                // 05.2 plan 04 (D-04): the forced pass is composed with the window's
+                // ATTACHED profile — the references come from the NamerPostLook being
+                // fitted, so there is no per-fit profile override anymore (the WR-02
+                // job is vacuous when the stylization profile is always the attached
+                // one).
+                NamerStyleProfile styleProfile = NamerProcessor.ResolveStyleProfile(_settings);
                 bool stylizeLens = styleProfile != null
                     && (_afterView == kAfterViewStylized || _afterView == kAfterViewPost || _forceStylizeForFit);
 
@@ -781,45 +787,47 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// 05.1 D-04 (STYL-09): pushes the fitted post look onto the live preview
-        /// material and (when present) the generated After material, following every
+        /// 05.1 D-04 (STYL-09) / 05.2 plan 04 (W10, D-08): pushes the SELECTED
+        /// post-look asset's fitted grade onto the live preview material and (when
+        /// present) the generated After material, following every
         /// <see cref="ApplyDebugGates"/> call site. The Stylized + Post lens ONLY —
         /// the other two After Views write the neutral table, so switching lenses
         /// restores the identity grade (in-shader default).
         /// </summary>
         private void ApplyPreviewPostLook()
         {
-            NamerStyleProfile profile = NamerProcessor.ResolveStyleProfile(_settings);
+            NamerPostLook look = NamerProcessor.ResolvePostLook(_settings);
             bool postActive = _afterView == kAfterViewPost;
-            ApplyPostLook(_namerMaterial, profile, postActive);
-            ApplyPostLook(_generatedMaterial, profile, postActive);
+            ApplyPostLook(_namerMaterial, look, postActive);
+            ApplyPostLook(_generatedMaterial, look, postActive);
 
             // Pane bloom rides the same funnel: armed only when the post lens is
-            // active AND the profile carries a fit (the W6 degrade falls back to
-            // plain Stylized NAMER — no bloom either). 05.2-03 (R7): the intensity
-            // applies at FULL STRENGTH — no scaling path exists (the threshold was
-            // always unscaled — it is a separability floor, not a strength); the
+            // active AND the selected asset carries a fit (the W10 degrade falls
+            // back to plain Stylized NAMER — no bloom either). 05.2-03 (R7) / 05.2
+            // plan 04: the intensity applies at FULL STRENGTH, read from the asset's
+            // PostBloomIntensity artist knob (A9) — no scaling path exists; the
             // renderer's enabled gate (intensity > 0 AND threshold > 0) keeps Render
             // byte-identical to the disabled path.
-            bool fitted = postActive && profile != null && profile.HasPostFit;
+            bool fitted = postActive && look != null && look.HasFit;
             _preview.SetPostBloom(
-                BloomThresholdLinear(profile),
-                fitted ? NamerEditorConstants.DefaultBloomIntensity : 0f);
+                BloomThresholdLinear(look),
+                fitted ? look.PostBloomIntensity : 0f);
         }
 
         /// <summary>
-        /// 05.1 D-04: the bloom threshold in LINEAR space — the exact conversion
-        /// URP's PostProcessPass applies at render time to the gamma-space slider
-        /// value. A null or unfitted profile returns 0 (the disabled sentinel).
+        /// 05.1 D-04 / 05.2 plan 04 (W10): the bloom threshold in LINEAR space — the
+        /// exact conversion URP's PostProcessPass applies at render time to the
+        /// gamma-space slider value. A null or unfitted asset returns 0 (the
+        /// disabled sentinel).
         /// </summary>
-        internal static float BloomThresholdLinear(NamerStyleProfile profile)
+        internal static float BloomThresholdLinear(NamerPostLook look)
         {
-            if (profile == null || !profile.HasPostFit)
+            if (look == null || !look.HasFit)
             {
                 return 0f;
             }
 
-            return Mathf.GammaToLinearSpace(profile.PostBloomThreshold);
+            return Mathf.GammaToLinearSpace(look.PostBloomThreshold);
         }
 
         /// <summary>
@@ -830,48 +838,49 @@ namespace GraffitiEntertainment.Namer.Editor
         /// early-out) with identity LMS/EV/z/s and a null curve strip. Active case
         /// derives the CPU-side twins exactly like URP's own passes:
         /// ColorUtils.ColorBalanceToLMSCoeffs (the function ColorGradingLutPass
-        /// calls) and z/s = value/100 + 1. 05.2-03 (R7): the fitted values apply at
-        /// FULL STRENGTH — direct profile reads, no scaling path exists — while the
-        /// neutral/unconditional-binding discipline is unchanged.
+        /// calls) and z/s = value/100 + 1. 05.2-03 (R7) / 05.2 plan 04 (W10): the
+        /// selected asset's fitted values apply at FULL STRENGTH — direct unscaled
+        /// look-field reads, no scaling path exists — while the neutral/
+        /// unconditional-binding discipline is unchanged.
         /// </summary>
-        internal static void ApplyPostLook(Material material, NamerStyleProfile profile, bool postActive)
+        internal static void ApplyPostLook(Material material, NamerPostLook look, bool postActive)
         {
             if (material == null)
             {
                 return;
             }
 
-            bool enable = postActive && profile != null && profile.HasPostFit;
+            bool enable = postActive && look != null && look.HasFit;
             material.SetFloat(PostEnableId, enable ? 1f : 0f);
             material.SetVector(
                 PostLmsCoeffsId,
-                profile != null
+                look != null
                     ? (Vector4)UnityEngine.Rendering.ColorUtils.ColorBalanceToLMSCoeffs(
-                        profile.PostTemperature,
-                        profile.PostTint)
+                        look.PostTemperature,
+                        look.PostTint)
                     : Vector4.one);
             material.SetFloat(
                 PostExposureEvId,
-                profile != null ? profile.PostExposureEv : 0f);
+                look != null ? look.PostExposureEv : 0f);
             material.SetFloat(
                 PostContrastZId,
-                profile != null ? profile.PostContrast / 100f + 1f : 1f);
+                look != null ? look.PostContrast / 100f + 1f : 1f);
             material.SetFloat(
                 PostSaturationSId,
-                profile != null ? profile.PostSaturation / 100f + 1f : 1f);
-            material.SetTexture(PostCurveTexId, enable ? GetOrCreatePostCurveTexture(profile) : null);
+                look != null ? look.PostSaturation / 100f + 1f : 1f);
+            material.SetTexture(PostCurveTexId, enable ? GetOrCreatePostCurveTexture(look) : null);
         }
 
         /// <summary>
         /// One-slot static cache for the 128x1 curve strip: rebuilt only when the
-        /// profile's identity or any curve key changes (a re-fit can land on the
-        /// same fingerprint while editing keys, so the key dump — not the
-        /// fingerprint — is the cache key). Released in
+        /// selected post-look asset's identity or any curve key changes (a re-fit
+        /// can land on the same fingerprint while editing keys, so the key dump —
+        /// not the fingerprint — is the cache key). Released in
         /// <see cref="OnDisable"/>.
         /// </summary>
-        private static Texture2D GetOrCreatePostCurveTexture(NamerStyleProfile profile)
+        private static Texture2D GetOrCreatePostCurveTexture(NamerPostLook look)
         {
-            string key = ComputePostCurveCacheKey(profile);
+            string key = ComputePostCurveCacheKey(look);
             if (_postCurveTexture != null && _postCurveTextureKey == key)
             {
                 return _postCurveTexture;
@@ -882,24 +891,25 @@ namespace GraffitiEntertainment.Namer.Editor
                 DestroyImmediate(_postCurveTexture);
             }
 
-            _postCurveTexture = BuildPostCurveTexture(profile);
+            _postCurveTexture = BuildPostCurveTexture(look);
             _postCurveTextureKey = key;
             return _postCurveTexture;
         }
 
         /// <summary>
-        /// Cache identity: the profile's instance ID plus every key (time, value)
-        /// of all four fitted curves, invariant-culture formatted. Null curves
-        /// contribute nothing (the texture builder falls back to the diagonal).
+        /// Cache identity: the post-look asset's instance ID plus every key (time,
+        /// value) of all four fitted curves, invariant-culture formatted. Null
+        /// curves contribute nothing (the texture builder falls back to the
+        /// diagonal).
         /// </summary>
-        private static string ComputePostCurveCacheKey(NamerStyleProfile profile)
+        private static string ComputePostCurveCacheKey(NamerPostLook look)
         {
             StringBuilder builder = new StringBuilder();
-            builder.Append(profile.GetInstanceID());
-            AppendCurveKey(builder, "M", profile.PostMasterCurve);
-            AppendCurveKey(builder, "R", profile.PostRedCurve);
-            AppendCurveKey(builder, "G", profile.PostGreenCurve);
-            AppendCurveKey(builder, "B", profile.PostBlueCurve);
+            builder.Append(look.GetInstanceID());
+            AppendCurveKey(builder, "M", look.PostMasterCurve);
+            AppendCurveKey(builder, "R", look.PostRedCurve);
+            AppendCurveKey(builder, "G", look.PostGreenCurve);
+            AppendCurveKey(builder, "B", look.PostBlueCurve);
             return builder.ToString();
         }
 
@@ -936,12 +946,12 @@ namespace GraffitiEntertainment.Namer.Editor
         /// land between texels exactly like the LUT builder's LinearClamp
         /// sampling of its curve textures.
         /// </summary>
-        private static Texture2D BuildPostCurveTexture(NamerStyleProfile profile)
+        private static Texture2D BuildPostCurveTexture(NamerPostLook look)
         {
-            AnimationCurve masterCurve = profile.PostMasterCurve;
-            AnimationCurve redCurve = profile.PostRedCurve;
-            AnimationCurve greenCurve = profile.PostGreenCurve;
-            AnimationCurve blueCurve = profile.PostBlueCurve;
+            AnimationCurve masterCurve = look.PostMasterCurve;
+            AnimationCurve redCurve = look.PostRedCurve;
+            AnimationCurve greenCurve = look.PostGreenCurve;
+            AnimationCurve blueCurve = look.PostBlueCurve;
             Color[] pixels = new Color[kPostCurveTexelCount];
             for (int i = 0; i < kPostCurveTexelCount; i++)
             {
@@ -2543,15 +2553,6 @@ namespace GraffitiEntertainment.Namer.Editor
                 }
 
                 _profileEditor = UnityEditor.Editor.CreateEditor(attached);
-
-                // 05.1 plan 03 host registration: the embedded inspector resolves its
-                // exemplar through this window (P17's "one visible, honest source of
-                // exemplar truth" — the planner-decision registration seam).
-                NamerStyleProfileEditor profileEditor = _profileEditor as NamerStyleProfileEditor;
-                if (profileEditor != null)
-                {
-                    profileEditor.HostWindow = this;
-                }
             }
 
             return _profileEditor;
@@ -2569,23 +2570,29 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// 05.1 plan 03 fit seam (D-01 explicit / D-03 exemplar): renders the
-        /// palette-mapped stylized output of the object currently loaded in this window
-        /// REGARDLESS of the preview lens — <see cref="_forceStylizeForFit"/> ORs into
-        /// the stylize lens for one synchronous recompute (the RequestBake
-        /// explicit-action precedent — never EditorApplication.delayCall) — reads the
-        /// live result's styled base back WITHOUT releasing it (the window keeps
-        /// managing <see cref="_liveResult"/>), accumulates the profile's references in
-        /// slot order with their weights, and runs the deterministic
-        /// <see cref="NamerStylePostFit.Fit"/>. The stylized base is computed with the
-        /// passed profile itself (<see cref="_fitStyleProfileOverride"/>, WR-02) —
-        /// never the window's own attached profile. Cancellable progress bar, extractor
-        /// read discipline (isReadable pre-check, per-texture failure name), and no
-        /// partial result on cancel or failure.
+        /// 05.1 plan 03 fit seam (D-01 explicit / D-03 exemplar) / 05.2 plan 04
+        /// (D-04 asset-driven): renders the palette-mapped stylized output of the
+        /// object currently loaded in this window REGARDLESS of the preview lens —
+        /// <see cref="_forceStylizeForFit"/> ORs into the stylize lens for one
+        /// synchronous recompute (the RequestBake explicit-action precedent — never
+        /// EditorApplication.delayCall) — reads the live result's styled base back
+        /// WITHOUT releasing it (the window keeps managing
+        /// <see cref="_liveResult"/>), accumulates the post-look asset's references
+        /// in slot order with their weights, and runs the deterministic
+        /// <see cref="NamerStylePostFit.Fit"/>. 05.2 plan 04 (D-04): the forced pass
+        /// is composed with the window's ATTACHED profile — the references come
+        /// from the <see cref="NamerPostLook"/> being fitted, the stylization
+        /// always from the window. A null look, no loadable source, or no
+        /// stylization output (<see cref="HasStylizedOutput"/>, the A7 prereq
+        /// predicate) returns the prereq-unmet bucket (notExtracted) — the
+        /// W10-fit-button locked reason the 05.2-05 FitButtonState chain resolves
+        /// BEFORE the click. Cancellable progress bar, extractor read discipline
+        /// (isReadable pre-check, per-texture failure name), and no partial result
+        /// on cancel or failure.
         /// </summary>
-        internal NamerStylePostFitRunResult RunStylePostFit(NamerStyleProfile profile)
+        internal NamerStylePostFitRunResult RunStylePostFit(NamerPostLook look)
         {
-            if (profile == null || !profile.IsExtracted)
+            if (look == null)
             {
                 return new NamerStylePostFitRunResult(cancelled: false, errorTextureName: null, notExtracted: true);
             }
@@ -2598,14 +2605,14 @@ namespace GraffitiEntertainment.Namer.Editor
             // forced RecomputePreview below runs EnsurePipeline() first, which
             // creates the pipeline on demand; a source that still produces no live
             // result fails loudly at the stylizedBase null check instead.
-            if (!HasLoadableSource)
+            if (!HasLoadableSource || !HasStylizedOutput(_settings))
             {
                 return new NamerStylePostFitRunResult(cancelled: false, errorTextureName: null, notExtracted: true);
             }
 
             // Extract's first-line precedent (T-05-03): sanitize a hand-edited asset
             // before any weight or reference is read.
-            profile.ClampToCaps();
+            look.ClampToCaps();
 
             string exemplarName = _selection.name;
             try
@@ -2614,16 +2621,16 @@ namespace GraffitiEntertainment.Namer.Editor
                 // isReadable pre-check so the failure is a named-texture result, buffer
                 // dropped before the next reference).
                 NamerStylePostStats referenceStats = new NamerStylePostStats();
-                for (int i = 0; i < profile.References.Count; i++)
+                for (int i = 0; i < look.References.Count; i++)
                 {
-                    Texture2D reference = profile.References[i];
+                    Texture2D reference = look.References[i];
                     if (reference == null)
                     {
                         continue;
                     }
 
-                    float weight = i < profile.ReferenceWeights.Count
-                        ? profile.ReferenceWeights[i]
+                    float weight = i < look.ReferenceWeights.Count
+                        ? look.ReferenceWeights[i]
                         : NamerEditorConstants.DefaultReferenceWeight;
 
                     if (!reference.isReadable)
@@ -2647,20 +2654,21 @@ namespace GraffitiEntertainment.Namer.Editor
                     if (EditorUtility.DisplayCancelableProgressBar(
                             "Fitting NAMER Post Look",
                             "Reading references (" + reference.name + ")",
-                            FitStageProgress(0, (float)(i + 1) / profile.References.Count)))
+                            FitStageProgress(0, (float)(i + 1) / look.References.Count)))
                     {
                         return new NamerStylePostFitRunResult(cancelled: true, errorTextureName: null, notExtracted: false);
                     }
                 }
 
-                // Stage 2 — forced-stylized recompute + sync readback. The flags are
+                // Stage 2 — forced-stylized recompute + sync readback. The flag is
                 // ALWAYS reset in the finally; the side effect is honest (the preview
                 // pane keeps showing the stylized result that was just fitted).
-                // WR-02 (05.1 review): the recompute stylizes with the profile being
-                // fitted — the override replaces the window's attached profile for
-                // this one pass, so a fallback exemplar window with a different (or
-                // no) attached profile can never skew or silently skip the
-                // stylization the post fit is decomposed against.
+                // 05.2 plan 04 (D-04): the forced pass is composed with the window's
+                // ATTACHED profile — the references come from the NamerPostLook
+                // being fitted, the stylization always from the window. The WR-02
+                // override is retired: a window with no attached profile is now an
+                // A7 prereq failure (HasStylizedOutput) resolved before the fit
+                // starts, never a silently unstylized base mid-fit.
                 if (EditorUtility.DisplayCancelableProgressBar(
                         "Fitting NAMER Post Look",
                         "Rendering stylized preview",
@@ -2670,7 +2678,6 @@ namespace GraffitiEntertainment.Namer.Editor
                 }
 
                 _forceStylizeForFit = true;
-                _fitStyleProfileOverride = profile;
                 try
                 {
                     RecomputePreview();
@@ -2678,7 +2685,6 @@ namespace GraffitiEntertainment.Namer.Editor
                 finally
                 {
                     _forceStylizeForFit = false;
-                    _fitStyleProfileOverride = null;
                 }
 
                 RenderTexture stylizedBase = (RenderTexture)ResolveStylizePreviewBase(_liveResult);
@@ -2719,7 +2725,7 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 NamerStylePostStats sourceStats = NamerStylePostFit.AccumulateSource(readbackColors);
                 NamerStylePostFitParams fitted =
-                    NamerStylePostFit.Fit(sourceStats, referenceStats, profile.ComputeFingerprint());
+                    NamerStylePostFit.Fit(sourceStats, referenceStats, look.ComputeFingerprint());
                 return new NamerStylePostFitRunResult(fitted, exemplarName);
             }
             finally
@@ -2735,6 +2741,20 @@ namespace GraffitiEntertainment.Namer.Editor
         private static float FitStageProgress(int stageIndex, float fraction)
         {
             return (stageIndex + Mathf.Clamp01(fraction)) / kPostFitStageCount;
+        }
+
+        /// <summary>
+        /// 05.2 plan 04 (A7 prereq, D-04): true when the fit would have a stylized
+        /// output to decompose — a resolvable ATTACHED style profile exists (the
+        /// forced pass composes with the window's attached profile; the
+        /// <see cref="NamerPostLook"/> under fit contributes references only). The
+        /// 05.2-05 FitButtonState chain evaluates this BEFORE the click, so the
+        /// failure surfaces as a locked reason, not a silent no-op — internal
+        /// static so that chain is headless-testable.
+        /// </summary>
+        internal static bool HasStylizedOutput(NamerProcessorSettings settings)
+        {
+            return NamerProcessor.ResolveStyleProfile(settings) != null;
         }
 
         /// <summary>

@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: milestone_complete
-stopped_at: Milestone complete (Phase 05.2 was final phase)
-last_updated: 2026-09-28T21:08:38.648Z
+status: completed
+stopped_at: Completed 05.2-04-PLAN.md
+last_updated: "2026-09-28T22:40:11.129Z"
 last_activity: 2026-09-28
 progress:
   total_phases: 11
-  completed_phases: 10
+  completed_phases: 11
   total_plans: 50
   completed_plans: 50
-  percent: 91
+  percent: 100
 ---
 
 # Project State
@@ -264,6 +264,7 @@ None yet.
 | 260925-je1 | Fix Stylized + Post magenta lens: NamerPostBloom core Common/SpaceTransforms includes swapped for the house URP Core.hlsl (UnityInput → UNITY_MATRIX_M for TransformObjectToHClip on Metal; 3-pass warm-draw verified clean via relay) + albedo preview 512px aspect-fit, horizontally centered, no scrollbar overflow (d951b05+16292eb) | 2026-09-25 | 16292eb | [260925-je1-fix-namerpostbloom-magenta-urp-core-incl](./quick/260925-je1-fix-namerpostbloom-magenta-urp-core-incl/) |
 | 260926-lqr | Hue-preserving post look redesign in NamerStylePostFit.cs: fitted WB Temperature/Tint clamped ±15 (kFittedWhiteBalanceLimit), Saturation floored at 0, R/G/B curves identity diagonals (master-only histogram fit), dual-start SolveWhiteBalance (21-point step-10 grid seed escapes the non-unimodal stall basin); NamerStylePostFitTests 13 tests — live 13/13 targeted, 298/299 full (1 pre-existing AO drift); rides the fit-look-rails degenerate-source guard (debug set in 8839042) | 2026-09-26 | 5db4179 | [260926-lqr-hue-preserving-post-look-redesign-in-nam](./quick/260926-lqr-hue-preserving-post-look-redesign-in-nam/) |
 | 260926-mtv | Albedo preview quad centers on the VISIBLE scroll band (scroll.x + viewWidth/2, not content-width row center) and clips via identity-default _UvRect shader sub-rect window; pure geometry seam NamerEditorWindow.ComputeAlbedoPreviewGeometry + 4 headless tests; post-execution fixes: uvRect bottom-origin (probe-verified) and Repaint-gated scroll-view rect capture (GetLastRect returns degenerate 1x1 during Layout — probe-verified root cause of the user-reported invisible preview); NamerEditorWindowSmokeTests 12/12 targeted after fix, 301/303 full (2 pre-existing: AO drift + AO-pref isolation) | 2026-09-26 | d26004a | [260926-mtv-albedo-preview-view-band-centering](./quick/260926-mtv-albedo-preview-view-band-centering/) |
+| 260928-lm5 | Material-inspector reference rows in NamerPostLookEditor.DrawReferenceSlots: "Reference Texture #N" label left + square 64px thumbnail ObjectField (file-private kThumbnailSize, 5.1 sibling convention) right per the 2026-09-28 user amendment superseding the 2026-09-27 no-thumbnail call; EndHorizontal before the continue-guard so the horizontal group always closes; assign/undo/SetDirty/RaiseChanged write block byte-identical; grep gates pass, live-editor visual/compile verification orchestrator-owned | 2026-09-28 | 693a85d | [260928-lm5-reference-image-rows-material-inspector-](./quick/260928-lm5-reference-image-rows-material-inspector-/) |
 
 ## Deferred Items
 
@@ -275,6 +276,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-28T20:49:04.778Z
+Last session: 2026-09-28T22:40:11.116Z
 Stopped at: Completed 05.2-04-PLAN.md
 Resume file: None

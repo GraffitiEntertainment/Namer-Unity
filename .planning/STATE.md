@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05.2-01-PLAN.md
-last_updated: "2026-09-28T19:18:56.917Z"
+stopped_at: Completed 05.2-03-PLAN.md
+last_updated: "2026-09-28T19:49:15.670Z"
 last_activity: 2026-09-28
 progress:
   total_phases: 11
   completed_phases: 10
   total_plans: 50
-  completed_plans: 45
-  percent: 90
+  completed_plans: 47
+  percent: 91
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 ## Current Position
 
 Phase: 05.2 (standalone-post-look-asset-reference-fitted-urp-post-look-as) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-09-28
 
-Progress: [█████████░] 90%
+Progress: [█████████░] 94%
 
 ## Performance Metrics
 
@@ -98,6 +98,7 @@ Progress: [█████████░] 90%
 | Phase 05 P03 | 26min | 3 tasks | 14 files |
 | Phase 05.2 P01 | 10min | 3 tasks | 9 files |
 | Phase 05.2 P02 | 9min | 2 tasks | 2 files |
+| Phase 05.2 P03 | 17min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -219,6 +220,9 @@ Recent decisions affecting current work:
 - [Phase 05.2]: [Phase 05.2 P02]: Channel-pane clip = rect-intersection + _UvRect sub-rect window pair (ComputeChannelPaneClip): the trimmed rect alone would squeeze the full texture into the visible portion (the stretched defect), so partially clipped panes window their sampling per-draw with immediate identity reset (mtv shared-material discipline)
 - [Phase 05.2]: [Phase 05.2 P02]: The 2px-class gap is achieved by a zero-MARGIN copy of EditorStyles.toggle (_channelPaneSlotStyle), not GUIStyle.none — GUIStyle.none measures content at zero width and would destroy column alignment under the toggle row; identical measurement/padding keeps the columns aligned while removing only the style-owned margin stacking
 - [Phase 05.2]: [Phase 05.2 P02]: hbar band detection reuses the probe-verified expand-row overflow law measured from the toggle row (Repaint-gated GetLastRect capture into _channelToggleRowRect; GetLastRect is degenerate during Layout — mtv lesson); live EditMode + W14 visual run deferred to the post-wave regression gate, compile equivalence via Unity 6000.0.82f1 bundled Roslyn to real assembly names
+- [Phase 05.2]: 05.2-03: ToneMatch retired compile-atomically — C# binding + kernel declaration + profile field died in one commit (Metal silent-skip rule); the window/writer R7 unscale was compile-forced into Task 1
+- [Phase 05.2]: 05.2-03: R7 — fitted post parameters apply at full strength everywhere (no scaling path); R8 — Process writes no companion Volume, orphaned 5.1 Volumes left in place
+- [Phase 05.2]: 05.2-03: NamerPostPreviewTests.cs was externally reverted to its committed b335cb8 content mid-execution (editor/IDE-side); the committed version already satisfies the retirement (zero retired identifiers, R7 full-strength asserts), so the no-diff state was accepted and flagged for the post-wave live gate
 
 ### Pending Todos
 
@@ -263,6 +267,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-28T19:18:56.904Z
-Stopped at: Completed 05.2-01-PLAN.md
+Last session: 2026-09-28T19:49:15.655Z
+Stopped at: Completed 05.2-03-PLAN.md
 Resume file: None

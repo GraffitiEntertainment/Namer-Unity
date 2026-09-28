@@ -358,7 +358,7 @@ Plans:
 4. ToneMatch is retired end-to-end: no UI knob, no serialized field, no kernel luma-transfer path — palette transfer (StyleStrength hue/vibrance, HueReplaceMode, smoothing) is otherwise byte-identical, and the zero-dispatch identity gate semantics are preserved
 5. The "Stylized + Post" After View preview reads a selected `NamerPostLook` asset's parameters
 6. The fit math (`NamerStylePostFit`) is unchanged — it moves home (asset instead of profile), preserving its determinism contract and existing test pins
-**Plans:** 2/6 plans executed
+**Plans:** 3/6 plans executed
 
 Plans:
 
@@ -369,7 +369,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 05.2-03-PLAN.md — ToneMatch retirement end-to-end: pipeline/kernel/field/slider/copy, NamerPostLookScale deletion, R8 Process companion-Volume removal, test retirement (STYL-11)
+- [x] 05.2-03-PLAN.md — ToneMatch retirement end-to-end: pipeline/kernel/field/slider/copy, NamerPostLookScale deletion, R8 Process companion-Volume removal, test retirement (STYL-11)
 
 **Wave 3** *(blocked on Wave 2)*
 

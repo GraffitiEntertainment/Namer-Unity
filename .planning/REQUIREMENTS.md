@@ -56,7 +56,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **STYL-08**: Tonemapping defaults to ACES with the fit shaping parameters around it; bloom threshold auto-fitted from reference highlights, intensity exposed for artist control *(Phase 5.1)*
 - [ ] **STYL-09**: Processor preview can render the stylized NAMER with the fitted post-processing look applied in-window *(Phase 5.1)*
 - [ ] **STYL-10**: The fitted post look lives on a standalone `NamerPostLook` ScriptableObject — Fit Look, fitted parameters, and its own reference-image list are created, fitted, and hand-tweaked in the asset's own inspector, not the NAMER Processor window *(Phase 5.2)*
-- [ ] **STYL-11**: Palette transfer never modifies luma — ToneMatch is retired end-to-end (no UI knob, no serialized profile field, no kernel luma-transfer path); tonality is owned exclusively by the post look *(Phase 5.2)*
+- [x] **STYL-11**: Palette transfer never modifies luma — ToneMatch is retired end-to-end (no UI knob, no serialized profile field, no kernel luma-transfer path); tonality is owned exclusively by the post look *(Phase 5.2)*
 - [ ] **STYL-12**: Each `NamerPostLook` asset generates its own URP Volume profile under the generated-asset conventions; duplicating and tweaking an asset yields independent per-scene looks, and re-fit regenerates its Volume *(Phase 5.2)*
 
 ### Asset Generation & Safety
@@ -151,7 +151,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STYL-08 | Phase 5.1 | Not Started |
 | STYL-09 | Phase 5.1 | Not Started |
 | STYL-10 | Phase 5.2 | Not Started |
-| STYL-11 | Phase 5.2 | Not Started |
+| STYL-11 | Phase 5.2 | Complete |
 | STYL-12 | Phase 5.2 | Not Started |
 | GEN-01 | Phase 3 | Complete |
 | GEN-02 | Phase 3 | Complete |

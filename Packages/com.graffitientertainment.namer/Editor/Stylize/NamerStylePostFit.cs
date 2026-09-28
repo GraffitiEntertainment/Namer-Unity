@@ -424,29 +424,6 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Writes a successful fit onto the profile's serialized fitted-post block
-        /// (05.1 D-02 source of truth). Pure data write — no Undo, no SetDirty, no
-        /// Volume regeneration: the caller (the inspector's RunFitLook) owns the
-        /// transaction. The four curves are constructed from cloned key arrays, so
-        /// later curve edits can never alias the fit result.
-        /// </summary>
-        public static void ApplyToProfile(NamerStyleProfile profile, NamerStylePostFitParams fit, string exemplarName)
-        {
-            profile.PostTemperature = fit.Temperature;
-            profile.PostTint = fit.Tint;
-            profile.PostExposureEv = fit.PostExposureEv;
-            profile.PostContrast = fit.Contrast;
-            profile.PostSaturation = fit.Saturation;
-            profile.PostBloomThreshold = fit.BloomThreshold;
-            profile.PostMasterCurve = new AnimationCurve(fit.MasterKeys);
-            profile.PostRedCurve = new AnimationCurve(fit.RedKeys);
-            profile.PostGreenCurve = new AnimationCurve(fit.GreenKeys);
-            profile.PostBlueCurve = new AnimationCurve(fit.BlueKeys);
-            profile.PostFitFingerprint = fit.Fingerprint;
-            profile.PostFitExemplarName = exemplarName;
-        }
-
-        /// <summary>
         /// Writes a successful fit onto the post-look asset's serialized fitted-post
         /// block (05.2 D-03 re-home; the asset is the source of truth, D-06). Pure
         /// data write — no Undo, no SetDirty, no Volume regeneration: the caller

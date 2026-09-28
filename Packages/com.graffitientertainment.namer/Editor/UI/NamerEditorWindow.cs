@@ -2845,9 +2845,9 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>
         /// 05-03 W3 attach-state copy (UI-SPEC locked): "" when nothing is attached
         /// (the W4 popup's disabled hint carries the null state), otherwise the
-        /// extraction honesty line. 05.1-03 W8: extracted profiles append the fit
-        /// honesty clause — "post look fitted from {exemplar}" / "post look not
-        /// fitted". Internal for the formatting test.
+        /// extraction honesty line. 05.2-06 W12: the fit clause is deleted — the
+        /// profile is palette-only (R4) and no longer knows about fits (the post
+        /// look lives on the selected NamerPostLook asset).
         /// </summary>
         internal static string DescribeProfileState(NamerStyleProfile profile)
         {
@@ -2859,10 +2859,7 @@ namespace GraffitiEntertainment.Namer.Editor
             if (profile.IsExtracted)
             {
                 return profile.name + " — palette extracted (" + profile.PaletteAnchors.Count + " anchors, "
-                    + profile.Stats.ReferenceCount + " references), "
-                    + (profile.HasPostFit
-                        ? "post look fitted from " + profile.PostFitExemplarName
-                        : "post look not fitted");
+                    + profile.Stats.ReferenceCount + " references)";
             }
 
             return profile.name + " — not extracted";

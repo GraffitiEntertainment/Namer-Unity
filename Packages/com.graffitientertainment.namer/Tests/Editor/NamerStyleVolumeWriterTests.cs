@@ -209,120 +209,6 @@ namespace GraffitiEntertainment.Namer.Tests
             }
         }
 
-        /// <summary>
-        /// Tone Match 0 law: Write generates the NEUTRAL Volume — every fitted
-        /// scalar lands on 0 and the curves bake onto the identity diagonal
-        /// (within the 128-texel TextureCurve bake tolerance), while the bloom
-        /// threshold stays UNSCALED at the fitted 0.82 (a separability floor,
-        /// not a strength) and the fixed ACES template is untouched.
-        /// </summary>
-        [Test]
-        public void Write_ToneMatchZero_WritesNeutralVolume()
-        {
-            NamerStyleProfile profile = CreateFittedProfile("VolumeWriterToneMatchZero");
-            profile.ToneMatch = 0f;
-            PrefsSnapshot prefs = CapturePrefs();
-            EnsureTempFolder();
-            NamerProcessorSettings settings = NewSettings();
-            try
-            {
-                VolumeProfile written = NamerStyleVolumeWriter.Write(profile, settings);
-                Assert.IsNotNull(written);
-
-                Assert.IsTrue(written.TryGet(out WhiteBalance whiteBalance));
-                Assert.AreEqual(0f, whiteBalance.temperature.value,
-                    "Tone Match 0 must neutralize the fitted temperature");
-                Assert.AreEqual(0f, whiteBalance.tint.value,
-                    "Tone Match 0 must neutralize the fitted tint");
-
-                Assert.IsTrue(written.TryGet(out ColorAdjustments colorAdjustments));
-                Assert.AreEqual(0f, colorAdjustments.postExposure.value,
-                    "Tone Match 0 must neutralize the fitted EV");
-                Assert.AreEqual(0f, colorAdjustments.contrast.value,
-                    "Tone Match 0 must neutralize the fitted contrast");
-                Assert.AreEqual(0f, colorAdjustments.saturation.value,
-                    "Tone Match 0 must neutralize the fitted saturation");
-
-                Assert.IsTrue(written.TryGet(out Bloom bloom));
-                Assert.AreEqual(0f, bloom.intensity.value,
-                    "Tone Match 0 must zero the bloom intensity");
-                Assert.AreEqual(profile.PostBloomThreshold, bloom.threshold.value,
-                    "the bloom threshold is a separability floor — never scaled by Tone Match");
-
-                Assert.IsTrue(written.TryGet(out ColorCurves curves));
-                Assert.That(Mathf.Abs(curves.master.value.Evaluate(0.25f) - 0.25f), Is.LessThan(0.01f),
-                    "s=0 bakes the master curve onto the identity diagonal (TextureCurve bake tolerance)");
-                Assert.That(Mathf.Abs(curves.red.value.Evaluate(0.5f) - 0.5f), Is.LessThan(0.01f),
-                    "s=0 bakes the red curve onto the identity diagonal (TextureCurve bake tolerance)");
-
-                Assert.IsTrue(written.TryGet(out Tonemapping tonemapping));
-                Assert.IsTrue(tonemapping.mode.overrideState,
-                    "ACES stays an override");
-                Assert.AreEqual(TonemappingMode.ACES, tonemapping.mode.value,
-                    "ACES is the fixed Volume template — deliberately not scaled");
-            }
-            finally
-            {
-                AssetDatabase.DeleteAsset(TempFolder);
-                RestorePrefs(prefs);
-                UnityEngine.Object.DestroyImmediate(profile);
-            }
-        }
-
-        /// <summary>
-        /// Tone Match 0.5 law: every fitted scalar halves exactly toward
-        /// neutral — the fixture values are unclamped-safe and every expected
-        /// value is an exact binary half (12.5 -> 6.25, -3.25 -> -1.625,
-        /// 0.75 -> 0.375, 8 -> 4, -4.5 -> -2.25, intensity 1 -> 0.5) — while
-        /// the bloom threshold stays at the fitted 0.82 and the master curve's
-        /// (0.5, 0.55) key lerps halfway to the diagonal (0.525, bake
-        /// tolerance).
-        /// </summary>
-        [Test]
-        public void Write_ToneMatchHalf_HalvesFittedParams()
-        {
-            NamerStyleProfile profile = CreateFittedProfile("VolumeWriterToneMatchHalf");
-            profile.ToneMatch = 0.5f;
-            PrefsSnapshot prefs = CapturePrefs();
-            EnsureTempFolder();
-            NamerProcessorSettings settings = NewSettings();
-            try
-            {
-                VolumeProfile written = NamerStyleVolumeWriter.Write(profile, settings);
-                Assert.IsNotNull(written);
-
-                Assert.IsTrue(written.TryGet(out WhiteBalance whiteBalance));
-                Assert.AreEqual(6.25f, whiteBalance.temperature.value,
-                    "temperature must halve exactly (12.5 * 0.5)");
-                Assert.AreEqual(-1.625f, whiteBalance.tint.value,
-                    "tint must halve exactly (-3.25 * 0.5)");
-
-                Assert.IsTrue(written.TryGet(out ColorAdjustments colorAdjustments));
-                Assert.AreEqual(0.375f, colorAdjustments.postExposure.value,
-                    "EV must halve exactly (0.75 * 0.5)");
-                Assert.AreEqual(4f, colorAdjustments.contrast.value,
-                    "contrast must halve exactly (8 * 0.5)");
-                Assert.AreEqual(-2.25f, colorAdjustments.saturation.value,
-                    "saturation must halve exactly (-4.5 * 0.5)");
-
-                Assert.IsTrue(written.TryGet(out Bloom bloom));
-                Assert.AreEqual(0.5f, bloom.intensity.value,
-                    "bloom intensity must halve exactly (DefaultBloomIntensity 1 * 0.5)");
-                Assert.AreEqual(0.82f, bloom.threshold.value,
-                    "the bloom threshold is a separability floor — never scaled by Tone Match");
-
-                Assert.IsTrue(written.TryGet(out ColorCurves curves));
-                Assert.That(Mathf.Abs(curves.master.value.Evaluate(0.5f) - 0.525f), Is.LessThan(0.02f),
-                    "the master key (0.5, 0.55) must lerp halfway to the diagonal (TextureCurve bake tolerance)");
-            }
-            finally
-            {
-                AssetDatabase.DeleteAsset(TempFolder);
-                RestorePrefs(prefs);
-                UnityEngine.Object.DestroyImmediate(profile);
-            }
-        }
-
         [Test]
         public void ComposeVolumePath_IsProfileKeyedAtDestinationRoot()
         {
@@ -626,8 +512,8 @@ namespace GraffitiEntertainment.Namer.Tests
             profile.PostRedCurve = new AnimationCurve(new Keyframe(0f, 0.05f), new Keyframe(1f, 0.95f));
             profile.PostGreenCurve = new AnimationCurve(new Keyframe(0f, 0f), new Keyframe(1f, 1f));
             profile.PostBlueCurve = new AnimationCurve(new Keyframe(0f, 0.1f), new Keyframe(1f, 0.9f));
-            // Full-strength fixture — DefaultToneMatch is 0 since hk7.
-            profile.ToneMatch = 1f;
+            // 05.2-03 (R7): fitted values write at full strength — the scaling
+            // path is retired.
             profile.PostFitFingerprint = "test-fit-fingerprint";
             profile.PostFitExemplarName = "TestExemplar";
             return profile;

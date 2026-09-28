@@ -63,7 +63,7 @@ namespace GraffitiEntertainment.Namer.Tests
 
         // Two-half luma-structure fixture (quick 260924-hk7): hue 1/12 at moderate
         // saturation 0.5, bright left half / dark right half — authored on the kernel's
-        // own HSV unit line so the toneMatch-0 luma oracle is exact (K(1/12, 0.5) =
+        // own HSV unit line so the luma-preservation oracle is exact (K(1/12, 0.5) =
         // 0.785, so even the bright half's source V = 0.7 / 0.785 = 0.89 does not clip).
         private const float kTwoHalfHue = 1f / 12f;
         private const float kTwoHalfSaturation = 0.5f;
@@ -289,10 +289,10 @@ namespace GraffitiEntertainment.Namer.Tests
         // --------------------------------------------------------------------
         // D-01 propagation: Replace at strength 1 styles the source BEFORE the fit —
         // the styled hue reaches the result base AND the fitted vertex colors.
-        // Re-specced to the quick 260924-hk7 operator: hue still snaps to the anchor,
+        // Re-specced to the 05.2-03 (STYL-11) operator: hue still snaps to the anchor,
         // but saturation is boost-only (the grain-orange fixture's constant sat 1
-        // stays 1, NOT the anchor's 0.6) and luma is preserved at the default
-        // toneMatch 0 (median equals the unstyled control run's).
+        // stays 1, NOT the anchor's 0.6) and luma is preserved (median equals the
+        // unstyled control run's — the palette never transfers luma).
         // --------------------------------------------------------------------
 
         [UnityTest]
@@ -344,8 +344,8 @@ namespace GraffitiEntertainment.Namer.Tests
                         {
                             // The styled base is the pre-projection source: hue snaps to the
                             // anchor (D-04/D-05) while the pipeline stays in linear space.
-                            // Sat is boost-only and luma is keyed to the (default 0) tone
-                            // match — the grain fixture's constant sat 1 and grain luma
+                            // Sat is boost-only and luma is never transferred (STYL-11) —
+                            // the grain fixture's constant sat 1 and grain luma
                             // must both survive (quick 260924-hk7).
                             Color[] styled = ReadBackFloat(result.SourceBaseColor);
                             float hue = MedianOf(styled, c => HueOf(c));
@@ -357,7 +357,7 @@ namespace GraffitiEntertainment.Namer.Tests
                             Assert.AreEqual(1f, saturation, kHalfEpsilon,
                                 "boost-only saturation: the fixture's constant sat 1 stays 1, never pulled down to the anchor's 0.6");
                             Assert.AreEqual(controlLuma, luma, kLumaTolerance,
-                                "toneMatch 0 (profile default): styled base luma median equals the unstyled control's — tonality survives");
+                                "styled base luma median equals the unstyled control's — tonality survives (the palette never transfers luma)");
 
                             // The vertex-color fit ran against the STYLED source: the styled
                             // base varies only in luma (hue/sat constant at the anchor
@@ -459,13 +459,14 @@ namespace GraffitiEntertainment.Namer.Tests
 
         // --------------------------------------------------------------------
         // Quick 260924-hk7 constraint: "Process output with a stylization context
-        // preserves albedo luma structure at toneMatch 0". No-clip fixture: the styled
+        // preserves albedo luma structure" — unconditional since 05.2-03 (STYL-11):
+        // the palette never transfers luma. No-clip fixture: the styled
         // bright half needs V = luma / K(anchorHue, anchorSat) = 0.7 / 0.931 = 0.75 < 1
         // against the (0.2, 0.6, 0.4) anchor — hue and luma readbacks stay exact.
         // --------------------------------------------------------------------
 
         [UnityTest]
-        public IEnumerator Stylization_ToneMatchZero_PreservesAlbedoLumaStructure()
+        public IEnumerator Stylization_PreservesAlbedoLumaStructure()
         {
             if (!ComputeAvailable)
             {
@@ -482,8 +483,6 @@ namespace GraffitiEntertainment.Namer.Tests
                 var inspection = BuildInspection(baseMap, mesh, occlusion);
                 NamerSplitResult split = MeshVertexSplitter.Split(mesh);
                 NamerStyleStylization stylization = NamerStyleStylization.Create(profile, split);
-                Assert.AreEqual(0f, stylization.ToneMatch,
-                    "the profile fixture must run at the default toneMatch 0 (the Create() wiring pin)");
                 Assert.IsTrue(stylization.Active, "Replace at strength 1 with valid anchors must be active");
 
                 using (var pipeline = new NamerComputePipeline())
@@ -534,7 +533,7 @@ namespace GraffitiEntertainment.Namer.Tests
                             }
 
                             Assert.LessOrEqual(maxSourceDelta, kLumaTolerance,
-                                "styled SourceBaseColor preserves the albedo luma per texel at toneMatch 0 (max interior delta "
+                                "styled SourceBaseColor preserves the albedo luma per texel (max interior delta "
                                 + maxSourceDelta.ToString("0.0000") + ")");
 
                             // Projected base: the bright/dark half ORDERING survives and the
@@ -1131,7 +1130,7 @@ namespace GraffitiEntertainment.Namer.Tests
                     "Replace at strength 1: the BAKED base hue must snap to the anchor hue (orange 1/12 is the unstyled control)");
 
                 // DERIVED saturation (quick 260924-hk7 re-derivation): the operator is
-                // boost-only at toneMatch 0 (the profile default), so the grain's own
+                // boost-only, so the grain's own
                 // sat 1 survives (max(1, anchorSat) = 1 — no anchor can pull it down)
                 // and its own luma survives (0.5702 * grain in [0.456, 0.570]).
                 // Rebuilding hue 5/6 at sat 1 needs V = luma / K(5/6, 1) = luma /
@@ -1140,7 +1139,7 @@ namespace GraffitiEntertainment.Namer.Tests
                 // 1 — independent of which tied chromatic anchor wins the scan.
                 float expectedSaturation = ExpectedByteSaturation(new Color(1f, 0f, 1f, 1f));
                 Assert.AreEqual(expectedSaturation, medianSaturation, kE2ESaturationTolerance,
-                    "Replace at strength 1 + toneMatch 0: the clipped magenta rebuild bakes as (255, 0, 255) — byte saturation exactly 1");
+                    "Replace at strength 1: the clipped magenta rebuild bakes as (255, 0, 255) — byte saturation exactly 1");
             }
             finally
             {
@@ -1561,7 +1560,7 @@ namespace GraffitiEntertainment.Namer.Tests
 
         /// <summary>Two-half luma-structure base (quick 260924-hk7): bright left half /
         /// dark right half, both on the kernel's own HSV unit line at (hue 1/12, sat 0.5)
-        /// so the toneMatch-0 luma oracle is exact per texel.</summary>
+        /// so the luma-preservation oracle is exact per texel.</summary>
         private static Texture2D CreateTwoHalvesBaseMap()
         {
             var texture = new Texture2D(WorkingSize, WorkingSize, TextureFormat.RGBA32, false, true)

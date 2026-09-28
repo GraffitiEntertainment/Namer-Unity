@@ -150,9 +150,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STYL-07 | Phase 5.1 | Not Started |
 | STYL-08 | Phase 5.1 | Not Started |
 | STYL-09 | Phase 5.1 | Not Started |
-| STYL-10 | Phase 5.2 | Not Started |
+| STYL-10 | Phase 5.2 | Complete |
 | STYL-11 | Phase 5.2 | Complete |
-| STYL-12 | Phase 5.2 | Not Started |
+| STYL-12 | Phase 5.2 | Complete |
 | GEN-01 | Phase 3 | Complete |
 | GEN-02 | Phase 3 | Complete |
 | GEN-03 | Phase 3 | Complete |

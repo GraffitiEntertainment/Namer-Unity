@@ -65,7 +65,11 @@ namespace GraffitiEntertainment.Namer.Editor
         /// configured destination, or when a non-generated asset sits at the target
         /// path (the overwrite opt-in does not gate this companion Volume —
         /// <see cref="PreflightWriteGate"/>; the refusal text flows to the
-        /// "Fit failed: {message}" HelpBox in plan 03).
+        /// "Fit failed: {message}" HelpBox in plan 03). The fitted values are
+        /// Tone-Match-scaled at write time via the shared NamerPostLookScale,
+        /// identically to the preview's ApplyPostLook, so the generated scene
+        /// Volume matches the approved preview at every setting — the profile
+        /// remains the source of truth (the scale is never written back).
         /// </summary>
         public static VolumeProfile Write(NamerStyleProfile profile, NamerProcessorSettings settings)
         {
@@ -80,6 +84,10 @@ namespace GraffitiEntertainment.Namer.Editor
             // Threat T-05.1-02-03: hand-edited serialized fit values are sanitized
             // before any parameter is read.
             profile.ClampToCaps();
+
+            // ClampToCaps already sanitized ToneMatch (NaN -> default, clamped to
+            // [0,1]) — read it once for every fitted-param scale below.
+            float toneMatch = profile.ToneMatch;
 
             PreflightWriteGate(profile, settings);
 
@@ -97,17 +105,17 @@ namespace GraffitiEntertainment.Namer.Editor
 
             WhiteBalance whiteBalance = volume.Add<WhiteBalance>();
             whiteBalance.temperature.overrideState = true;
-            whiteBalance.temperature.value = profile.PostTemperature;
+            whiteBalance.temperature.value = NamerPostLookScale.Scale(profile.PostTemperature, toneMatch);
             whiteBalance.tint.overrideState = true;
-            whiteBalance.tint.value = profile.PostTint;
+            whiteBalance.tint.value = NamerPostLookScale.Scale(profile.PostTint, toneMatch);
 
             ColorAdjustments colorAdjustments = volume.Add<ColorAdjustments>();
             colorAdjustments.postExposure.overrideState = true;
-            colorAdjustments.postExposure.value = profile.PostExposureEv;
+            colorAdjustments.postExposure.value = NamerPostLookScale.Scale(profile.PostExposureEv, toneMatch);
             colorAdjustments.contrast.overrideState = true;
-            colorAdjustments.contrast.value = profile.PostContrast;
+            colorAdjustments.contrast.value = NamerPostLookScale.Scale(profile.PostContrast, toneMatch);
             colorAdjustments.saturation.overrideState = true;
-            colorAdjustments.saturation.value = profile.PostSaturation;
+            colorAdjustments.saturation.value = NamerPostLookScale.Scale(profile.PostSaturation, toneMatch);
             // colorFilter stays at its neutral-white default with overrideState false —
             // visibly neutral, not a fitted knob (UI-SPEC assembly table).
 
@@ -115,17 +123,17 @@ namespace GraffitiEntertainment.Namer.Editor
             bloom.threshold.overrideState = true;
             bloom.threshold.value = profile.PostBloomThreshold;
             bloom.intensity.overrideState = true;
-            bloom.intensity.value = NamerEditorConstants.DefaultBloomIntensity;
+            bloom.intensity.value = NamerPostLookScale.Scale(NamerEditorConstants.DefaultBloomIntensity, toneMatch);
 
             ColorCurves curves = volume.Add<ColorCurves>();
             curves.master.overrideState = true;
-            curves.master.value = BuildTextureCurve(profile.PostMasterCurve);
+            curves.master.value = BuildTextureCurve(NamerPostLookScale.ScaleCurve(profile.PostMasterCurve, toneMatch));
             curves.red.overrideState = true;
-            curves.red.value = BuildTextureCurve(profile.PostRedCurve);
+            curves.red.value = BuildTextureCurve(NamerPostLookScale.ScaleCurve(profile.PostRedCurve, toneMatch));
             curves.green.overrideState = true;
-            curves.green.value = BuildTextureCurve(profile.PostGreenCurve);
+            curves.green.value = BuildTextureCurve(NamerPostLookScale.ScaleCurve(profile.PostGreenCurve, toneMatch));
             curves.blue.overrideState = true;
-            curves.blue.value = BuildTextureCurve(profile.PostBlueCurve);
+            curves.blue.value = BuildTextureCurve(NamerPostLookScale.ScaleCurve(profile.PostBlueCurve, toneMatch));
 
             AssetDatabase.CreateAsset(volume, path);
             // Pitfall 1: every component must be parented to the asset file or it
@@ -144,6 +152,141 @@ namespace GraffitiEntertainment.Namer.Editor
 
             VolumeProfile loaded = AssetDatabase.LoadAssetAtPath<VolumeProfile>(path);
             AssetGenerator.Stamp(loaded);
+            return loaded;
+        }
+
+        /// <summary>
+        /// Composes the generated Volume path for a post-look asset at the configured
+        /// destination ROOT (05.2 D-06 re-home; the asset is the source of truth —
+        /// same GEN-01 formula as the profile path, keyed on the ASSET name):
+        /// <c>{prefix}{SanitizeFileName(look.name)}{suffix}_Post.asset</c>. Because the
+        /// path keys off the asset name, Unity's native duplicate ("{name} 1") yields a
+        /// naturally independent Volume — the per-scene duplicate-and-tweak workflow
+        /// rides the naming for free.
+        /// </summary>
+        public static string ComposeVolumePath(NamerPostLook look, NamerProcessorSettings settings)
+        {
+            string prefix = settings.Prefix ?? string.Empty;
+            string suffix = settings.Suffix ?? string.Empty;
+            return settings.Destination + prefix + AssetGenerator.SanitizeFileName(look.name) + suffix + "_Post.asset";
+        }
+
+        /// <summary>
+        /// CR-01 gate discipline carried over verbatim from the profile path (05.2 D-06):
+        /// the write gates <see cref="Write(NamerPostLook, NamerProcessorSettings)"/>
+        /// will run, evaluated WITHOUT writing — destination confinement
+        /// (<see cref="AssetGenerator.ValidateComposedPath"/>) plus the
+        /// NamerGenerated-label check with the own-companion exemption
+        /// (<see cref="AssetGenerator.EnsureWritableTarget"/>, overwriteGenerated:
+        /// true). The Fit Look / Regenerate Volume transactions call this BEFORE
+        /// mutating the asset, so a refusal leaves the asset untouched.
+        /// </summary>
+        internal static void PreflightWriteGate(NamerPostLook look, NamerProcessorSettings settings)
+        {
+            string path = ComposeVolumePath(look, settings);
+            AssetGenerator.ValidateComposedPath(path, settings.Destination);
+            AssetGenerator.EnsureWritableTarget(path, overwriteGenerated: true);
+        }
+
+        /// <summary>
+        /// Generates the VolumeProfile asset for a fitted post-look asset and returns
+        /// the loaded, NamerGenerated-stamped asset (05.2 D-06: the ASSET is the source
+        /// of truth — this writer derives the Volume from it; hand-tweaks made on the
+        /// generated Volume are accepted-lost on re-fit/regeneration). Throws
+        /// <see cref="InvalidOperationException"/> when the asset is null or unfitted,
+        /// when the composed path escapes the configured destination, or when a
+        /// non-generated asset sits at the target path (carried-over profile-path
+        /// gates: <see cref="PreflightWriteGate(NamerPostLook, NamerProcessorSettings)"/>).
+        /// Every parameter applies at FULL STRENGTH — the UNSCALED
+        /// <c>look.Post*</c> fields (05.2 R7: post owns tone unconditionally, no
+        /// tone-match scaling anywhere) — and bloom intensity reads the asset's own
+        /// <see cref="NamerPostLook.PostBloomIntensity"/> artist knob. After the stamp,
+        /// the write records <see cref="NamerPostLook.VolumeWriteFingerprint"/> so the
+        /// A13 volume-staleness seam starts honest.
+        /// </summary>
+        public static VolumeProfile Write(NamerPostLook look, NamerProcessorSettings settings)
+        {
+            if (look == null || !look.HasFit)
+            {
+                throw new InvalidOperationException(
+                    "Refusing to generate the post Volume: post look '"
+                    + (look != null ? look.name : "null")
+                    + "' carries no fitted post look. Run Fit Look first.");
+            }
+
+            // Threat T-05.2-01-01: hand-edited serialized fit values are sanitized
+            // before any parameter is read.
+            look.ClampToCaps();
+
+            PreflightWriteGate(look, settings);
+
+            string path = ComposeVolumePath(look, settings);
+
+            // Pitfall 10 (carried over): a FRESH profile instance every write — never
+            // Add into a loaded stale profile (that both orphans old TextureCurve
+            // sub-assets and throws "component already exists" on re-fit).
+            VolumeProfile volume = ScriptableObject.CreateInstance<VolumeProfile>();
+            volume.name = Path.GetFileNameWithoutExtension(path);
+
+            Tonemapping tonemapping = volume.Add<Tonemapping>();
+            tonemapping.mode.overrideState = true;
+            tonemapping.mode.value = TonemappingMode.ACES;
+
+            WhiteBalance whiteBalance = volume.Add<WhiteBalance>();
+            whiteBalance.temperature.overrideState = true;
+            whiteBalance.temperature.value = look.PostTemperature;
+            whiteBalance.tint.overrideState = true;
+            whiteBalance.tint.value = look.PostTint;
+
+            ColorAdjustments colorAdjustments = volume.Add<ColorAdjustments>();
+            colorAdjustments.postExposure.overrideState = true;
+            colorAdjustments.postExposure.value = look.PostExposureEv;
+            colorAdjustments.contrast.overrideState = true;
+            colorAdjustments.contrast.value = look.PostContrast;
+            colorAdjustments.saturation.overrideState = true;
+            colorAdjustments.saturation.value = look.PostSaturation;
+            // colorFilter stays at its neutral-white default with overrideState false —
+            // visibly neutral, not a fitted knob (UI-SPEC assembly table).
+
+            Bloom bloom = volume.Add<Bloom>();
+            bloom.threshold.overrideState = true;
+            bloom.threshold.value = look.PostBloomThreshold;
+            bloom.intensity.overrideState = true;
+            bloom.intensity.value = look.PostBloomIntensity;
+
+            ColorCurves curves = volume.Add<ColorCurves>();
+            curves.master.overrideState = true;
+            curves.master.value = BuildTextureCurve(look.PostMasterCurve);
+            curves.red.overrideState = true;
+            curves.red.value = BuildTextureCurve(look.PostRedCurve);
+            curves.green.overrideState = true;
+            curves.green.value = BuildTextureCurve(look.PostGreenCurve);
+            curves.blue.overrideState = true;
+            curves.blue.value = BuildTextureCurve(look.PostBlueCurve);
+
+            AssetDatabase.CreateAsset(volume, path);
+            // Pitfall 1 (carried over): every component must be parented to the asset
+            // file or it dangles and loads back null.
+            AssetDatabase.AddObjectToAsset(tonemapping, volume);
+            AssetDatabase.AddObjectToAsset(whiteBalance, volume);
+            AssetDatabase.AddObjectToAsset(colorAdjustments, volume);
+            AssetDatabase.AddObjectToAsset(bloom, volume);
+            AssetDatabase.AddObjectToAsset(curves, volume);
+            // WR-04 (carried over): persist ONLY this Volume — SaveAssets() flushes
+            // every dirty asset in the project. SetDirty(look) below marks the asset
+            // for the fingerprint write but never force-saves unrelated user work.
+            EditorUtility.SetDirty(volume);
+            AssetDatabase.SaveAssetIfDirty(volume);
+
+            VolumeProfile loaded = AssetDatabase.LoadAssetAtPath<VolumeProfile>(path);
+            AssetGenerator.Stamp(loaded);
+
+            // A13 seam: record the params fingerprint at write time so IsVolumeStale
+            // reads false immediately after a write and flips once any parameter or
+            // curve key drifts. The look asset may be an in-memory instance (tests)
+            // or a loaded project asset (Fit Look / Regenerate Volume).
+            look.VolumeWriteFingerprint = look.ComputeParamsFingerprint();
+            EditorUtility.SetDirty(look);
             return loaded;
         }
 

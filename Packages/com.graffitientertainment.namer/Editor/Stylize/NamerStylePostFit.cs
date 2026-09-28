@@ -77,6 +77,8 @@ namespace GraffitiEntertainment.Namer.Editor
     /// Accumulated pixel statistics for one distribution. Domains (RESEARCH Pattern 1,
     /// binding for the project's m_ColorGradingMode: 0 LDR asset):
     /// - Source stats: ACES-tonemapped (NamerStylePostMath.TonemapLdr) linear values in [0, 1].
+    /// - Raw source sums: pre-tonemap raw linear channel sums, AccumulateSource only
+    ///   (260927-jkb: the post-exposure solve models EV before the ACES tonemap).
     /// - Reference stats: sRGB-decoded linear values in [0, 1] (display-referred), plus a
     ///   raw sRGB Max3 histogram (gamma-space, no decode) for the bloom threshold.
     /// Built only by the NamerStylePostFit accumulators; fields are internal.
@@ -89,6 +91,14 @@ namespace GraffitiEntertainment.Namer.Editor
         internal double LumaSum;
         internal double ChromaSum;
         internal double TotalWeight;
+
+        /// <summary>Pre-tonemap raw linear channel sums, accumulated ONLY by
+        /// AccumulateSource (the reference accumulator's raw domain equals its decoded
+        /// linear domain — deliberately not accumulated, keeping the seam honest).</summary>
+        internal double RawRedSum;
+        internal double RawGreenSum;
+        internal double RawBlueSum;
+
         internal readonly float[] LumaHistogram = new float[NamerStylePostFit.kPostHistogramBins];
         internal readonly float[] RedHistogram = new float[NamerStylePostFit.kPostHistogramBins];
         internal readonly float[] GreenHistogram = new float[NamerStylePostFit.kPostHistogramBins];
@@ -113,6 +123,24 @@ namespace GraffitiEntertainment.Namer.Editor
                     (float)(RedSum / TotalWeight),
                     (float)(GreenSum / TotalWeight),
                     (float)(BlueSum / TotalWeight),
+                    1f);
+            }
+        }
+
+        /// <summary>Mean pre-tonemap linear color; only meaningful for source distributions (the raw sums are source-only).</summary>
+        internal Color RawMeanLinear
+        {
+            get
+            {
+                if (TotalWeight <= 0)
+                {
+                    return new Color(0f, 0f, 0f, 0f);
+                }
+
+                return new Color(
+                    (float)(RawRedSum / TotalWeight),
+                    (float)(RawGreenSum / TotalWeight),
+                    (float)(RawBlueSum / TotalWeight),
                     1f);
             }
         }
@@ -173,8 +201,9 @@ namespace GraffitiEntertainment.Namer.Editor
         private const float kStatEpsilon = 1e-6f;                // denominator floor for means/chroma/LMS gains
         private const float kChromaNoiseFloor = 1e-3f;           // deadband for chroma differences (5x the ACES gray-spread noise)
         private const float kParamRangeLimit = 100f;             // URP percent-knob clamp and percent scale
-        private const float kFittedWhiteBalanceLimit = 15f;      // hue-preserving clamp on the FITTED white-balance knobs; the solve still searches [-100, 100]
+        private const float kFittedWhiteBalanceLimit = 50f;      // hue-preserving clamp on the FITTED white-balance knobs, chosen at 50 (strong warm/cool while keeping the von Kries hue rotation bounded); the solve still searches [-100, 100]; URP's own slider range is ±100 (260927-jkb widen from 15)
         private const float kMaxFittedPostExposureEv = 10f;      // EV clamp; plan 02 pins MaxFittedPostExposureEv to this value
+        private const int kExposureBisectionIterations = 48;     // 260927-jkb: fixed count keeps the determinism contract (fixed iteration order and counts); float32 brackets collapse to adjacent floats well before 48, so the result is the fully converged float — identical run to run
         private const float kWhiteBalanceRange = 100f;           // temperature/tint search bounds [-100, 100]
         private const int kWhiteBalanceSolveSweeps = 32;         // alternating-axis golden-section sweeps (fixed)
         private const int kWhiteBalanceLineProbes = 24;          // golden-section probes per line (fixed)
@@ -200,6 +229,12 @@ namespace GraffitiEntertainment.Namer.Editor
                 {
                     continue;
                 }
+
+                // 260927-jkb: raw pre-tonemap sums for the exposure solve's model input
+                // (weight is implicitly 1 — the source accumulator hardcodes 1f below).
+                stats.RawRedSum += pixel.r;
+                stats.RawGreenSum += pixel.g;
+                stats.RawBlueSum += pixel.b;
 
                 float3 tonemapped = NamerStylePostMath.TonemapLdr(new float3(pixel.r, pixel.g, pixel.b));
                 AccumulateLinear(stats, tonemapped, 1f);
@@ -239,8 +274,10 @@ namespace GraffitiEntertainment.Namer.Editor
         /// reference distribution. Knob order: (1) von Kries white balance via a
         /// deterministic dual-start (0-seed + grid-seed) alternating-axis
         /// golden-section solve over temperature/tint,
-        /// (2) post-exposure as the log2 post-tonemap linear mean-luma ratio, (3) contrast
-        /// as the LogC p90-p10 spread ratio, (4) saturation as the mean-chroma ratio,
+        /// (2) post-exposure via a fixed-iteration bisection of the pre-tonemap exposure
+        /// model against the reference mean luma (EV is applied before the ACES tonemap
+        /// in the shader chain — NamerPostPreview.hlsl / URP postExposure equivalent),
+        /// (3) contrast as the LogC p90-p10 spread ratio, (4) saturation as the mean-chroma ratio,
         /// (5) master curve via histogram specification (R/G/B stay identity
         /// diagonals), (6) bloom threshold as the p95 of the raw sRGB Max3 histogram.
         /// Every parameter is clamped to its named cap (threat T-05.1-01-01).
@@ -289,12 +326,41 @@ namespace GraffitiEntertainment.Namer.Editor
             fitted.Temperature = clamp(temperature, -kFittedWhiteBalanceLimit, kFittedWhiteBalanceLimit);
             fitted.Tint = clamp(tint, -kFittedWhiteBalanceLimit, kFittedWhiteBalanceLimit);
 
-            // (2) Post-exposure: log2 ratio of post-tonemap linear mean luma
-            // (reference is sRGB-decoded linear). Accepted v1 behavior: tonemap
-            // compression biases the ratio low on bright references (planner decision 1).
-            float srcLumaMean = max(source.MeanLuma, kStatEpsilon);
+            // (2) Post-exposure: fixed-iteration bisection of the PRE-tonemap exposure
+            // model (260927-jkb, revokes the accepted-v1 planner decision). The shader
+            // chain applies EV BEFORE the ACES tonemap — NamerPostPreview.hlsl multiplies
+            // by exp2(_PostExposureEv) ahead of AcesTonemap, and URP
+            // ColorAdjustments.postExposure is applied equivalently — so the solve finds
+            // the pre-tonemap gain whose TONEMAPPED output luma reproduces the reference
+            // mean luma. The retired v1 post-tonemap luma ratio undershot EV by exactly
+            // the tonemap compression (the reported slight-dark bias). The model
+            // evaluates tonemap on the raw MEAN, so the mean-vs-tonemap-of-mean Jensen
+            // residual is small for real (narrow-luma) distributions and accepted; the
+            // maximally wide synthetic test ramp widens it to first-order, which the
+            // tests handle by mirroring the twin instead of pinning a constant.
+            // TonemapLdr is monotone in uniform scale — saturate(AcesTonemap(
+            // UnityToAces(c*s))) is nondecreasing in s — so the sign rule converges, and
+            // the bracket endpoints ARE the ±10 clamp: a target outside the bracket
+            // lands exactly on the endpoint after float collapse (rail semantics).
+            float3 srcRawMean = max(ToFloat3(source.RawMeanLinear), kStatEpsilon);
             float refLumaMean = max(reference.MeanLuma, kStatEpsilon);
-            fitted.PostExposureEv = clamp(log2(refLumaMean / srcLumaMean), -kMaxFittedPostExposureEv, kMaxFittedPostExposureEv);
+            float evLow = -kMaxFittedPostExposureEv;
+            float evHigh = kMaxFittedPostExposureEv;
+            for (int i = 0; i < kExposureBisectionIterations; i++)
+            {
+                float evMid = (evLow + evHigh) * 0.5f;
+                float predicted = NamerStylePostMath.Luma709(NamerStylePostMath.TonemapLdr(srcRawMean * exp2(evMid)));
+                if (predicted < refLumaMean)
+                {
+                    evLow = evMid;
+                }
+                else
+                {
+                    evHigh = evMid;
+                }
+            }
+
+            fitted.PostExposureEv = clamp((evLow + evHigh) * 0.5f, -kMaxFittedPostExposureEv, kMaxFittedPostExposureEv);
 
             // (3) Contrast: LogC of the p10/p90 percentile spreads (source percentiles
             // post-tonemap linear, reference percentiles sRGB-decoded linear).
@@ -378,6 +444,32 @@ namespace GraffitiEntertainment.Namer.Editor
             profile.PostBlueCurve = new AnimationCurve(fit.BlueKeys);
             profile.PostFitFingerprint = fit.Fingerprint;
             profile.PostFitExemplarName = exemplarName;
+        }
+
+        /// <summary>
+        /// Writes a successful fit onto the post-look asset's serialized fitted-post
+        /// block (05.2 D-03 re-home; the asset is the source of truth, D-06). Pure
+        /// data write — no Undo, no SetDirty, no Volume regeneration: the caller
+        /// (the asset editor's RunFitLook, plan 05) owns the transaction. The four
+        /// curves are constructed from cloned key arrays, so later curve edits can
+        /// never alias the fit result. <see cref="NamerPostLook.PostBloomIntensity"/>
+        /// is deliberately NOT written — the artist knob is never fitted
+        /// (05.2 UI-SPEC A9).
+        /// </summary>
+        public static void ApplyToPostLook(NamerPostLook look, NamerStylePostFitParams fit, string exemplarName)
+        {
+            look.PostTemperature = fit.Temperature;
+            look.PostTint = fit.Tint;
+            look.PostExposureEv = fit.PostExposureEv;
+            look.PostContrast = fit.Contrast;
+            look.PostSaturation = fit.Saturation;
+            look.PostBloomThreshold = fit.BloomThreshold;
+            look.PostMasterCurve = new AnimationCurve(fit.MasterKeys);
+            look.PostRedCurve = new AnimationCurve(fit.RedKeys);
+            look.PostGreenCurve = new AnimationCurve(fit.GreenKeys);
+            look.PostBlueCurve = new AnimationCurve(fit.BlueKeys);
+            look.PostFitFingerprint = fit.Fingerprint;
+            look.PostFitExemplarName = exemplarName;
         }
 
         /// <summary>

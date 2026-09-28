@@ -209,6 +209,120 @@ namespace GraffitiEntertainment.Namer.Tests
             }
         }
 
+        /// <summary>
+        /// Tone Match 0 law: Write generates the NEUTRAL Volume — every fitted
+        /// scalar lands on 0 and the curves bake onto the identity diagonal
+        /// (within the 128-texel TextureCurve bake tolerance), while the bloom
+        /// threshold stays UNSCALED at the fitted 0.82 (a separability floor,
+        /// not a strength) and the fixed ACES template is untouched.
+        /// </summary>
+        [Test]
+        public void Write_ToneMatchZero_WritesNeutralVolume()
+        {
+            NamerStyleProfile profile = CreateFittedProfile("VolumeWriterToneMatchZero");
+            profile.ToneMatch = 0f;
+            PrefsSnapshot prefs = CapturePrefs();
+            EnsureTempFolder();
+            NamerProcessorSettings settings = NewSettings();
+            try
+            {
+                VolumeProfile written = NamerStyleVolumeWriter.Write(profile, settings);
+                Assert.IsNotNull(written);
+
+                Assert.IsTrue(written.TryGet(out WhiteBalance whiteBalance));
+                Assert.AreEqual(0f, whiteBalance.temperature.value,
+                    "Tone Match 0 must neutralize the fitted temperature");
+                Assert.AreEqual(0f, whiteBalance.tint.value,
+                    "Tone Match 0 must neutralize the fitted tint");
+
+                Assert.IsTrue(written.TryGet(out ColorAdjustments colorAdjustments));
+                Assert.AreEqual(0f, colorAdjustments.postExposure.value,
+                    "Tone Match 0 must neutralize the fitted EV");
+                Assert.AreEqual(0f, colorAdjustments.contrast.value,
+                    "Tone Match 0 must neutralize the fitted contrast");
+                Assert.AreEqual(0f, colorAdjustments.saturation.value,
+                    "Tone Match 0 must neutralize the fitted saturation");
+
+                Assert.IsTrue(written.TryGet(out Bloom bloom));
+                Assert.AreEqual(0f, bloom.intensity.value,
+                    "Tone Match 0 must zero the bloom intensity");
+                Assert.AreEqual(profile.PostBloomThreshold, bloom.threshold.value,
+                    "the bloom threshold is a separability floor — never scaled by Tone Match");
+
+                Assert.IsTrue(written.TryGet(out ColorCurves curves));
+                Assert.That(Mathf.Abs(curves.master.value.Evaluate(0.25f) - 0.25f), Is.LessThan(0.01f),
+                    "s=0 bakes the master curve onto the identity diagonal (TextureCurve bake tolerance)");
+                Assert.That(Mathf.Abs(curves.red.value.Evaluate(0.5f) - 0.5f), Is.LessThan(0.01f),
+                    "s=0 bakes the red curve onto the identity diagonal (TextureCurve bake tolerance)");
+
+                Assert.IsTrue(written.TryGet(out Tonemapping tonemapping));
+                Assert.IsTrue(tonemapping.mode.overrideState,
+                    "ACES stays an override");
+                Assert.AreEqual(TonemappingMode.ACES, tonemapping.mode.value,
+                    "ACES is the fixed Volume template — deliberately not scaled");
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(TempFolder);
+                RestorePrefs(prefs);
+                UnityEngine.Object.DestroyImmediate(profile);
+            }
+        }
+
+        /// <summary>
+        /// Tone Match 0.5 law: every fitted scalar halves exactly toward
+        /// neutral — the fixture values are unclamped-safe and every expected
+        /// value is an exact binary half (12.5 -> 6.25, -3.25 -> -1.625,
+        /// 0.75 -> 0.375, 8 -> 4, -4.5 -> -2.25, intensity 1 -> 0.5) — while
+        /// the bloom threshold stays at the fitted 0.82 and the master curve's
+        /// (0.5, 0.55) key lerps halfway to the diagonal (0.525, bake
+        /// tolerance).
+        /// </summary>
+        [Test]
+        public void Write_ToneMatchHalf_HalvesFittedParams()
+        {
+            NamerStyleProfile profile = CreateFittedProfile("VolumeWriterToneMatchHalf");
+            profile.ToneMatch = 0.5f;
+            PrefsSnapshot prefs = CapturePrefs();
+            EnsureTempFolder();
+            NamerProcessorSettings settings = NewSettings();
+            try
+            {
+                VolumeProfile written = NamerStyleVolumeWriter.Write(profile, settings);
+                Assert.IsNotNull(written);
+
+                Assert.IsTrue(written.TryGet(out WhiteBalance whiteBalance));
+                Assert.AreEqual(6.25f, whiteBalance.temperature.value,
+                    "temperature must halve exactly (12.5 * 0.5)");
+                Assert.AreEqual(-1.625f, whiteBalance.tint.value,
+                    "tint must halve exactly (-3.25 * 0.5)");
+
+                Assert.IsTrue(written.TryGet(out ColorAdjustments colorAdjustments));
+                Assert.AreEqual(0.375f, colorAdjustments.postExposure.value,
+                    "EV must halve exactly (0.75 * 0.5)");
+                Assert.AreEqual(4f, colorAdjustments.contrast.value,
+                    "contrast must halve exactly (8 * 0.5)");
+                Assert.AreEqual(-2.25f, colorAdjustments.saturation.value,
+                    "saturation must halve exactly (-4.5 * 0.5)");
+
+                Assert.IsTrue(written.TryGet(out Bloom bloom));
+                Assert.AreEqual(0.5f, bloom.intensity.value,
+                    "bloom intensity must halve exactly (DefaultBloomIntensity 1 * 0.5)");
+                Assert.AreEqual(0.82f, bloom.threshold.value,
+                    "the bloom threshold is a separability floor — never scaled by Tone Match");
+
+                Assert.IsTrue(written.TryGet(out ColorCurves curves));
+                Assert.That(Mathf.Abs(curves.master.value.Evaluate(0.5f) - 0.525f), Is.LessThan(0.02f),
+                    "the master key (0.5, 0.55) must lerp halfway to the diagonal (TextureCurve bake tolerance)");
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(TempFolder);
+                RestorePrefs(prefs);
+                UnityEngine.Object.DestroyImmediate(profile);
+            }
+        }
+
         [Test]
         public void ComposeVolumePath_IsProfileKeyedAtDestinationRoot()
         {
@@ -236,6 +350,264 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         /// <summary>
+        /// 05.2 plan 01 (STYL-12, R7 full-strength pin): Write(NamerPostLook) generates
+        /// the five-component Volume with every override reading the UNSCALED asset
+        /// field EXACTLY — distinct non-neutral fixture values incl. the
+        /// PostBloomIntensity artist knob — and the curve keys surviving the
+        /// TextureCurve bake within tolerance.
+        /// </summary>
+        [Test]
+        public void Write_FromAsset_CreatesVolumeWithFiveComponents()
+        {
+            NamerPostLook look = CreateFittedLook("VolumeWriterAssetFit");
+            PrefsSnapshot prefs = CapturePrefs();
+            EnsureTempFolder();
+            NamerProcessorSettings settings = NewSettings();
+            try
+            {
+                VolumeProfile written = NamerStyleVolumeWriter.Write(look, settings);
+                Assert.IsNotNull(written, "Write returns the loaded, stamped VolumeProfile");
+
+                string path = NamerStyleVolumeWriter.ComposeVolumePath(look, settings);
+                VolumeProfile loaded = AssetDatabase.LoadAssetAtPath<VolumeProfile>(path);
+                Assert.IsNotNull(loaded, "the VolumeProfile must persist to disk at the composed asset-keyed path");
+                Assert.AreEqual(5, loaded.components.Count,
+                    "exactly the five UI-SPEC assembly-table components are generated");
+
+                Assert.IsTrue(loaded.TryGet(out Tonemapping tonemapping));
+                Assert.IsTrue(tonemapping.mode.overrideState, "tonemapping mode is an override (STYL-08 default ACES)");
+                Assert.AreEqual(TonemappingMode.ACES, tonemapping.mode.value);
+
+                // R7 full-strength pin: every override equals the asset field EXACTLY —
+                // no tone-match scaling anywhere on the asset path.
+                Assert.IsTrue(loaded.TryGet(out WhiteBalance whiteBalance));
+                Assert.IsTrue(whiteBalance.temperature.overrideState);
+                Assert.AreEqual(look.PostTemperature, whiteBalance.temperature.value,
+                    "temperature reads the unscaled asset field at FULL strength");
+                Assert.IsTrue(whiteBalance.tint.overrideState);
+                Assert.AreEqual(look.PostTint, whiteBalance.tint.value,
+                    "tint reads the unscaled asset field at FULL strength");
+
+                Assert.IsTrue(loaded.TryGet(out ColorAdjustments colorAdjustments));
+                Assert.IsTrue(colorAdjustments.postExposure.overrideState);
+                Assert.AreEqual(look.PostExposureEv, colorAdjustments.postExposure.value,
+                    "post exposure reads the unscaled asset field at FULL strength");
+                Assert.IsTrue(colorAdjustments.contrast.overrideState);
+                Assert.AreEqual(look.PostContrast, colorAdjustments.contrast.value,
+                    "contrast reads the unscaled asset field at FULL strength");
+                Assert.IsTrue(colorAdjustments.saturation.overrideState);
+                Assert.AreEqual(look.PostSaturation, colorAdjustments.saturation.value,
+                    "saturation reads the unscaled asset field at FULL strength");
+                Assert.IsFalse(colorAdjustments.colorFilter.overrideState,
+                    "colorFilter stays visibly neutral — not a fitted knob");
+                Assert.AreEqual(Color.white, colorAdjustments.colorFilter.value);
+
+                Assert.IsTrue(loaded.TryGet(out Bloom bloom));
+                Assert.IsTrue(bloom.threshold.overrideState);
+                Assert.AreEqual(look.PostBloomThreshold, bloom.threshold.value,
+                    "bloom threshold reads the asset field exactly (a separability floor, never scaled)");
+                Assert.IsTrue(bloom.intensity.overrideState);
+                Assert.AreEqual(look.PostBloomIntensity, bloom.intensity.value,
+                    "bloom intensity reads the asset's own artist knob (A9) — unscaled, never fitted");
+
+                Assert.IsTrue(loaded.TryGet(out ColorCurves curves));
+                Assert.IsTrue(curves.master.overrideState);
+                Assert.IsNotNull(curves.master.value, "curves round-trip as TextureCurves");
+                Assert.IsNotNull(curves.red.value);
+                Assert.IsNotNull(curves.green.value);
+                Assert.IsNotNull(curves.blue.value);
+                Assert.That(Mathf.Abs(curves.master.value.Evaluate(0.5f) - 0.55f), Is.LessThan(0.01f),
+                    "the master key (0.5, 0.55) bakes at FULL strength (TextureCurve bake tolerance — a half-strength scale would read 0.525)");
+                Assert.That(Mathf.Abs(curves.red.value.Evaluate(0.5f) - 0.5f), Is.LessThan(0.01f),
+                    "the red curve keeps its shape at FULL strength");
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(TempFolder);
+                RestorePrefs(prefs);
+                UnityEngine.Object.DestroyImmediate(look);
+            }
+        }
+
+        [Test]
+        public void Write_FromAsset_StampAndRefitOverwrite()
+        {
+            NamerPostLook look = CreateFittedLook("VolumeWriterAssetStamp");
+            PrefsSnapshot prefs = CapturePrefs();
+            EnsureTempFolder();
+            // NewSettings leaves the opt-in OFF — the default-settings path.
+            NamerProcessorSettings settings = NewSettings();
+            try
+            {
+                VolumeProfile written = NamerStyleVolumeWriter.Write(look, settings);
+                Assert.IsNotNull(written);
+
+                VolumeProfile loaded = AssetDatabase.LoadAssetAtPath<VolumeProfile>(
+                    NamerStyleVolumeWriter.ComposeVolumePath(look, settings));
+                Assert.IsNotNull(loaded);
+                Assert.Contains(NamerEditorConstants.GeneratedLabel, AssetDatabase.GetLabels(loaded),
+                    "the generated Volume carries the NamerGenerated stamp so the overwrite opt-in gate covers it (GEN-03)");
+
+                // Own-companion exemption carried over: a stamped Volume re-writes
+                // with the opt-in OFF (regeneration is promised unconditionally).
+                VolumeProfile rewritten = NamerStyleVolumeWriter.Write(look, settings);
+                Assert.IsNotNull(rewritten, "re-write with the opt-in off regenerates the asset's companion Volume");
+                Assert.AreEqual(5, rewritten.components.Count);
+                Assert.IsTrue(rewritten.TryGet(out Tonemapping tonemapping),
+                    "the re-written Volume loads a full fresh component set from disk");
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(TempFolder);
+                RestorePrefs(prefs);
+                UnityEngine.Object.DestroyImmediate(look);
+            }
+        }
+
+        [Test]
+        public void Write_FromAsset_RefusesNonGeneratedOverwrite()
+        {
+            NamerPostLook look = CreateFittedLook("VolumeWriterAssetForeign");
+            PrefsSnapshot prefs = CapturePrefs();
+            EnsureTempFolder();
+            // Opt-in ON, so ONLY the non-generated refusal can fire.
+            NamerProcessorSettings settings = NewSettings();
+            settings.OverwriteGenerated = true;
+            try
+            {
+                string path = NamerStyleVolumeWriter.ComposeVolumePath(look, settings);
+                VolumeProfile foreign = ScriptableObject.CreateInstance<VolumeProfile>();
+                foreign.name = "ForeignNonGenerated";
+                AssetDatabase.CreateAsset(foreign, path);
+
+                InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+                    () => NamerStyleVolumeWriter.Write(look, settings));
+                Assert.That(ex.Message, Does.Contain("non-generated"),
+                    "the refusal must name the non-generated-target reason (carried-over profile-path gate)");
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(TempFolder);
+                RestorePrefs(prefs);
+                UnityEngine.Object.DestroyImmediate(look);
+            }
+        }
+
+        [Test]
+        public void Write_FromAsset_RefusesUnfitted()
+        {
+            NamerPostLook unfitted = ScriptableObject.CreateInstance<NamerPostLook>();
+            unfitted.name = "VolumeWriterAssetUnfitted";
+            PrefsSnapshot prefs = CapturePrefs();
+            EnsureTempFolder();
+            NamerProcessorSettings settings = NewSettings();
+            try
+            {
+                InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+                    () => NamerStyleVolumeWriter.Write(unfitted, settings));
+                Assert.That(ex.Message, Does.Contain("carries no fitted post look"),
+                    "the null/unfitted guard keeps the profile-path InvalidOperationException shape");
+
+                InvalidOperationException nullEx = Assert.Throws<InvalidOperationException>(
+                    () => NamerStyleVolumeWriter.Write((NamerPostLook)null, settings));
+                Assert.That(nullEx.Message, Does.Contain("carries no fitted post look"),
+                    "a null asset refuses with the same guard shape");
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(TempFolder);
+                RestorePrefs(prefs);
+                UnityEngine.Object.DestroyImmediate(unfitted);
+            }
+        }
+
+        [Test]
+        public void Write_FromAsset_RecordsVolumeWriteFingerprint()
+        {
+            NamerPostLook look = CreateFittedLook("VolumeWriterAssetFingerprint");
+            PrefsSnapshot prefs = CapturePrefs();
+            EnsureTempFolder();
+            NamerProcessorSettings settings = NewSettings();
+            try
+            {
+                VolumeProfile written = NamerStyleVolumeWriter.Write(look, settings);
+                Assert.IsNotNull(written);
+                Assert.AreEqual(look.ComputeParamsFingerprint(), look.VolumeWriteFingerprint,
+                    "the write stamps the params fingerprint at write time (A13)");
+                Assert.IsFalse(look.IsVolumeStale,
+                    "immediately after a write the asset reports not volume-stale");
+
+                look.PostSaturation = look.PostSaturation + 1.5f;
+                Assert.IsTrue(look.IsVolumeStale,
+                    "a parameter tweak after the write flips the A13 volume-stale warning on");
+
+                VolumeProfile regenerated = NamerStyleVolumeWriter.Write(look, settings);
+                Assert.IsNotNull(regenerated);
+                Assert.IsFalse(look.IsVolumeStale,
+                    "regenerating re-stamps the fingerprint and clears the staleness (ClampToCaps keeps the tweaked value in range)");
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(TempFolder);
+                RestorePrefs(prefs);
+                UnityEngine.Object.DestroyImmediate(look);
+            }
+        }
+
+        [Test]
+        public void ComposeVolumePath_IsAssetNameKeyedAtDestinationRoot()
+        {
+            NamerPostLook look = CreateFittedLook("My/Post: Look");
+            PrefsSnapshot prefs = CapturePrefs();
+            try
+            {
+                NamerProcessorSettings settings = NewSettings();
+                settings.Prefix = "Pfx";
+                settings.Suffix = "Sfx";
+
+                string path = NamerStyleVolumeWriter.ComposeVolumePath(look, settings);
+                string safeName = AssetGenerator.SanitizeFileName(look.name);
+                string expected = TempFolder + "/" + "Pfx" + safeName + "Sfx" + "_Post.asset";
+                Assert.AreEqual(expected, path,
+                    "the asset Volume path is {prefix}{SanitizeFileName(look.name)}{suffix}_Post.asset (05.2 D-06 — name-keyed so duplicates stay independent)");
+                Assert.IsFalse(path.Contains("/" + safeName + "/"),
+                    "the Volume must NOT live in a per-selection subfolder — the look is asset-scoped and scene-wide");
+            }
+            finally
+            {
+                RestorePrefs(prefs);
+                UnityEngine.Object.DestroyImmediate(look);
+            }
+        }
+
+        /// <summary>
+        /// A hand-built fitted post-look asset with distinct, unclamped-safe knob
+        /// values and non-trivial curves (mirrors the state Fit Look leaves behind;
+        /// 05.2 plan 01 — PostBloomIntensity carries a DISTINCT non-neutral value so
+        /// the full-strength pin actually tests the knob).
+        /// </summary>
+        private static NamerPostLook CreateFittedLook(string lookName)
+        {
+            NamerPostLook look = ScriptableObject.CreateInstance<NamerPostLook>();
+            look.name = lookName;
+            look.PostTemperature = 12.5f;
+            look.PostTint = -3.25f;
+            look.PostExposureEv = 0.75f;
+            look.PostContrast = 8f;
+            look.PostSaturation = -4.5f;
+            look.PostBloomThreshold = 0.82f;
+            look.PostBloomIntensity = 2.25f;
+            look.PostMasterCurve = new AnimationCurve(
+                new Keyframe(0f, 0f), new Keyframe(0.5f, 0.55f), new Keyframe(1f, 1f));
+            look.PostRedCurve = new AnimationCurve(new Keyframe(0f, 0.05f), new Keyframe(1f, 0.95f));
+            look.PostGreenCurve = new AnimationCurve(new Keyframe(0f, 0f), new Keyframe(1f, 1f));
+            look.PostBlueCurve = new AnimationCurve(new Keyframe(0f, 0.1f), new Keyframe(1f, 0.9f));
+            look.PostFitFingerprint = "test-asset-fit-fingerprint";
+            look.PostFitExemplarName = "TestExemplar";
+            return look;
+        }
+
+        /// <summary>
         /// A hand-built fitted profile with distinct, unclamped-safe knob values and
         /// non-trivial curves (mirrors the state Fit Look leaves behind, plan 03).
         /// </summary>
@@ -254,6 +626,8 @@ namespace GraffitiEntertainment.Namer.Tests
             profile.PostRedCurve = new AnimationCurve(new Keyframe(0f, 0.05f), new Keyframe(1f, 0.95f));
             profile.PostGreenCurve = new AnimationCurve(new Keyframe(0f, 0f), new Keyframe(1f, 1f));
             profile.PostBlueCurve = new AnimationCurve(new Keyframe(0f, 0.1f), new Keyframe(1f, 0.9f));
+            // Full-strength fixture — DefaultToneMatch is 0 since hk7.
+            profile.ToneMatch = 1f;
             profile.PostFitFingerprint = "test-fit-fingerprint";
             profile.PostFitExemplarName = "TestExemplar";
             return profile;

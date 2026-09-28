@@ -358,10 +358,30 @@ Plans:
 4. ToneMatch is retired end-to-end: no UI knob, no serialized field, no kernel luma-transfer path — palette transfer (StyleStrength hue/vibrance, HueReplaceMode, smoothing) is otherwise byte-identical, and the zero-dispatch identity gate semantics are preserved
 5. The "Stylized + Post" After View preview reads a selected `NamerPostLook` asset's parameters
 6. The fit math (`NamerStylePostFit`) is unchanged — it moves home (asset instead of profile), preserving its determinism contract and existing test pins
-**Plans:** 0 plans
+**Plans:** 6 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 05.2 to break down)
+
+**Wave 1** *(parallel — disjoint files)*
+
+- [ ] 05.2-01-PLAN.md — Asset foundation: NamerPostLook ScriptableObject + constants + PostLookGuid pref, ApplyToPostLook + asset-targeted Volume writer overloads (full-strength), asset-side tests (STYL-10/12)
+- [ ] 05.2-02-PLAN.md — W14 channel-pane fix: pure visible-band clip seam + headless geometry pins, de-styled reservations (UI-04)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 05.2-03-PLAN.md — ToneMatch retirement end-to-end: pipeline/kernel/field/slider/copy, NamerPostLookScale deletion, R8 Process companion-Volume removal, test retirement (STYL-11)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 05.2-04-PLAN.md — Window rewire: ResolvePostLook + RunStylePostFit(NamerPostLook) seam + asset-driven lens (W10), Post Look row + fallbacks + tooltip (W9-W11), R3 profile-fit-UI removal, preview-test retarget (STYL-10/UI-04)
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 05.2-05-PLAN.md — NamerPostLookEditor A1-A14 (references + Fit Look prereq chain + editable params + Volume block) + D-07 load-time migration M1-M3 + lifecycle tests + USER_GUIDE (STYL-10/12)
+
+**Wave 5** *(blocked on Wave 4)*
+
+- [ ] 05.2-06-PLAN.md — R4 profile slim-down + W12 + ApplyToProfile/writer-profile/migration deletions + full-suite live regression + consistency grep (STYL-10/11/12)
 
 ## Progress
 

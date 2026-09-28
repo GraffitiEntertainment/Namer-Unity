@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -30,6 +31,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private bool advancedFoldout;
         private bool isFitting;
         private string fitError;
+        private string volumeError;
 
         /// <summary>
         /// Pure prerequisite state of the A7 Fit Look button (05.2 plan 05; the
@@ -74,6 +76,11 @@ namespace GraffitiEntertainment.Namer.Editor
             EditorGUILayout.Space();
 
             DrawFitLookBlock();
+
+            DrawParametersBlock();
+            EditorGUILayout.Space();
+
+            DrawVolumeBlock();
         }
 
         /// <summary>
@@ -444,6 +451,205 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 isFitting = false;
                 NamerPostLook.RaiseChanged(look);
+            }
+        }
+
+        /// <summary>
+        /// A9-A10: the EDITABLE fitted parameters (STYL-10/STYL-12 delta — the 5.1
+        /// read-only P18 rows re-homed as the artist tweak surface; the asset is the
+        /// source of truth, D-06) plus the fit-staleness warning. Rows render in the
+        /// locked order inside <see cref="EditorGUI.DisabledScope"/>(!HasFit), with
+        /// the unfitted-params reason visible when disabled. Tonemapping stays a
+        /// read-only constant row. Every editable tooltip = the 5.1 fit-statistic
+        /// string + <see cref="NamerEditorConstants.PostLookParameterTooltipSuffix"/>
+        /// (NOT the debounce sentence — these sliders write the asset).
+        /// </summary>
+        private void DrawParametersBlock()
+        {
+            EditorGUILayout.LabelField("Fitted Post Look", EditorStyles.boldLabel);
+
+            if (!look.HasFit)
+            {
+                EditorGUILayout.LabelField(
+                    "Not fitted — Fit Look fills these parameters from the references; tweak them afterwards.",
+                    EditorStyles.miniLabel);
+            }
+
+            using (new EditorGUI.DisabledScope(!look.HasFit))
+            {
+                // Constant row — never a placeholder (URP's ACES curve is parameter-free).
+                EditorGUILayout.LabelField(
+                    new GUIContent("Tonemapping", "Fixed ACES — URP's curve is parameter-free; the fit shapes exposure/contrast/curves around it."),
+                    new GUIContent("ACES (default)"));
+
+                string whiteBalanceTooltip = "Von Kries fit of the source mean chromaticity onto the references' (temperature / tint). "
+                    + NamerEditorConstants.PostLookParameterTooltipSuffix;
+                DrawSlider(
+                    new GUIContent("White Balance Temperature", whiteBalanceTooltip),
+                    look.PostTemperature, -100f, 100f, "Set White Balance Temperature",
+                    (edited, value) => edited.PostTemperature = value);
+                DrawSlider(
+                    new GUIContent("White Balance Tint", whiteBalanceTooltip),
+                    look.PostTint, -100f, 100f, "Set White Balance Tint",
+                    (edited, value) => edited.PostTint = value);
+                DrawSlider(
+                    new GUIContent("Post Exposure", "Mean-luma EV ratio of the tonemapped source onto the decoded references. "
+                        + NamerEditorConstants.PostLookParameterTooltipSuffix),
+                    look.PostExposureEv, -NamerEditorConstants.MaxFittedPostExposureEv, NamerEditorConstants.MaxFittedPostExposureEv,
+                    "Set Post Exposure",
+                    (edited, value) => edited.PostExposureEv = value);
+                DrawSlider(
+                    new GUIContent("Contrast", "LogC p90-p10 percentile-spread ratio between source and references. "
+                        + NamerEditorConstants.PostLookParameterTooltipSuffix),
+                    look.PostContrast, -100f, 100f, "Set Contrast",
+                    (edited, value) => edited.PostContrast = value);
+                DrawSlider(
+                    new GUIContent("Saturation", "Perceptual mean-chroma ratio between source and references (plain URP Saturation). "
+                        + NamerEditorConstants.PostLookParameterTooltipSuffix),
+                    look.PostSaturation, -100f, 100f, "Set Saturation",
+                    (edited, value) => edited.PostSaturation = value);
+                DrawSlider(
+                    new GUIContent("Bloom Threshold", "Reference highlight percentile (p95 of raw sRGB Max3), written gamma-space like URP's own slider. "
+                        + NamerEditorConstants.PostLookParameterTooltipSuffix),
+                    look.PostBloomThreshold, 0f, NamerEditorConstants.MaxBloomThreshold, "Set Bloom Threshold",
+                    (edited, value) => edited.PostBloomThreshold = value);
+                DrawSlider(
+                    new GUIContent("Bloom Intensity", "Artist knob — defaulted, never fitted; tweak it here, then Regenerate Volume. "
+                        + NamerEditorConstants.PostLookParameterTooltipSuffix),
+                    look.PostBloomIntensity, 0f, NamerEditorConstants.MaxBloomIntensity, "Set Bloom Intensity",
+                    (edited, value) => edited.PostBloomIntensity = value);
+
+                string curvesTooltip = "Histogram specification (CDF matching) of source luma/channels onto the references'. "
+                    + NamerEditorConstants.PostLookParameterTooltipSuffix;
+                DrawCurveField(
+                    new GUIContent("Master Curve", curvesTooltip), look.PostMasterCurve, Color.white,
+                    "Set Master Curve", (edited, value) => edited.PostMasterCurve = value);
+                DrawCurveField(
+                    new GUIContent("Red Curve", curvesTooltip), look.PostRedCurve, Color.red,
+                    "Set Red Curve", (edited, value) => edited.PostRedCurve = value);
+                DrawCurveField(
+                    new GUIContent("Green Curve", curvesTooltip), look.PostGreenCurve, Color.green,
+                    "Set Green Curve", (edited, value) => edited.PostGreenCurve = value);
+                DrawCurveField(
+                    new GUIContent("Blue Curve", curvesTooltip), look.PostBlueCurve, Color.blue,
+                    "Set Blue Curve", (edited, value) => edited.PostBlueCurve = value);
+            }
+
+            // A10: the asset's own reference fingerprint no longer matches fit time.
+            if (look.IsFitStale)
+            {
+                EditorGUILayout.HelpBox(
+                    "References changed since the fit — Fit Look again to refresh the post look.",
+                    MessageType.Warning);
+            }
+
+            EditorGUILayout.Space();
+        }
+
+        /// <summary>
+        /// Curve row with the value-edit contract of <see cref="DrawSlider"/> plus the
+        /// curve-specific sanitize: after the write, <see cref="NamerPostLook.ClampToCaps"/>
+        /// clamps every key to [0,1] and drops degenerates. The key-COUNT cap
+        /// (<see cref="NamerEditorConstants.MaxCurveKeys"/>) rides the Volume-write
+        /// resample in NamerStyleVolumeWriter.BuildTextureCurve — the editor path does
+        /// not second-guess it.
+        /// </summary>
+        private void DrawCurveField(GUIContent label, AnimationCurve value, Color color, string undoName, Action<NamerPostLook, AnimationCurve> write)
+        {
+            EditorGUI.BeginChangeCheck();
+            AnimationCurve updated = EditorGUILayout.CurveField(label, value, color, new Rect(0f, 0f, 1f, 1f));
+            if (EditorGUI.EndChangeCheck())
+            {
+                Undo.RecordObject(look, undoName);
+                write(look, updated);
+                look.ClampToCaps();
+                EditorUtility.SetDirty(look);
+                NamerPostLook.RaiseChanged(look);
+            }
+        }
+
+        /// <summary>
+        /// A11-A14: the Volume block — status line (name-keyed companion Volume
+        /// derived from this asset, D-06), the explicit Regenerate Volume button
+        /// (A12, preflighted + pinging, never debounced), the Volume-staleness
+        /// warning (A13, rides the plan-01 VolumeWriteFingerprint stamp), and the
+        /// per-scene duplicate-and-tweak hint (A14).
+        /// </summary>
+        private void DrawVolumeBlock()
+        {
+            EditorGUILayout.LabelField("Volume", EditorStyles.boldLabel);
+
+            // A11: the Volume the writer will (re)generate for this asset.
+            if (look.HasFit)
+            {
+                NamerProcessorSettings settings = new NamerProcessorSettings();
+                string volumeFileName = Path.GetFileName(NamerStyleVolumeWriter.ComposeVolumePath(look, settings));
+                EditorGUILayout.LabelField(
+                    "Volume: " + volumeFileName + " — generated from this asset; hand-tweaks to it are lost on re-fit or regeneration.",
+                    EditorStyles.miniLabel);
+            }
+            else
+            {
+                EditorGUILayout.LabelField("No Volume yet — Fit Look generates one.", EditorStyles.miniLabel);
+            }
+
+            // A12: explicit regeneration — disabled until fitted, with the
+            // unfitted-params reason under it.
+            using (new EditorGUI.DisabledScope(!look.HasFit))
+            {
+                if (GUILayout.Button(new GUIContent("Regenerate Volume",
+                        "Rebuilds this asset's generated URP Volume profile from the current parameters. Overwrites the generated Volume — hand-tweaks to it are lost. For a per-scene look, duplicate this asset and tweak the copy.")))
+                {
+                    RunRegenerateVolume();
+                }
+            }
+
+            if (!look.HasFit)
+            {
+                EditorGUILayout.LabelField(
+                    "Not fitted — Fit Look fills these parameters from the references; tweak them afterwards.",
+                    EditorStyles.miniLabel);
+            }
+
+            if (!string.IsNullOrEmpty(volumeError))
+            {
+                EditorGUILayout.HelpBox(volumeError, MessageType.Error);
+            }
+
+            // A13: parameters changed since the last Volume write.
+            if (look.IsVolumeStale)
+            {
+                EditorGUILayout.HelpBox(
+                    "Asset parameters changed since the Volume was generated — Regenerate Volume to update the scene look.",
+                    MessageType.Warning);
+            }
+
+            // A14: the D-06 per-scene workflow hint.
+            EditorGUILayout.LabelField(
+                "For a per-scene look, duplicate this asset and tweak the copy — each asset owns its own Volume.",
+                EditorStyles.miniLabel);
+        }
+
+        /// <summary>
+        /// A12 click: preflight the write gates, rebuild the companion Volume from
+        /// the asset's current parameters, ping it. Any refusal or failure surfaces
+        /// as the locked "Volume regeneration failed: …" HelpBox. Explicit action —
+        /// never debounced, no confirmation (house law; the overwrite is
+        /// pre-documented in the button tooltip).
+        /// </summary>
+        private void RunRegenerateVolume()
+        {
+            volumeError = null;
+            try
+            {
+                NamerProcessorSettings settings = new NamerProcessorSettings();
+                NamerStyleVolumeWriter.PreflightWriteGate(look, settings);
+                VolumeProfile volume = NamerStyleVolumeWriter.Write(look, settings);
+                EditorGUIUtility.PingObject(volume);
+            }
+            catch (Exception exception)
+            {
+                volumeError = "Volume regeneration failed: " + exception.Message;
             }
         }
 

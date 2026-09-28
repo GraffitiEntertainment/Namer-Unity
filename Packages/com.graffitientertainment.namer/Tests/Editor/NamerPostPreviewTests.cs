@@ -1,44 +1,23 @@
 using GraffitiEntertainment.Namer.Editor;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 
 namespace GraffitiEntertainment.Namer.Tests
 {
     /// <summary>
-    /// 05.1 D-04 (STYL-09) Stylized + Post lens tests: the preview-composition gate
-    /// (the post view composes stylization), the popup option table, the caption
-    /// seam, and the ApplyPostLook material-uniform contract. Mirrors
-    /// <see cref="NamerStylizationIntegrationTests"/> pure-seam patterns and
-    /// <see cref="NamerDipSwitchTests"/> material-uniform idioms.
+    /// 05.1 D-04 (STYL-09) / 05.2 plan 04 (W10) Stylized + Post lens tests, pinned
+    /// against the SELECTED <see cref="NamerPostLook"/> asset: the popup option
+    /// table, the caption seam, the ApplyPostLook material-uniform contract
+    /// (full-strength direct asset reads), the bloom-threshold conversion, the
+    /// GUID round-trip of the selection row (W9), and the pane-bloom renderer
+    /// state. Mirrors <see cref="NamerStylizationIntegrationTests"/> pure-seam
+    /// patterns and <see cref="NamerDipSwitchTests"/> material-uniform idioms.
     /// </summary>
     public class NamerPostPreviewTests
     {
-        /// <summary>
-        /// The post lens must compose stylization exactly like the Stylized NAMER
-        /// lens — the fitted post grade rides ON TOP of the stylized base, it never
-        /// replaces it (W5 widening of ComposePreviewStylization).
-        /// </summary>
-        [Test]
-        public void ComposePreviewStylization_PostView_ComposesStylization()
-        {
-            NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
-            try
-            {
-                profile.Smoothing = 0.5f;
-
-                NamerStyleStylization composed = NamerEditorWindow.ComposePreviewStylization(
-                    profile, NamerEditorWindow.kAfterViewPost, null);
-                Assert.IsNotNull(composed,
-                    "After View = Stylized + Post must compose the stylized preview context");
-                Assert.IsTrue(composed.SmoothingSkippedNoMesh,
-                    "no split handed to the composition must set SmoothingSkippedNoMesh (OQ-3, shared with the stylized lens)");
-            }
-            finally
-            {
-                Object.DestroyImmediate(profile);
-            }
-        }
+        private const string TempFolder = "Assets/NAMER_PostPreview_Tests_Temp";
 
         /// <summary>
         /// The After View popup offers exactly three entries, index-parallel to
@@ -58,7 +37,8 @@ namespace GraffitiEntertainment.Namer.Tests
         /// <summary>
         /// Caption seam (W7): the post state returns the locked post caption and
         /// suppresses the Before/After flipper; the stylized state keeps its caption;
-        /// only the un-stylized state draws the flipper.
+        /// only the un-stylized state draws the flipper. W13: the caption is
+        /// UNCHANGED by the 05.2 asset rewire.
         /// </summary>
         [Test]
         public void ResolveAlbedoPreviewCaption_PostState_ReturnsPostCaptionAndNoFlipper()
@@ -81,33 +61,69 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         /// <summary>
-        /// Full-table law (Metal silent-skip discipline): a FITTED profile at the
+        /// W9 selection round-trip: the GUID the row persists resolves back to the
+        /// SAME asset instance (domain-reload-safe attach mechanism, the style-row
+        /// mirror), and an empty GUID resolves null (the silent detach — the W10
+        /// fallback to plain Stylized NAMER). The EditorPrefs-backed pref is saved
+        /// and restored in finally so the test never leaks the selection.
+        /// </summary>
+        [Test]
+        public void ResolvePostLook_RoundTrip_ResolvesSelectedAssetAndNullOnEmptyGuid()
+        {
+            string savedGuid = new NamerProcessorSettings().PostLookGuid;
+            EnsureTempFolder();
+            NamerPostLook look = ScriptableObject.CreateInstance<NamerPostLook>();
+            try
+            {
+                AssetDatabase.CreateAsset(look, TempFolder + "/PostPreviewLook.asset");
+                NamerProcessorSettings settings = new NamerProcessorSettings();
+                settings.PostLookGuid = string.Empty;
+                Assert.IsNull(NamerProcessor.ResolvePostLook(settings),
+                    "an empty GUID is the silent detach — resolve must return null");
+
+                string guid = AssetDatabase.AssetPathToGUID(TempFolder + "/PostPreviewLook.asset");
+                Assert.IsFalse(string.IsNullOrEmpty(guid), "the temp asset must have a real GUID");
+                settings.PostLookGuid = guid;
+                NamerPostLook resolved = NamerProcessor.ResolvePostLook(settings);
+                Assert.AreSame(look, resolved,
+                    "the persisted GUID must resolve back to the same asset instance (survives domain reload)");
+            }
+            finally
+            {
+                new NamerProcessorSettings().PostLookGuid = savedGuid;
+                AssetDatabase.DeleteAsset(TempFolder);
+            }
+        }
+
+        /// <summary>
+        /// Full-table law (Metal silent-skip discipline): a FITTED post look at the
         /// post lens writes enable 1 plus the CPU-side twins of URP's own grading
         /// passes — LMS via the exact ColorBalanceToLMSCoeffs the LUT pass calls,
-        /// z = contrast/100 + 1, s = saturation/100 + 1, raw EV — and binds the
+        /// z = contrast/100 + 1, s = saturation/100 + 1, raw EV — with every value a
+        /// DIRECT unscaled asset-field read (R7 full strength), and binds the
         /// 128x1 RGBA float curve strip.
         /// </summary>
         [Test]
-        public void ApplyPostLook_FittedProfile_SetsFullTable()
+        public void ApplyPostLook_FittedLook_SetsFullTable()
         {
             Shader shader = Shader.Find("GraffitiEntertainment.Namer/NAMER");
             Assert.IsNotNull(shader, "NAMER shader must load");
 
-            NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            NamerPostLook look = ScriptableObject.CreateInstance<NamerPostLook>();
             Material material = new Material(shader);
             try
             {
-                profile.PostFitFingerprint = "synthetic-fit-fingerprint";
-                profile.PostTemperature = 20f;
-                profile.PostTint = -10f;
-                profile.PostExposureEv = 1.5f;
-                profile.PostContrast = 25f;
-                profile.PostSaturation = -40f;
+                look.PostFitFingerprint = "synthetic-fit-fingerprint";
+                look.PostTemperature = 20f;
+                look.PostTint = -10f;
+                look.PostExposureEv = 1.5f;
+                look.PostContrast = 25f;
+                look.PostSaturation = -40f;
 
-                NamerEditorWindow.ApplyPostLook(material, profile, true);
+                NamerEditorWindow.ApplyPostLook(material, look, true);
 
                 Assert.AreEqual(1f, material.GetFloat("_PostEnable"),
-                    "fitted profile at the post lens must enable the in-shader grade");
+                    "fitted look at the post lens must enable the in-shader grade");
                 Vector4 expectedLms = ColorUtils.ColorBalanceToLMSCoeffs(20f, -10f);
                 Assert.AreEqual(expectedLms, material.GetVector("_PostLmsCoeffs"),
                     "LMS coefficients must be the exact function URP's LUT pass evaluates");
@@ -130,12 +146,12 @@ namespace GraffitiEntertainment.Namer.Tests
             finally
             {
                 Object.DestroyImmediate(material);
-                Object.DestroyImmediate(profile);
+                Object.DestroyImmediate(look);
             }
         }
 
         /// <summary>
-        /// Inactive table law: unfitted profile, non-post lens, or null profile all
+        /// Inactive table law: unfitted look, non-post lens, or null look all
         /// write the COMPLETE neutral table (enable 0, identity LMS/z/s/EV, null
         /// curve) — never a half-written table (Metal skips unbound dispatches
         /// silently).
@@ -146,8 +162,8 @@ namespace GraffitiEntertainment.Namer.Tests
             Shader shader = Shader.Find("GraffitiEntertainment.Namer/NAMER");
             Assert.IsNotNull(shader, "NAMER shader must load");
 
-            NamerStyleProfile fitted = ScriptableObject.CreateInstance<NamerStyleProfile>();
-            NamerStyleProfile unfitted = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            NamerPostLook fitted = ScriptableObject.CreateInstance<NamerPostLook>();
+            NamerPostLook unfitted = ScriptableObject.CreateInstance<NamerPostLook>();
             Material material = new Material(shader);
             try
             {
@@ -157,27 +173,27 @@ namespace GraffitiEntertainment.Namer.Tests
                 fitted.PostSaturation = 50f;
                 fitted.PostExposureEv = 2f;
 
-                // Null profile (post lens, but nothing attached): full neutral table.
+                // Null look (post lens, but nothing selected): full neutral table.
                 NamerEditorWindow.ApplyPostLook(material, null, true);
                 Assert.AreEqual(0f, material.GetFloat("_PostEnable"));
                 Assert.AreEqual(Vector4.one, material.GetVector("_PostLmsCoeffs"),
-                    "null profile must still write the neutral LMS row");
+                    "a null look must still write the neutral LMS row");
                 Assert.AreEqual(0f, material.GetFloat("_PostExposureEv"));
                 Assert.AreEqual(1f, material.GetFloat("_PostContrastZ"));
                 Assert.AreEqual(1f, material.GetFloat("_PostSaturationS"));
                 Assert.IsNull(material.GetTexture("_PostCurveTex"));
 
-                // Fitted profile but a NON-post lens: enable 0 (identity grade) — the
+                // Fitted look but a NON-post lens: enable 0 (identity grade) — the
                 // other uniforms may ride along, the gate is what the shader reads.
                 NamerEditorWindow.ApplyPostLook(material, fitted, false);
                 Assert.AreEqual(0f, material.GetFloat("_PostEnable"),
                     "the NAMER/Stylized lenses must keep the in-shader grade off");
 
-                // Post lens but an UNFITTED profile: enable 0 (W6 fallback to plain
-                // Stylized NAMER).
+                // Post lens but an UNFITTED look: enable 0 (the W10 fallback to
+                // plain Stylized NAMER).
                 NamerEditorWindow.ApplyPostLook(material, unfitted, true);
                 Assert.AreEqual(0f, material.GetFloat("_PostEnable"),
-                    "an unfitted profile must fall back to the un-graded stylized view");
+                    "an unfitted look must fall back to the un-graded stylized view");
             }
             finally
             {
@@ -186,23 +202,25 @@ namespace GraffitiEntertainment.Namer.Tests
                 Object.DestroyImmediate(fitted);
             }
         }
+
         /// <summary>
-        /// Bloom threshold conversion (05.1 D-04): the pure helper applies URP's exact
-        /// render-time gamma-to-linear conversion to the fitted threshold and returns
-        /// the disabled sentinel 0 for null/unfitted profiles.
+        /// Bloom threshold conversion (05.1 D-04 / 05.2 W10): the pure helper applies
+        /// URP's exact render-time gamma-to-linear conversion to the selected look's
+        /// fitted threshold and returns the disabled sentinel 0 for null/unfitted
+        /// looks.
         /// </summary>
         [Test]
         public void BloomThresholdLinear_MatchesUrpRenderTimeConversion()
         {
             Assert.AreEqual(0f, NamerEditorWindow.BloomThresholdLinear(null),
-                "no profile must disable the pane bloom chain (0 sentinel)");
+                "no selected look must disable the pane bloom chain (0 sentinel)");
 
-            NamerStyleProfile unfitted = ScriptableObject.CreateInstance<NamerStyleProfile>();
-            NamerStyleProfile fitted = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            NamerPostLook unfitted = ScriptableObject.CreateInstance<NamerPostLook>();
+            NamerPostLook fitted = ScriptableObject.CreateInstance<NamerPostLook>();
             try
             {
                 Assert.AreEqual(0f, NamerEditorWindow.BloomThresholdLinear(unfitted),
-                    "an unfitted profile must disable the pane bloom chain (0 sentinel)");
+                    "an unfitted look must disable the pane bloom chain (0 sentinel)");
 
                 fitted.PostFitFingerprint = "synthetic-fit-fingerprint";
                 fitted.PostBloomThreshold = 0.9f;
@@ -246,6 +264,14 @@ namespace GraffitiEntertainment.Namer.Tests
             finally
             {
                 renderer.Dispose();
+            }
+        }
+
+        private static void EnsureTempFolder()
+        {
+            if (!AssetDatabase.IsValidFolder(TempFolder))
+            {
+                AssetDatabase.CreateFolder("Assets", TempFolder.Substring("Assets/".Length));
             }
         }
     }

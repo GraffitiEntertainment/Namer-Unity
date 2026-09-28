@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 05.2 UI-SPEC approved
-last_updated: "2026-09-28T02:07:54.241Z"
-last_activity: 2026-09-28 -- Phase 05.2 planning complete
+stopped_at: Completed 05.2-01-PLAN.md
+last_updated: "2026-09-28T19:04:40.783Z"
+last_activity: 2026-09-28
 progress:
   total_phases: 11
   completed_phases: 10
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-25)
 
 **Core value:** A user can select a textured FBX in Unity, run `Process with NAMER`, and get a correctly rendering, source-compatible NAMER material without ever modifying the imported source assets or leaving the Unity Editor.
-**Current focus:** Phase 05.2 — standalone-post-look-asset
+**Current focus:** Phase 05.2 — standalone-post-look-asset-reference-fitted-urp-post-look-as
 
 ## Current Position
 
-Phase: 05.2 — NOT PLANNED
-Plan: 1 of 4
+Phase: 05.2 (standalone-post-look-asset-reference-fitted-urp-post-look-as) — EXECUTING
+Plan: 2 of 6
 Status: Ready to execute
-Last activity: 2026-09-28 -- Phase 05.2 planning complete
+Last activity: 2026-09-28
 
-Progress: [██████████] 100%
+Progress: [█████████░] 88%
 
 ## Performance Metrics
 
@@ -96,6 +96,7 @@ Progress: [██████████] 100%
 | Phase 05 P01 | 45min | 3 tasks | 6 files |
 | Phase 05 P02 | 85min | 3 tasks | 12 files |
 | Phase 05 P03 | 26min | 3 tasks | 14 files |
+| Phase 05.2 P01 | 10min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -211,6 +212,9 @@ Recent decisions affecting current work:
 - [Phase 05]: Preview/bake parity via shared NamerProcessor.ApplyStyleControls — window preview and Process bake apply identical clamped scalars from the same profile (05-03)
 - [Phase 05]: After View is a preview-only lens; the bake composes the attached profile unconditionally (05-03 W4)
 - [Phase 05]: Kernel-direct tests left untouched on bare-global-float Metal evidence; all new production dispatch sites bind full argument tables (05-03)
+- [Phase 05.2]: [Phase 05.2 P01]: NamerPostLook asset menu composes PostLookDefaultAssetName + ".asset" instead of inlining the literal (constants law; the constant also feeds plan 04's create dialog)
+- [Phase 05.2]: [Phase 05.2 P01]: PostBloomIntensity NaN fallback is DefaultBloomIntensity (the identity knob value), mirroring the bloom-threshold URP-default precedent — then clamps [0, MaxBloomIntensity]
+- [Phase 05.2]: [Phase 05.2 P01]: Live EditMode run of NamerPostLookTests + NamerStyleVolumeWriterTests deferred to the post-wave regression gate (04.2-P04/04.3-02 precedent — no unity-mcp relay in the executor session); compile equivalence proven via Unity's bundled Roslyn (csc.dll via NetCoreRuntime dotnet) against the csproj reference closure, built to the real assembly names
 
 ### Pending Todos
 
@@ -255,6 +259,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-28T00:58:42.910Z
-Stopped at: Phase 05.2 UI-SPEC approved
-Resume file: .planning/phases/05.2-standalone-post-look-asset-reference-fitted-urp-post-look-as/05.2-UI-SPEC.md
+Last session: 2026-09-28T19:04:40.769Z
+Stopped at: Completed 05.2-01-PLAN.md
+Resume file: None

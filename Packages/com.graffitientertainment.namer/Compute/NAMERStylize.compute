@@ -26,10 +26,10 @@
 //                            strength (Preserve) or f = 1 (Replace, D-05/A5), boost
 //                            saturation toward the anchor without ever desaturating
 //                            (achromatic texels keep hue AND sat frozen so blacks can
-//                            never be tinted), and pull luma ONLY by the independent
-//                            _ToneMatch control [0,1] (0 preserves source tonality),
-//                            rebuild + saturate, preserve base alpha. With no anchors,
-//                            or zero strength AND zero tone match, the kernel is a
+//                            never be tinted), and NEVER transfer luma (05.2 STYL-11:
+//                            the palette is hue/vibrance-only; tonality is owned by
+//                            the post look), rebuild + saturate, preserve base alpha.
+//                            With no anchors, or zero strength, the kernel is a
 //                            byte-exact passthrough copy, so dst is always fully
 //                            written even when only smoothing ran.
 //
@@ -224,8 +224,6 @@ static const float NAMER_STYLIZE_LUMA_SCALE_EPS = 1e-4; // K floor for the luma-
 StructuredBuffer<float4> _AnchorParams;
 uint _AnchorCount;
 float _StyleStrength;
-float _ToneMatch;      // independent tonality control [0,1]: 0 preserves the source's
-                       // own luma, 1 snaps output luma to the matched anchor's luma
 int _HueReplaceMode;   // 0 = Preserve (f = strength), 1 = Replace (f = 1) — D-05/A5
 
 Texture2D<float4> _PaletteSrc;    // last bilateral output (or src when smoothing skipped)
@@ -342,10 +340,11 @@ float3 NamerStylizeRebuild(float h, float s, float luma)
 // (max(srcSat, lerp(srcSat, anchorSat, strength)) — never desaturates, so a pastel
 // reference cannot soften a vivid source: acknowledged trade-off); keep ACHROMATIC
 // texels' hue AND saturation frozen (blacks/grays can never be tinted even when the
-// fallback matched them to a chromatic anchor); pull luma by the INDEPENDENT _ToneMatch
-// control only (strength never moves luma). Rebuild + saturate, PRESERVE base alpha
-// (Pitfall 5). With zero anchors, or zero strength AND zero tone match, this is a
-// passthrough copy, so the caller-owned dst is always fully written.
+// fallback matched them to a chromatic anchor); NEVER transfer luma (05.2 STYL-11:
+// anchor luma steers nearest-anchor MATCHING only — output luma is the source's own,
+// tonality belongs to the post look). Rebuild + saturate, PRESERVE base alpha
+// (Pitfall 5). With zero anchors, or zero strength, this is a passthrough copy, so
+// the caller-owned dst is always fully written.
 [numthreads(8,8,1)]
 void CSPaletteTransfer(uint3 id : SV_DispatchThreadID)
 {
@@ -362,8 +361,7 @@ void CSPaletteTransfer(uint3 id : SV_DispatchThreadID)
     }
 
     float strength = saturate(_StyleStrength);
-    float toneMatch = saturate(_ToneMatch);
-    if (strength <= 0.0 && toneMatch <= 0.0)
+    if (strength <= 0.0)
     {
         _PaletteOut[id.xy] = c;
         return;
@@ -436,17 +434,19 @@ void CSPaletteTransfer(uint3 id : SV_DispatchThreadID)
     }
 
     float4 anchor = _AnchorParams[winner];
-    float outLuma = lerp(srcLuma, anchor.z, toneMatch);
+    // 05.2 STYL-11: output luma is the source's own — the palette NEVER transfers
+    // luma (anchor.z keeps its role in nearest-anchor MATCHING only, above).
+    float outLuma = srcLuma;
     float outSat = texelAchromatic
         ? srcSat
         : max(srcSat, lerp(srcSat, anchor.y, strength));
     float outHue = srcHue;
     if (!texelAchromatic && strength > 0.0)
     {
-        // The strength > 0 gate keeps tone-only dispatches (strength 0, toneMatch > 0)
-        // from snapping hue under Replace (f = 1) — strength 0 means hue AND sat
-        // unchanged in BOTH modes. At strength 0 the sat formula above already
-        // collapses to srcSat; the gate is load-bearing only for hue.
+        // The strength > 0 gate is belt-and-braces since the passthrough early-return
+        // above already exits at strength <= 0 — kept so the hue/sat paths stay
+        // byte-identical for the surviving knobs (05.2-03 deleted the tone-only
+        // dispatch class this gate originally guarded).
         float f = (_HueReplaceMode == 1) ? 1.0 : strength;
         outHue = NamerStylizeHueLerp(srcHue, anchor.x, f);
     }

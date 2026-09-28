@@ -65,11 +65,11 @@ namespace GraffitiEntertainment.Namer.Editor
         /// configured destination, or when a non-generated asset sits at the target
         /// path (the overwrite opt-in does not gate this companion Volume —
         /// <see cref="PreflightWriteGate"/>; the refusal text flows to the
-        /// "Fit failed: {message}" HelpBox in plan 03). The fitted values are
-        /// Tone-Match-scaled at write time via the shared NamerPostLookScale,
-        /// identically to the preview's ApplyPostLook, so the generated scene
-        /// Volume matches the approved preview at every setting — the profile
-        /// remains the source of truth (the scale is never written back).
+        /// "Fit failed: {message}" HelpBox in plan 03). 05.2-03 (R7): the fitted
+        /// values are applied at FULL STRENGTH — direct profile reads, no scaling
+        /// path — identically to the preview's ApplyPostLook, so the generated
+        /// scene Volume matches the approved preview; the profile remains the
+        /// source of truth.
         /// </summary>
         public static VolumeProfile Write(NamerStyleProfile profile, NamerProcessorSettings settings)
         {
@@ -84,10 +84,6 @@ namespace GraffitiEntertainment.Namer.Editor
             // Threat T-05.1-02-03: hand-edited serialized fit values are sanitized
             // before any parameter is read.
             profile.ClampToCaps();
-
-            // ClampToCaps already sanitized ToneMatch (NaN -> default, clamped to
-            // [0,1]) — read it once for every fitted-param scale below.
-            float toneMatch = profile.ToneMatch;
 
             PreflightWriteGate(profile, settings);
 
@@ -105,17 +101,17 @@ namespace GraffitiEntertainment.Namer.Editor
 
             WhiteBalance whiteBalance = volume.Add<WhiteBalance>();
             whiteBalance.temperature.overrideState = true;
-            whiteBalance.temperature.value = NamerPostLookScale.Scale(profile.PostTemperature, toneMatch);
+            whiteBalance.temperature.value = profile.PostTemperature;
             whiteBalance.tint.overrideState = true;
-            whiteBalance.tint.value = NamerPostLookScale.Scale(profile.PostTint, toneMatch);
+            whiteBalance.tint.value = profile.PostTint;
 
             ColorAdjustments colorAdjustments = volume.Add<ColorAdjustments>();
             colorAdjustments.postExposure.overrideState = true;
-            colorAdjustments.postExposure.value = NamerPostLookScale.Scale(profile.PostExposureEv, toneMatch);
+            colorAdjustments.postExposure.value = profile.PostExposureEv;
             colorAdjustments.contrast.overrideState = true;
-            colorAdjustments.contrast.value = NamerPostLookScale.Scale(profile.PostContrast, toneMatch);
+            colorAdjustments.contrast.value = profile.PostContrast;
             colorAdjustments.saturation.overrideState = true;
-            colorAdjustments.saturation.value = NamerPostLookScale.Scale(profile.PostSaturation, toneMatch);
+            colorAdjustments.saturation.value = profile.PostSaturation;
             // colorFilter stays at its neutral-white default with overrideState false —
             // visibly neutral, not a fitted knob (UI-SPEC assembly table).
 
@@ -123,17 +119,17 @@ namespace GraffitiEntertainment.Namer.Editor
             bloom.threshold.overrideState = true;
             bloom.threshold.value = profile.PostBloomThreshold;
             bloom.intensity.overrideState = true;
-            bloom.intensity.value = NamerPostLookScale.Scale(NamerEditorConstants.DefaultBloomIntensity, toneMatch);
+            bloom.intensity.value = NamerEditorConstants.DefaultBloomIntensity;
 
             ColorCurves curves = volume.Add<ColorCurves>();
             curves.master.overrideState = true;
-            curves.master.value = BuildTextureCurve(NamerPostLookScale.ScaleCurve(profile.PostMasterCurve, toneMatch));
+            curves.master.value = BuildTextureCurve(profile.PostMasterCurve);
             curves.red.overrideState = true;
-            curves.red.value = BuildTextureCurve(NamerPostLookScale.ScaleCurve(profile.PostRedCurve, toneMatch));
+            curves.red.value = BuildTextureCurve(profile.PostRedCurve);
             curves.green.overrideState = true;
-            curves.green.value = BuildTextureCurve(NamerPostLookScale.ScaleCurve(profile.PostGreenCurve, toneMatch));
+            curves.green.value = BuildTextureCurve(profile.PostGreenCurve);
             curves.blue.overrideState = true;
-            curves.blue.value = BuildTextureCurve(NamerPostLookScale.ScaleCurve(profile.PostBlueCurve, toneMatch));
+            curves.blue.value = BuildTextureCurve(profile.PostBlueCurve);
 
             AssetDatabase.CreateAsset(volume, path);
             // Pitfall 1: every component must be parented to the asset file or it

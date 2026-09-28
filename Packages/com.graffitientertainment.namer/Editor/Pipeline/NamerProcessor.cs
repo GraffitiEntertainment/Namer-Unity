@@ -213,6 +213,9 @@ namespace GraffitiEntertainment.Namer.Editor
                     // guard, or unresolvable selection) degrades to palette-only with
                     // SmoothingSkippedNoMesh set. profile == null keeps stylization null —
                     // zero stylize dispatches, byte-identical.
+                    // 05.2-03 (STYL-11): the palette transfer is hue/vibrance-only — it
+                    // never pulls luma, fitted or not; tonality is owned exclusively by
+                    // the post look (the NamerPostLook asset's scene Volume).
                     NamerStyleStylization stylization = null;
                     if (styleProfile != null)
                     {

@@ -625,12 +625,11 @@ namespace GraffitiEntertainment.Namer.Editor
                     stylizeSplit = MeshVertexSplitter.Split(_previewMesh);
                 }
 
-                // 260926-qlb: the fit pass composes its base tone-neutral (WR-02's
-                // forced lens keeps its profile override; the solver now also fits
-                // the FULL tonal distance, so params stay ToneMatch-knob-independent).
+                // 05.2-03 (STYL-11): the palette transfer never pulls luma, so the
+                // fit pass reads the same stylized base as the Stylized lens — the
+                // solver fits the FULL tonal distance into the post params.
                 NamerStyleStylization stylization = ComposePreviewStylization(
-                    styleProfile, _forceStylizeForFit ? kAfterViewStylized : _afterView, stylizeSplit,
-                    forcePostOwnsTone: _forceStylizeForFit);
+                    styleProfile, _forceStylizeForFit ? kAfterViewStylized : _afterView, stylizeSplit);
                 _stylizeSmoothingSkipped = stylization != null && stylization.SmoothingSkippedNoMesh;
                 NamerProcessor.ApplyStyleControls(inspection, stylization != null ? styleProfile : null);
 
@@ -797,16 +796,15 @@ namespace GraffitiEntertainment.Namer.Editor
 
             // Pane bloom rides the same funnel: armed only when the post lens is
             // active AND the profile carries a fit (the W6 degrade falls back to
-            // plain Stylized NAMER — no bloom either). The bloom intensity scales
-            // by Tone Match like every other fitted post param (the threshold is
-            // deliberately unscaled — it is a separability floor, not a strength);
-            // s=0 yields intensity 0, and the renderer's enabled gate
-            // (intensity > 0 AND threshold > 0) keeps Render byte-identical to
-            // the disabled path.
+            // plain Stylized NAMER — no bloom either). 05.2-03 (R7): the intensity
+            // applies at FULL STRENGTH — no scaling path exists (the threshold was
+            // always unscaled — it is a separability floor, not a strength); the
+            // renderer's enabled gate (intensity > 0 AND threshold > 0) keeps Render
+            // byte-identical to the disabled path.
             bool fitted = postActive && profile != null && profile.HasPostFit;
             _preview.SetPostBloom(
                 BloomThresholdLinear(profile),
-                fitted ? NamerPostLookScale.Scale(NamerEditorConstants.DefaultBloomIntensity, profile.ToneMatch) : 0f);
+                fitted ? NamerEditorConstants.DefaultBloomIntensity : 0f);
         }
 
         /// <summary>
@@ -832,11 +830,9 @@ namespace GraffitiEntertainment.Namer.Editor
         /// early-out) with identity LMS/EV/z/s and a null curve strip. Active case
         /// derives the CPU-side twins exactly like URP's own passes:
         /// ColorUtils.ColorBalanceToLMSCoeffs (the function ColorGradingLutPass
-        /// calls) and z/s = value/100 + 1. The fitted values are lerped toward
-        /// neutral by the profile's Tone Match (0 = fully off with _PostEnable 0
-        /// and the exact neutral table, 1 = full strength) via the shared
-        /// NamerPostLookScale — the neutral/unconditional-binding discipline is
-        /// unchanged.
+        /// calls) and z/s = value/100 + 1. 05.2-03 (R7): the fitted values apply at
+        /// FULL STRENGTH — direct profile reads, no scaling path exists — while the
+        /// neutral/unconditional-binding discipline is unchanged.
         /// </summary>
         internal static void ApplyPostLook(Material material, NamerStyleProfile profile, bool postActive)
         {
@@ -845,36 +841,35 @@ namespace GraffitiEntertainment.Namer.Editor
                 return;
             }
 
-            float toneMatch = profile != null ? profile.ToneMatch : 0f;
-            bool enable = postActive && profile != null && profile.HasPostFit && NamerPostLookScale.IsActive(toneMatch);
+            bool enable = postActive && profile != null && profile.HasPostFit;
             material.SetFloat(PostEnableId, enable ? 1f : 0f);
             material.SetVector(
                 PostLmsCoeffsId,
                 profile != null
                     ? (Vector4)UnityEngine.Rendering.ColorUtils.ColorBalanceToLMSCoeffs(
-                        NamerPostLookScale.Scale(profile.PostTemperature, toneMatch),
-                        NamerPostLookScale.Scale(profile.PostTint, toneMatch))
+                        profile.PostTemperature,
+                        profile.PostTint)
                     : Vector4.one);
             material.SetFloat(
                 PostExposureEvId,
-                profile != null ? NamerPostLookScale.Scale(profile.PostExposureEv, toneMatch) : 0f);
+                profile != null ? profile.PostExposureEv : 0f);
             material.SetFloat(
                 PostContrastZId,
-                profile != null ? NamerPostLookScale.Scale(profile.PostContrast, toneMatch) / 100f + 1f : 1f);
+                profile != null ? profile.PostContrast / 100f + 1f : 1f);
             material.SetFloat(
                 PostSaturationSId,
-                profile != null ? NamerPostLookScale.Scale(profile.PostSaturation, toneMatch) / 100f + 1f : 1f);
-            material.SetTexture(PostCurveTexId, enable ? GetOrCreatePostCurveTexture(profile, toneMatch) : null);
+                profile != null ? profile.PostSaturation / 100f + 1f : 1f);
+            material.SetTexture(PostCurveTexId, enable ? GetOrCreatePostCurveTexture(profile) : null);
         }
 
         /// <summary>
         /// One-slot static cache for the 128x1 curve strip: rebuilt only when the
-        /// profile's identity, its Tone Match, or any curve key changes (a re-fit
-        /// can land on the same fingerprint while editing keys, so the key dump —
-        /// not the fingerprint — is the cache key). Released in
+        /// profile's identity or any curve key changes (a re-fit can land on the
+        /// same fingerprint while editing keys, so the key dump — not the
+        /// fingerprint — is the cache key). Released in
         /// <see cref="OnDisable"/>.
         /// </summary>
-        private static Texture2D GetOrCreatePostCurveTexture(NamerStyleProfile profile, float toneMatch)
+        private static Texture2D GetOrCreatePostCurveTexture(NamerStyleProfile profile)
         {
             string key = ComputePostCurveCacheKey(profile);
             if (_postCurveTexture != null && _postCurveTextureKey == key)
@@ -887,14 +882,13 @@ namespace GraffitiEntertainment.Namer.Editor
                 DestroyImmediate(_postCurveTexture);
             }
 
-            _postCurveTexture = BuildPostCurveTexture(profile, toneMatch);
+            _postCurveTexture = BuildPostCurveTexture(profile);
             _postCurveTextureKey = key;
             return _postCurveTexture;
         }
 
         /// <summary>
-        /// Cache identity: the profile's instance ID plus its Tone Match (the
-        /// strip derives from the live scale) plus every key (time, value)
+        /// Cache identity: the profile's instance ID plus every key (time, value)
         /// of all four fitted curves, invariant-culture formatted. Null curves
         /// contribute nothing (the texture builder falls back to the diagonal).
         /// </summary>
@@ -902,7 +896,6 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             StringBuilder builder = new StringBuilder();
             builder.Append(profile.GetInstanceID());
-            builder.Append("|T:").Append(profile.ToneMatch.ToString("R", CultureInfo.InvariantCulture));
             AppendCurveKey(builder, "M", profile.PostMasterCurve);
             AppendCurveKey(builder, "R", profile.PostRedCurve);
             AppendCurveKey(builder, "G", profile.PostGreenCurve);
@@ -937,19 +930,18 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>
         /// Builds the 128x1 RGBA float strip the shader samples as the YRGB curve
         /// bank: .r/.g/.b are the fitted R/G/B curves, .a the master curve — the
-        /// same packing URP's LUT-builder curve baker uses. The four fitted
-        /// curves are scaled toward the identity diagonal by
-        /// NamerPostLookScale.ScaleCurve at the live Tone Match before
-        /// evaluation. Linear filter + clamp wrap so in-shader bilinear fetches
+        /// same packing URP's LUT-builder curve baker uses. 05.2-03 (R7): the four
+        /// fitted curves are evaluated DIRECTLY at full strength — no scaling
+        /// path exists. Linear filter + clamp wrap so in-shader bilinear fetches
         /// land between texels exactly like the LUT builder's LinearClamp
         /// sampling of its curve textures.
         /// </summary>
-        private static Texture2D BuildPostCurveTexture(NamerStyleProfile profile, float toneMatch)
+        private static Texture2D BuildPostCurveTexture(NamerStyleProfile profile)
         {
-            AnimationCurve masterCurve = NamerPostLookScale.ScaleCurve(profile.PostMasterCurve, toneMatch);
-            AnimationCurve redCurve = NamerPostLookScale.ScaleCurve(profile.PostRedCurve, toneMatch);
-            AnimationCurve greenCurve = NamerPostLookScale.ScaleCurve(profile.PostGreenCurve, toneMatch);
-            AnimationCurve blueCurve = NamerPostLookScale.ScaleCurve(profile.PostBlueCurve, toneMatch);
+            AnimationCurve masterCurve = profile.PostMasterCurve;
+            AnimationCurve redCurve = profile.PostRedCurve;
+            AnimationCurve greenCurve = profile.PostGreenCurve;
+            AnimationCurve blueCurve = profile.PostBlueCurve;
             Color[] pixels = new Color[kPostCurveTexelCount];
             for (int i = 0; i < kPostCurveTexelCount; i++)
             {
@@ -2774,35 +2766,24 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>
         /// 05-03 W4 lens composition: the stylization handed to
         /// <see cref="NamerComputePipeline.Process"/> for the PREVIEW — null unless a
-        /// profile is attached AND After View reads a stylized-side lens. 05.1 W5:
-        /// Stylized + Post composes the SAME stylization (the post grade rides the
-        /// preview material's uniform table, not the pipeline — nothing
-        /// post-processed touches the compute output) EXCEPT the palette luma pull
-        /// is zeroed when the profile carries a fit (260926-qlb) — the fitted post
-        /// grade owns tonality as the only tone mechanism. An unfitted profile at
-        /// the post lens keeps the pull (the W6 degrade falls back to plain
-        /// Stylized NAMER — no post exists to own tone). <paramref name="forcePostOwnsTone"/>
-        /// is the RunStylePostFit forced pass (a fit is being CREATED — the solver
-        /// fits the full tonal distance from a tone-neutral base regardless of lens
-        /// or existing HasPostFit state). Internal for the lens logic test (the
-        /// smallest honest seam).
+        /// profile is attached AND After View reads a stylized-side lens (the
+        /// RunStylePostFit forced pass pins the view to kAfterViewStylized via
+        /// <see cref="_forceStylizeForFit"/>). 05.1 W5: Stylized + Post composes the
+        /// SAME stylization (the post grade rides the preview material's uniform
+        /// table, not the pipeline — nothing post-processed touches the compute
+        /// output). 05.2-03 (STYL-11): the palette never pulls luma, so there is no
+        /// tone exclusivity to arbitrate — both stylized lenses compose the identical
+        /// context. Internal for the lens logic test (the smallest honest seam).
         /// </summary>
         internal static NamerStyleStylization ComposePreviewStylization(
-            NamerStyleProfile profile, int afterView, NamerSplitResult split,
-            bool forcePostOwnsTone = false)
+            NamerStyleProfile profile, int afterView, NamerSplitResult split)
         {
             if (profile == null || (afterView != kAfterViewStylized && afterView != kAfterViewPost))
             {
                 return null;
             }
 
-            // 260926-qlb: the base-side predicate is HasPostFit ALONE, deliberately
-            // NOT NamerPostLookScale.IsActive — HasPostFit + ToneMatch = 0 must read
-            // as tone entirely untouched (pull zeroed AND post scaled to nothing).
-            // Do not "fix" this to IsActive.
-            bool postOwnsTone = forcePostOwnsTone
-                || (afterView == kAfterViewPost && profile.HasPostFit);
-            return NamerStyleStylization.Create(profile, split, postOwnsTone);
+            return NamerStyleStylization.Create(profile, split);
         }
 
         /// <summary>

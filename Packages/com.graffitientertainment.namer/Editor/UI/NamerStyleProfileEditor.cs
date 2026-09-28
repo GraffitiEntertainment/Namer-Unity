@@ -11,7 +11,8 @@ namespace GraffitiEntertainment.Namer.Editor
     /// with 64x64 thumbnails (P2), the +/– footer (P3), the count-honesty line (P4), the
     /// explicit Extract Style Stats button (P5, STYL-02), the Statistics block with the
     /// em-dash placeholder and staleness warning (P6), the five debounced parameter
-    /// sliders (P7-P11) plus the Tone Match slider (quick 260924-hk7), and the Advanced
+    /// sliders (P7-P11) — 05.2-03 (STYL-11/R1) retired the palette luma knob: the
+    /// palette transfer never touches tonality — and the Advanced
     /// foldout holding Hue Mode and per-reference
     /// weights (P12-P14). Every value edit routes through Undo.RecordObject +
     /// EditorUtility.SetDirty + <see cref="NamerStyleProfile.Changed"/> (OQ-2); list-shape
@@ -567,17 +568,13 @@ namespace GraffitiEntertainment.Namer.Editor
                 new GUIContent(fitted ? "master + R/G/B, " + profile.PostMasterCurve.length + " keys" : kStatPlaceholder));
         }
 
-        /// <summary>P7-P11 + Tone Match: the six parameter sliders, each with its decision tooltip.</summary>
+        /// <summary>P7-P11: the five parameter sliders, each with its decision tooltip.</summary>
         private void DrawParameterSliders()
         {
             DrawSlider(
-                new GUIContent("Style Strength", "Palette styling strength: 0 keeps the original look, 1 fully ramps hue toward the reference palette and boosts vibrance (tonality is governed by Tone Match, quick 260924-hk7). " + DebounceSuffix),
+                new GUIContent("Style Strength", "Palette styling strength: 0 keeps the original look, 1 fully ramps hue toward the reference palette and boosts vibrance. Palette transfer never touches tonality — a Post Look asset owns tone. " + DebounceSuffix),
                 profile.StyleStrength, 0f, 1f, "Set Style Strength",
                 (edited, value) => edited.StyleStrength = value);
-            DrawSlider(
-                new GUIContent("Tone Match", "0 preserves the source's own tonality; higher values pull brightness toward the reference anchors' luma. " + DebounceSuffix),
-                profile.ToneMatch, 0f, 1f, "Set Tone Match",
-                (edited, value) => edited.ToneMatch = value);
             DrawSlider(
                 new GUIContent("Smoothing", "Island-gated bilateral smoothing strength: reduces photographic noise without crossing UV islands, seams, or decals (D-03, STYL-04). " + DebounceSuffix),
                 profile.Smoothing, 0f, 1f, "Set Smoothing",

@@ -17,7 +17,7 @@ The journey moves from the format contract outward. First we lock the NAMER pack
 - [x] **Phase 4: Vertex-Color Decomposition + Residual** - Fit low-frequency color into vertex colors with an adaptive residual texture (gap closure in progress; verification found 3 gaps) (completed 2026-09-01)
 - [x] **Phase 5: Stylization** - Apply reference-image-driven, hue-preserving stylization via NAMERStyleProfile (completed 2026-09-24)
 - [x] **Phase 5.1: Reference-fitted URP post-processing look** - Fit the reference look's global grade into a generated URP Volume profile after the baked palette mapping (INSERTED) (completed 2026-09-25)
-- [ ] **Phase 5.2: Standalone post-look asset** - Reference-fitted URP post look as its own ScriptableObject: Fit Look in the asset's main inspector, ToneMatch retired, own reference list, per-scene Volume profiles (INSERTED)
+- [x] **Phase 5.2: Standalone post-look asset** - Reference-fitted URP post look as its own ScriptableObject: Fit Look in the asset's main inspector, ToneMatch retired, own reference list, per-scene Volume profiles (INSERTED) (completed 2026-09-28)
 
 ## Phase Details
 
@@ -358,7 +358,7 @@ Plans:
 4. ToneMatch is retired end-to-end: no UI knob, no serialized field, no kernel luma-transfer path — palette transfer (StyleStrength hue/vibrance, HueReplaceMode, smoothing) is otherwise byte-identical, and the zero-dispatch identity gate semantics are preserved
 5. The "Stylized + Post" After View preview reads a selected `NamerPostLook` asset's parameters
 6. The fit math (`NamerStylePostFit`) is unchanged — it moves home (asset instead of profile), preserving its determinism contract and existing test pins
-**Plans:** 5/6 plans executed
+**Plans:** 6/6 plans complete
 
 Plans:
 
@@ -381,7 +381,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4)*
 
-- [ ] 05.2-06-PLAN.md — R4 profile slim-down + W12 + ApplyToProfile/writer-profile/migration deletions + full-suite live regression + consistency grep (STYL-10/11/12)
+- [x] 05.2-06-PLAN.md — R4 profile slim-down + W12 + ApplyToProfile/writer-profile/migration deletions + full-suite live regression + consistency grep (STYL-10/11/12)
 
 ## Progress
 

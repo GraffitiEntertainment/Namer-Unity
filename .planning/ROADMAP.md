@@ -17,6 +17,7 @@ The journey moves from the format contract outward. First we lock the NAMER pack
 - [x] **Phase 4: Vertex-Color Decomposition + Residual** - Fit low-frequency color into vertex colors with an adaptive residual texture (gap closure in progress; verification found 3 gaps) (completed 2026-09-01)
 - [x] **Phase 5: Stylization** - Apply reference-image-driven, hue-preserving stylization via NAMERStyleProfile (completed 2026-09-24)
 - [x] **Phase 5.1: Reference-fitted URP post-processing look** - Fit the reference look's global grade into a generated URP Volume profile after the baked palette mapping (INSERTED) (completed 2026-09-25)
+- [ ] **Phase 5.2: Standalone post-look asset** - Reference-fitted URP post look as its own ScriptableObject: Fit Look in the asset's main inspector, ToneMatch retired, own reference list, per-scene Volume profiles (INSERTED)
 
 ## Phase Details
 
@@ -342,6 +343,25 @@ Plans:
 **Wave 3** *(blocked on Waves 1-2)*
 
 - [x] 05.1-04-PLAN.md — Stylized + Post preview lens: NamerPostPreview.hlsl LDR-chain twin composed in ForwardLit, W5–W8 lens wiring + post uniform table, pane-level bloom approximation, lens pins + USER_GUIDE
+
+### Phase 05.2: Standalone post-look asset: reference-fitted URP post look as its own ScriptableObject — Fit Look moves out of the NAMER panel into the asset's main inspector (generate + tweak), ToneMatch retired (palette never transfers luma, post owns tone), post-look asset owns its own reference list, per-scene Volume profiles from duplicated/tweaked assets (INSERTED)
+
+**Goal**: Move the reference-fitted post look (Phase 5.1) off the style profile and out of the Processor window into a standalone `NamerPostLook` ScriptableObject: fit-from-live-render and hand-tweaking happen in the asset's own inspector, the asset owns its reference list, each asset generates its own URP Volume profile (per-scene looks via duplicate + tweak), and ToneMatch is retired so palette transfer never touches luma — the post look owns tonality unconditionally
+
+**Depends on**: Phase 5, Phase 5.1
+**Requirements**: STYL-10, STYL-11, STYL-12
+**Success Criteria** (what must be TRUE):
+
+1. A `NamerPostLook` asset can be created from the asset menu; its main inspector exposes the fitted post parameters for hand-tweaking, a Fit action fed by the Processor window's current stylized render (disabled with a status hint when no render exists), its own reference-image list, and Volume regeneration
+2. Fitted parameters and reference images live on the asset — `NamerStyleProfile` no longer carries the fitted-post block (5.1-era profiles have a migration path)
+3. Each asset generates/refreshes its own URP Volume profile under the GEN-01/GEN-03 generated-asset conventions; re-fit regenerates, and duplicating + tweaking an asset yields independent per-scene looks
+4. ToneMatch is retired end-to-end: no UI knob, no serialized field, no kernel luma-transfer path — palette transfer (StyleStrength hue/vibrance, HueReplaceMode, smoothing) is otherwise byte-identical, and the zero-dispatch identity gate semantics are preserved
+5. The "Stylized + Post" After View preview reads a selected `NamerPostLook` asset's parameters
+6. The fit math (`NamerStylePostFit`) is unchanged — it moves home (asset instead of profile), preserving its determinism contract and existing test pins
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.2 to break down)
 
 ## Progress
 

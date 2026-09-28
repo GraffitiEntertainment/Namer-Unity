@@ -8,24 +8,21 @@ namespace GraffitiEntertainment.Namer.Tests
 {
     /// <summary>
     /// 05.1 plan 03 lifecycle tests (STYL-08 tail) / 05.2 plan 04 (R3) / 05.2 plan 05:
-    /// the Fit Look prerequisite seam lives on the ASSET editor now —
+    /// the Fit Look prerequisite seam lives on the ASSET editor —
     /// <see cref="NamerPostLookEditor.FitButtonState"/> with its LOCKED three-reason
     /// chain (positive-weight reference → exemplar window with a loadable source →
-    /// stylized output) — and the load-time migration
-    /// (<see cref="NamerPostLookMigration.MigrateProfile"/>) pins the D-07 contract:
-    /// verbatim copy, never overwriting an existing target, source fit cleared so
-    /// the scan filter never re-selects. Also here: the
-    /// <see cref="NamerStylePostFit.ApplyToProfile"/> write (every fitted field lands
-    /// on the profile, the fit is fresh, and re-fitting replaces wholesale with no
-    /// accumulation) and the W8 attach-state honesty clauses of
-    /// <see cref="NamerEditorWindow.DescribeProfileState"/> (W12 is plan 06 — the fit
-    /// clause stays until then). Pure EditMode logic — no
-    /// GPU, no Process run (the Volume regen gate itself is covered by the plan-02
-    /// writer tests; the Process hook is compile-proven here and regression-covered by
-    /// the full suite). Asset-writing tests use a temp folder deleted in
-    /// <c>finally</c> so fingerprints are real GUID-based identity strings; the
-    /// EditorPrefs-backed Style Profile pref is snapshotted and restored in
-    /// <c>finally</c> so stylized-output pinning never leaks the selection.
+    /// stylized output). Pure EditMode logic — no GPU, no Process run (the Volume
+    /// regen gate itself is covered by the volume-writer tests; the fit write lands
+    /// on the asset via <see cref="NamerStylePostFit.ApplyToPostLook"/> — see
+    /// NamerStylePostFitTests / NamerPostLookTests — and regression is covered by the
+    /// full suite). 05.2-06 (STYL-10/STYL-11): the profile-write, load-time
+    /// migration, and W8 fit-clause fixtures retired with the deleted profile-side
+    /// surface — the migration window closed in 05.2 plan 05 and the post look now
+    /// exists exactly once, on the asset. Asset-writing tests use a temp folder
+    /// deleted in <c>finally</c> so fingerprints are real GUID-based identity
+    /// strings; the EditorPrefs-backed Style Profile pref is snapshotted and
+    /// restored in <c>finally</c> so stylized-output pinning never leaks the
+    /// selection.
     /// </summary>
     public class NamerStylePostFitLifecycleTests
     {
@@ -39,150 +36,6 @@ namespace GraffitiEntertainment.Namer.Tests
 
         private const string ReasonNoStylizedOutput =
             "Fit Look fits the Processor window's stylized render — attach a Style Profile in the Processor window first.";
-
-        [Test]
-        public void ApplyToProfile_WritesAllFields()
-        {
-            NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
-            profile.name = "LifecycleFitProfile";
-            EnsureTempFolder();
-            Texture2D reference = new Texture2D(4, 4, TextureFormat.RGBA32, false)
-            {
-                name = "LifecycleFitReference",
-            };
-            AssetDatabase.CreateAsset(reference, TempFolder + "/LifecycleFitReference.asset");
-            profile.References.Add(reference);
-            try
-            {
-                NamerStylePostFitParams fit = new NamerStylePostFitParams
-                {
-                    Temperature = 12.5f,
-                    Tint = -3.25f,
-                    PostExposureEv = 0.75f,
-                    Contrast = 8f,
-                    Saturation = -4.5f,
-                    BloomThreshold = 0.82f,
-                    MasterKeys = new[] { new Keyframe(0f, 0f), new Keyframe(0.5f, 0.55f), new Keyframe(1f, 1f) },
-                    RedKeys = new[] { new Keyframe(0f, 0.05f), new Keyframe(1f, 0.95f) },
-                    GreenKeys = new[] { new Keyframe(0f, 0f), new Keyframe(1f, 1f) },
-                    BlueKeys = new[] { new Keyframe(0f, 0.1f), new Keyframe(1f, 0.9f) },
-                    Fingerprint = profile.ComputeFingerprint(),
-                };
-
-                NamerStylePostFit.ApplyToProfile(profile, fit, "ExemplarA");
-
-                Assert.AreEqual(12.5f, profile.PostTemperature);
-                Assert.AreEqual(-3.25f, profile.PostTint);
-                Assert.AreEqual(0.75f, profile.PostExposureEv);
-                Assert.AreEqual(8f, profile.PostContrast);
-                Assert.AreEqual(-4.5f, profile.PostSaturation);
-                Assert.AreEqual(0.82f, profile.PostBloomThreshold);
-
-                Assert.AreEqual(3, profile.PostMasterCurve.length, "master curve keys land verbatim");
-                Assert.AreEqual(2, profile.PostRedCurve.length);
-                Assert.AreEqual(2, profile.PostGreenCurve.length);
-                Assert.AreEqual(2, profile.PostBlueCurve.length);
-                Assert.AreEqual(0.55f, profile.PostMasterCurve.keys[1].value, "curve VALUES copy, not just lengths");
-
-                Assert.AreEqual(fit.Fingerprint, profile.PostFitFingerprint, "the fit fingerprint is the refs identity");
-                Assert.AreEqual("ExemplarA", profile.PostFitExemplarName);
-                Assert.IsTrue(profile.HasPostFit, "a fit fingerprint makes the profile fitted");
-                Assert.IsFalse(profile.IsFitStale, "a fit against the current refs fingerprint is fresh");
-            }
-            finally
-            {
-                AssetDatabase.DeleteAsset(TempFolder);
-                UnityEngine.Object.DestroyImmediate(profile);
-            }
-        }
-
-        [Test]
-        public void ApplyToProfile_IsIdempotentOnRefit()
-        {
-            NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
-            try
-            {
-                NamerStylePostFitParams firstFit = new NamerStylePostFitParams
-                {
-                    Temperature = 12.5f,
-                    Tint = -3.25f,
-                    PostExposureEv = 0.75f,
-                    Contrast = 8f,
-                    Saturation = -4.5f,
-                    BloomThreshold = 0.82f,
-                    MasterKeys = new[] { new Keyframe(0f, 0f), new Keyframe(0.5f, 0.55f), new Keyframe(1f, 1f) },
-                    RedKeys = new[] { new Keyframe(0f, 0.05f), new Keyframe(1f, 0.95f) },
-                    GreenKeys = new[] { new Keyframe(0f, 0f), new Keyframe(1f, 1f) },
-                    BlueKeys = new[] { new Keyframe(0f, 0.1f), new Keyframe(1f, 0.9f) },
-                    Fingerprint = "first-fit-fingerprint",
-                };
-                NamerStylePostFit.ApplyToProfile(profile, firstFit, "FirstExemplar");
-
-                NamerStylePostFitParams secondFit = new NamerStylePostFitParams
-                {
-                    Temperature = -7.25f,
-                    Tint = 2.5f,
-                    PostExposureEv = -0.4f,
-                    Contrast = -5f,
-                    Saturation = 6.25f,
-                    BloomThreshold = 0.95f,
-                    MasterKeys = new[] { new Keyframe(0f, 0f), new Keyframe(1f, 1f) },
-                    RedKeys = new[] { new Keyframe(0f, 0f), new Keyframe(1f, 1f) },
-                    GreenKeys = new[] { new Keyframe(0f, 0f), new Keyframe(1f, 1f) },
-                    BlueKeys = new[] { new Keyframe(0f, 0f), new Keyframe(1f, 1f) },
-                    Fingerprint = "second-fit-fingerprint",
-                };
-                NamerStylePostFit.ApplyToProfile(profile, secondFit, "SecondExemplar");
-
-                Assert.AreEqual("SecondExemplar", profile.PostFitExemplarName, "the last fit's exemplar wins");
-                Assert.AreEqual(-7.25f, profile.PostTemperature, "the last fit's temperature wins");
-                Assert.AreEqual(2.5f, profile.PostTint);
-                Assert.AreEqual(-0.4f, profile.PostExposureEv);
-                Assert.AreEqual(-5f, profile.PostContrast);
-                Assert.AreEqual(6.25f, profile.PostSaturation);
-                Assert.AreEqual(0.95f, profile.PostBloomThreshold);
-                Assert.AreEqual(2, profile.PostMasterCurve.length,
-                    "re-fit REPLACES the curve wholesale — no key accumulation from the first fit");
-                Assert.AreEqual("second-fit-fingerprint", profile.PostFitFingerprint);
-                Assert.IsTrue(profile.HasPostFit);
-            }
-            finally
-            {
-                UnityEngine.Object.DestroyImmediate(profile);
-            }
-        }
-
-        [Test]
-        public void DescribeProfileState_ReportsFitTruth()
-        {
-            NamerStyleProfile unextracted = ScriptableObject.CreateInstance<NamerStyleProfile>();
-            unextracted.name = "ProfileU";
-            NamerStyleProfile unfitted = ScriptableObject.CreateInstance<NamerStyleProfile>();
-            unfitted.name = "ProfileN";
-            unfitted.ReferenceFingerprint = "hand-set-extract-fingerprint";
-            unfitted.Stats.ReferenceCount = 2;
-            NamerStyleProfile fitted = ScriptableObject.CreateInstance<NamerStyleProfile>();
-            fitted.name = "ProfileF";
-            fitted.ReferenceFingerprint = "hand-set-extract-fingerprint";
-            fitted.Stats.ReferenceCount = 2;
-            fitted.PostFitFingerprint = "hand-set-fit-fingerprint";
-            fitted.PostFitExemplarName = "ExemplarA";
-            try
-            {
-                Assert.AreEqual("ProfileU — not extracted",
-                    NamerEditorWindow.DescribeProfileState(unextracted));
-                Assert.AreEqual("ProfileN — palette extracted (0 anchors, 2 references), post look not fitted",
-                    NamerEditorWindow.DescribeProfileState(unfitted));
-                Assert.AreEqual("ProfileF — palette extracted (0 anchors, 2 references), post look fitted from ExemplarA",
-                    NamerEditorWindow.DescribeProfileState(fitted));
-            }
-            finally
-            {
-                UnityEngine.Object.DestroyImmediate(unextracted);
-                UnityEngine.Object.DestroyImmediate(unfitted);
-                UnityEngine.Object.DestroyImmediate(fitted);
-            }
-        }
 
         /// <summary>
         /// 05.2-05 prereq 1: an assigned reference whose only weight is 0 leaves
@@ -301,157 +154,6 @@ namespace GraffitiEntertainment.Namer.Tests
                 UnityEngine.Object.DestroyImmediate(window);
                 UnityEngine.Object.DestroyImmediate(token);
                 UnityEngine.Object.DestroyImmediate(look);
-            }
-        }
-
-        /// <summary>
-        /// D-07 M1 verbatim-copy law: a fitted temp profile migrates to a
-        /// "{name} Post.asset" NamerPostLook beside itself with every fitted field
-        /// equal (six floats, curve KEYS, fingerprint, exemplar), the reference lists
-        /// seeded with null slots and weights preserved, HasFit true, and the artist
-        /// knob defaulted (the profile never stored Bloom Intensity).
-        /// </summary>
-        [Test]
-        public void MigrateProfile_CopiesLookVerbatim()
-        {
-            EnsureTempFolder();
-            Texture2D refA = new Texture2D(4, 4, TextureFormat.RGBA32, false)
-            {
-                name = "MigrationRefA",
-            };
-            Texture2D refB = new Texture2D(4, 4, TextureFormat.RGBA32, false)
-            {
-                name = "MigrationRefB",
-            };
-            AssetDatabase.CreateAsset(refA, TempFolder + "/MigrationRefA.asset");
-            AssetDatabase.CreateAsset(refB, TempFolder + "/MigrationRefB.asset");
-            NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
-            profile.name = "MigrationSource";
-            profile.PostTemperature = 15.5f;
-            profile.PostTint = -8.25f;
-            profile.PostExposureEv = 1.25f;
-            profile.PostContrast = -12f;
-            profile.PostSaturation = 7.5f;
-            profile.PostBloomThreshold = 0.77f;
-            profile.PostMasterCurve = new AnimationCurve(new[]
-            {
-                new Keyframe(0f, 0.1f), new Keyframe(0.5f, 0.6f), new Keyframe(1f, 0.9f),
-            });
-            profile.PostRedCurve = new AnimationCurve(new[] { new Keyframe(0f, 0.05f), new Keyframe(1f, 0.95f) });
-            profile.PostGreenCurve = new AnimationCurve(new[] { new Keyframe(0f, 0f), new Keyframe(1f, 1f) });
-            profile.PostBlueCurve = new AnimationCurve(new[] { new Keyframe(0f, 0.1f), new Keyframe(1f, 0.9f) });
-            profile.PostFitFingerprint = "migration-test-fingerprint";
-            profile.PostFitExemplarName = "MigrationExemplar";
-            profile.References.Add(refA);
-            profile.References.Add(null);
-            profile.References.Add(refB);
-            profile.ReferenceWeights.Add(0.5f);
-            profile.ReferenceWeights.Add(1f);
-            profile.ReferenceWeights.Add(0.25f);
-            AssetDatabase.CreateAsset(profile, TempFolder + "/MigrationSource.asset");
-            try
-            {
-                Assert.IsTrue(NamerPostLookMigration.MigrateProfile(profile), "a fitted persisted profile converts");
-
-                string targetPath = TempFolder + "/MigrationSource Post.asset";
-                NamerPostLook look = AssetDatabase.LoadAssetAtPath<NamerPostLook>(targetPath);
-                Assert.IsNotNull(look, "the migrated asset exists beside the profile");
-
-                Assert.AreEqual(15.5f, look.PostTemperature);
-                Assert.AreEqual(-8.25f, look.PostTint);
-                Assert.AreEqual(1.25f, look.PostExposureEv);
-                Assert.AreEqual(-12f, look.PostContrast);
-                Assert.AreEqual(7.5f, look.PostSaturation);
-                Assert.AreEqual(0.77f, look.PostBloomThreshold);
-
-                Assert.AreEqual(3, look.PostMasterCurve.length, "curve keys copy verbatim");
-                Assert.AreEqual(0.6f, look.PostMasterCurve.keys[1].value, "curve VALUES copy, not just lengths");
-                Assert.AreEqual(2, look.PostRedCurve.length);
-                Assert.AreEqual(2, look.PostGreenCurve.length);
-                Assert.AreEqual(2, look.PostBlueCurve.length);
-
-                Assert.AreEqual("migration-test-fingerprint", look.PostFitFingerprint, "the fingerprint carries verbatim");
-                Assert.AreEqual("MigrationExemplar", look.PostFitExemplarName);
-                Assert.IsTrue(look.HasFit);
-
-                Assert.AreEqual(3, look.References.Count, "references seed with null slots preserved");
-                Assert.AreSame(refA, look.References[0], "reference instances carry over");
-                Assert.IsNull(look.References[1], "null slots are preserved");
-                Assert.AreSame(refB, look.References[2]);
-                Assert.AreEqual(0.5f, look.ReferenceWeights[0], "weights stay parallel");
-                Assert.AreEqual(1f, look.ReferenceWeights[1]);
-                Assert.AreEqual(0.25f, look.ReferenceWeights[2]);
-
-                Assert.AreEqual(NamerEditorConstants.DefaultBloomIntensity, look.PostBloomIntensity,
-                    "the artist knob moves home defaulted — the profile never stored it");
-            }
-            finally
-            {
-                AssetDatabase.DeleteAsset(TempFolder);
-            }
-        }
-
-        /// <summary>
-        /// D-07 GEN-03: an existing target at "{name} Post.asset" is NEVER
-        /// overwritten — MigrateProfile returns false, the source fit stays intact,
-        /// and the pre-existing target's parameters are untouched.
-        /// </summary>
-        [Test]
-        public void MigrateProfile_SkipsExistingTarget()
-        {
-            EnsureTempFolder();
-            NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
-            profile.name = "MigrationSkip";
-            profile.PostTemperature = 9.5f;
-            profile.PostFitFingerprint = "skip-fingerprint";
-            AssetDatabase.CreateAsset(profile, TempFolder + "/MigrationSkip.asset");
-            NamerPostLook existing = ScriptableObject.CreateInstance<NamerPostLook>();
-            existing.PostTemperature = 42f;
-            AssetDatabase.CreateAsset(existing, TempFolder + "/MigrationSkip Post.asset");
-            try
-            {
-                Assert.IsFalse(NamerPostLookMigration.MigrateProfile(profile), "an existing target skips the profile whole");
-                Assert.IsTrue(profile.HasPostFit, "the source fit stays intact on skip");
-                Assert.AreEqual(9.5f, profile.PostTemperature);
-                NamerPostLook atTarget = AssetDatabase.LoadAssetAtPath<NamerPostLook>(TempFolder + "/MigrationSkip Post.asset");
-                Assert.AreEqual(42f, atTarget.PostTemperature, "the pre-existing target is untouched");
-            }
-            finally
-            {
-                AssetDatabase.DeleteAsset(TempFolder);
-            }
-        }
-
-        /// <summary>
-        /// D-07 idempotence: after a successful migration the source's fit
-        /// fingerprint is cleared (HasPostFit false — the scan filter never
-        /// re-selects it) while the drained fitted fields stay on disk for plan 06's
-        /// deletion, and a second call is a no-op returning false.
-        /// </summary>
-        [Test]
-        public void MigrateProfile_ClearsSourceFitAndSecondCallIsNoOp()
-        {
-            EnsureTempFolder();
-            NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
-            profile.name = "MigrationClear";
-            profile.PostTemperature = 3.25f;
-            profile.PostFitFingerprint = "clear-fingerprint";
-            profile.PostFitExemplarName = "ClearExemplar";
-            AssetDatabase.CreateAsset(profile, TempFolder + "/MigrationClear.asset");
-            try
-            {
-                Assert.IsTrue(NamerPostLookMigration.MigrateProfile(profile));
-                Assert.IsFalse(profile.HasPostFit, "the fit has moved — the filter never re-selects");
-                Assert.AreEqual(string.Empty, profile.PostFitFingerprint);
-                Assert.AreEqual(3.25f, profile.PostTemperature,
-                    "only the fingerprint clears now — the drained fields stay until plan 06 deletes them");
-                Assert.IsNotNull(AssetDatabase.LoadAssetAtPath<NamerPostLook>(TempFolder + "/MigrationClear Post.asset"),
-                    "the migrated asset from the first call is on disk");
-                Assert.IsFalse(NamerPostLookMigration.MigrateProfile(profile), "a second call is a no-op");
-            }
-            finally
-            {
-                AssetDatabase.DeleteAsset(TempFolder);
             }
         }
 

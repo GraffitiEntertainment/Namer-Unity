@@ -1412,7 +1412,9 @@ namespace GraffitiEntertainment.Namer.Tests
 
                 // W3 + W8 locked copy (05/05.1 UI-SPEC): "" for nothing attached (the
                 // popup's disabled hint carries that state), the honesty line
-                // otherwise, now with the fit clause appended on extracted profiles.
+                // otherwise. 05.2-06 (W12): the fit clause is gone — the profile is
+                // palette-only since R4 and the post look lives on the NamerPostLook
+                // asset, not here.
                 Assert.AreEqual(string.Empty, NamerEditorWindow.DescribeProfileState(null));
 
                 Assert.AreEqual(
@@ -1420,15 +1422,7 @@ namespace GraffitiEntertainment.Namer.Tests
                     NamerEditorWindow.DescribeProfileState(notExtracted));
 
                 Assert.AreEqual(
-                    "Ink — palette extracted (2 anchors, 3 references), post look not fitted",
-                    NamerEditorWindow.DescribeProfileState(extracted));
-
-                // W8 fitted clause: a written fit fingerprint + exemplar name flip
-                // the appended clause to the fitted truth (D-03 names the exemplar).
-                extracted.PostFitFingerprint = "synthetic-fit-fingerprint";
-                extracted.PostFitExemplarName = "InkExemplar";
-                Assert.AreEqual(
-                    "Ink — palette extracted (2 anchors, 3 references), post look fitted from InkExemplar",
+                    "Ink — palette extracted (2 anchors, 3 references)",
                     NamerEditorWindow.DescribeProfileState(extracted));
             }
             finally

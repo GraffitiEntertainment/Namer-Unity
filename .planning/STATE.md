@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: completed
-stopped_at: Phase 5.1 UI-SPEC approved
-last_updated: "2026-09-25T02:18:06.417Z"
-last_activity: 2026-09-25 -- Phase 05.1 marked complete
+status: executing
+stopped_at: Phase 05.2 UI-SPEC approved
+last_updated: "2026-09-28T02:07:54.241Z"
+last_activity: 2026-09-28 -- Phase 05.2 planning complete
 progress:
-  total_phases: 10
+  total_phases: 11
   completed_phases: 10
-  total_plans: 44
+  total_plans: 50
   completed_plans: 44
-  percent: 100
+  percent: 88
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-25)
 
 **Core value:** A user can select a textured FBX in Unity, run `Process with NAMER`, and get a correctly rendering, source-compatible NAMER material without ever modifying the imported source assets or leaving the Unity Editor.
-**Current focus:** Phase 05.1 — reference-fitted-urp-post-processing-look-inserted
+**Current focus:** Phase 05.2 — standalone-post-look-asset
 
 ## Current Position
 
-Phase: 05.1 — COMPLETE
+Phase: 05.2 — NOT PLANNED
 Plan: 1 of 4
-Status: Phase 05.1 complete
-Last activity: 2026-09-26 -- Completed quick task 260926-mtv: albedo preview view-band centering + _UvRect clip window + Repaint-gated scroll-rect capture
+Status: Ready to execute
+Last activity: 2026-09-28 -- Phase 05.2 planning complete
 
 Progress: [██████████] 100%
 
@@ -105,6 +105,7 @@ Progress: [██████████] 100%
 - Phase 04.1 inserted after Phase 4: Baked-response roughness extraction + zero-residual one-texture mode — extract gloss baked into base as 6-bit roughness, refit vertex colors, D-13 auto-drop becomes primary path (see notes/roughness-extraction-one-texture-mode.md) (URGENT)
 - Phase 04.3 inserted after Phase 4: Adaptive residual resolution (lowest mip meeting ~99% coverage) + LOD-aware residual/no-texture tiers (URGENT)
 - Phase 04.3 edited: descoped to percentile-coverage residual resolution; LOD texture tiers deferred pending Ultimate LOD System decision
+- Phase 05.2 inserted after Phase 5: Standalone post-look asset: reference-fitted URP post look as its own ScriptableObject — Fit Look moves out of the NAMER panel into the asset's main inspector (generate + tweak), ToneMatch retired (palette never transfers luma, post owns tone), post-look asset owns its own reference list, per-scene Volume profiles from duplicated/tweaked assets
 
 ### Decisions
 
@@ -254,6 +255,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-24T22:33:07.045Z
-Stopped at: Phase 5.1 UI-SPEC approved
-Resume file: .planning/phases/05.1-reference-fitted-urp-post-processing-look-inserted/05.1-UI-SPEC.md
+Last session: 2026-09-28T00:58:42.910Z
+Stopped at: Phase 05.2 UI-SPEC approved
+Resume file: .planning/phases/05.2-standalone-post-look-asset-reference-fitted-urp-post-look-as/05.2-UI-SPEC.md

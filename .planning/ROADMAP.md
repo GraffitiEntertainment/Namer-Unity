@@ -358,7 +358,7 @@ Plans:
 4. ToneMatch is retired end-to-end: no UI knob, no serialized field, no kernel luma-transfer path — palette transfer (StyleStrength hue/vibrance, HueReplaceMode, smoothing) is otherwise byte-identical, and the zero-dispatch identity gate semantics are preserved
 5. The "Stylized + Post" After View preview reads a selected `NamerPostLook` asset's parameters
 6. The fit math (`NamerStylePostFit`) is unchanged — it moves home (asset instead of profile), preserving its determinism contract and existing test pins
-**Plans:** 4/6 plans executed
+**Plans:** 5/6 plans executed
 
 Plans:
 
@@ -377,7 +377,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3)*
 
-- [ ] 05.2-05-PLAN.md — NamerPostLookEditor A1-A14 (references + Fit Look prereq chain + editable params + Volume block) + D-07 load-time migration M1-M3 + lifecycle tests + USER_GUIDE (STYL-10/12)
+- [x] 05.2-05-PLAN.md — NamerPostLookEditor A1-A14 (references + Fit Look prereq chain + editable params + Volume block) + D-07 load-time migration M1-M3 + lifecycle tests + USER_GUIDE (STYL-10/12)
 
 **Wave 5** *(blocked on Wave 4)*
 

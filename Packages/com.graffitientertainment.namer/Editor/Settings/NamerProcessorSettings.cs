@@ -40,6 +40,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private const string FoldoutStylizationKey = "NamerProcessor.FoldoutStylization";
         private const string AfterViewKey = "NamerProcessor.AfterView";
         private const string StyleProfileGuidKey = "NamerProcessor.StyleProfileGuid";
+        private const string PostLookGuidKey = "NamerProcessor.PostLookGuid";
 
         /// <summary>Generated-output root folder (D-01 default: Assets/NAMERGenerated/).</summary>
         public string Destination
@@ -237,6 +238,14 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             get { return EditorPrefs.GetString(StyleProfileGuidKey, string.Empty); }
             set { EditorPrefs.SetString(StyleProfileGuidKey, value); }
+        }
+
+        /// <summary>Selected <see cref="NamerPostLook"/> asset GUID (05.2 W9; empty =
+        /// no post look — the Stylized + Post lens falls back to plain Stylized).</summary>
+        public string PostLookGuid
+        {
+            get { return EditorPrefs.GetString(PostLookGuidKey, string.Empty); }
+            set { EditorPrefs.SetString(PostLookGuidKey, value); }
         }
     }
 }

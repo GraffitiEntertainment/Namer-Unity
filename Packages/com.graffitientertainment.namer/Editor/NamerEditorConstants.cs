@@ -127,5 +127,17 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>Maximum fitted bloom threshold (05.1; URP Bloom threshold is Min 0 — upper bound for sanitized hand edits).</summary>
         public const float MaxBloomThreshold = 10f;
+
+        /// <summary>Maximum bloom intensity on the post-look asset's artist knob (05.2 UI-SPEC A9; upper bound for the slider and ClampToCaps).</summary>
+        public const float MaxBloomIntensity = 10f;
+
+        /// <summary>Tooltip suffix appended to every editable fitted-parameter tooltip on the post-look asset (05.2 UI-SPEC Copywriting — the debounce suffix is NOT used there).</summary>
+        public const string PostLookParameterTooltipSuffix = "Writes to this asset (undoable); Regenerate Volume to update the scene look.";
+
+        /// <summary>Default asset name for a newly created post look (05.2 UI-SPEC Copywriting; menu + create-and-select dialog).</summary>
+        public const string PostLookDefaultAssetName = "New Namer Post Look";
+
+        /// <summary>Title of the Processor window's create-and-select post-look dialog (05.2 UI-SPEC Copywriting).</summary>
+        public const string PostLookCreateDialogTitle = "Create NAMER Post Look";
     }
 }

@@ -1679,6 +1679,42 @@ namespace GraffitiEntertainment.Namer.Editor
                 ? _generatedMaterial
                 : _namerMaterial;
 
+            // W14 gap fix: reserve the pane slots with a zero-MARGIN copy of the
+            // toggle style (lazily created — EditorStyles needs the editor skin).
+            // Measurement is untouched (same content, same padding), so the pane
+            // columns stay aligned with the toggle row; only the style-owned
+            // vertical margin stacking is removed, landing the strip one platform
+            // row spacing under its toggle row.
+            if (_channelPaneSlotStyle == null)
+            {
+                _channelPaneSlotStyle = new GUIStyle(EditorStyles.toggle) { margin = new RectOffset(0, 0, 0, 0) };
+            }
+
+            // W14 clip: the panes are CONTENT-space rects inside the scroll view and
+            // Graphics.DrawTexture does not clip to it (the mtv 260926-mtv defect
+            // class) — derive the visible band from the captured widget rect
+            // exactly like DrawAlbedoPreview. GetLastRect() here (immediately after
+            // the toggle row's EndHorizontal) reads the toggle row's rect during
+            // Repaint and is degenerate during Layout, so capture Repaint-gated and
+            // reuse the field on other event types.
+            if (Event.current.type == EventType.Repaint)
+            {
+                _channelToggleRowRect = GUILayoutUtility.GetLastRect();
+            }
+
+            float vbarW = GUI.skin.verticalScrollbar.fixedWidth;
+            float hbarH = GUI.skin.horizontalScrollbar.fixedHeight;
+            // The vertical scrollbar is always shown in this window (the foldout
+            // content is always far taller than the view), so the subtract is
+            // unconditional by design.
+            float viewWidth = _scrollViewRect.width - vbarW;
+            // Exact overflow detector: the toggle row above pins at exactly
+            // viewWidth when the content fits and stretches past it on overflow
+            // (the probe-verified expand-row law); 0.5f is a float-noise epsilon.
+            bool hbarShown = _channelToggleRowRect.width > viewWidth + 0.5f;
+            float viewHeight = _scrollViewRect.height - (hbarShown ? hbarH : 0f);
+            Rect visibleBand = new Rect(_scrollPosition.x, _scrollPosition.y, viewWidth, viewHeight);
+
             EditorGUILayout.BeginHorizontal();
             for (int i = 0; i < ChannelPaneLabels.Length; i++)
             {
@@ -1687,13 +1723,13 @@ namespace GraffitiEntertainment.Namer.Editor
                     // No pane for the Vertex Color column; reserve its slot so the
                     // Normal pane still lands under the Normal toggle.
                     GUILayoutUtility.GetRect(new GUIContent(ShaderInputToggleLabels[5]),
-                        EditorStyles.toggle, GUILayout.Height(ChannelPaneSize));
+                        _channelPaneSlotStyle, GUILayout.Height(ChannelPaneSize));
                 }
 
                 int toggleIndex = i < 5 ? i : 6;
                 Rect slot = GUILayoutUtility.GetRect(
                     new GUIContent(ShaderInputToggleLabels[toggleIndex]),
-                    EditorStyles.toggle, GUILayout.Height(ChannelPaneSize));
+                    _channelPaneSlotStyle, GUILayout.Height(ChannelPaneSize));
                 Rect paneRect = new Rect(slot.x, slot.y,
                     Mathf.Min(ChannelPaneSize, slot.width), ChannelPaneSize);
 
@@ -1704,6 +1740,17 @@ namespace GraffitiEntertainment.Namer.Editor
                     continue;
                 }
 
+                // W14 clip: intersect the pane with the visible band; a zero-area
+                // clip (fully scrolled out / first frame before the Repaint
+                // capture) skips the draw, label, cursor, AND hit-test — label,
+                // cursor, and click rects all derive from the SAME clipped rect,
+                // so no invisible interactive surface extends under the bar.
+                Rect clippedRect = ComputeChannelPaneClip(paneRect, visibleBand, out Rect uvRect);
+                if (clippedRect.width <= 0f || clippedRect.height <= 0f)
+                {
+                    continue;
+                }
+
                 EnsureChannelViewMaterial();
                 _channelViewMaterial.SetTexture(SurfaceMapId, afterMaterial.GetTexture(SurfaceMapId));
                 _channelViewMaterial.SetTexture(BaseResidualMapId, afterMaterial.GetTexture(BaseResidualMapId));
@@ -1711,17 +1758,24 @@ namespace GraffitiEntertainment.Namer.Editor
                 _channelViewMaterial.SetFloat(ChannelId, i);
                 if (Event.current.type == EventType.Repaint)
                 {
-                    Graphics.DrawTexture(paneRect, Texture2D.whiteTexture, _channelViewMaterial);
+                    // Per-draw _UvRect window (mtv): a partially clipped pane
+                    // samples only its visible region — the clipped-off portion is
+                    // removed, never stretched into the trimmed rect. Set
+                    // immediately before the draw and reset to identity immediately
+                    // after so later consumers of the shared material are unaffected.
+                    _channelViewMaterial.SetVector(UvRectId, new Vector4(uvRect.x, uvRect.y, uvRect.width, uvRect.height));
+                    Graphics.DrawTexture(clippedRect, Texture2D.whiteTexture, _channelViewMaterial);
+                    _channelViewMaterial.SetVector(UvRectId, new Vector4(0f, 0f, 1f, 1f));
                 }
 
-                GUI.Label(paneRect, new GUIContent(string.Empty,
+                GUI.Label(clippedRect, new GUIContent(string.Empty,
                     ChannelPaneLabels[i] + " — source: " + (i == 0 ? "_BaseResidualMap" : "_SurfaceMap")));
-                EditorGUIUtility.AddCursorRect(paneRect, MouseCursor.Zoom);
+                EditorGUIUtility.AddCursorRect(clippedRect, MouseCursor.Zoom);
 
-                if (Event.current.type == EventType.MouseDown && paneRect.Contains(Event.current.mousePosition))
+                if (Event.current.type == EventType.MouseDown && clippedRect.Contains(Event.current.mousePosition))
                 {
                     Event.current.Use();
-                    ShowChannelPopup(paneRect, i, afterMaterial);
+                    ShowChannelPopup(clippedRect, i, afterMaterial);
                 }
             }
 

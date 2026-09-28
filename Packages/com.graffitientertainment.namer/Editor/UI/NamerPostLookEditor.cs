@@ -9,9 +9,10 @@ namespace GraffitiEntertainment.Namer.Editor
     /// <summary>
     /// Custom inspector for <see cref="NamerPostLook"/> implementing the 05.2 UI-SPEC
     /// section A component inventory exactly (STYL-10/STYL-12, D-03): the reference-list
-    /// header + slot rows + +/– footer + count-honesty line (A1-A4, D-05 — no per-row
-    /// thumbnail per the 2026-09-27 user amendment: the ObjectField's built-in preview
-    /// is the only image), the Advanced foldout with per-reference fit weights (A5),
+    /// header + slot rows + +/– footer + count-honesty line (A1-A4, D-05 — slot rows
+    /// render material-inspector style — label left, square thumbnail ObjectField
+    /// right — per the 2026-09-28 user amendment, superseding the 2026-09-27
+    /// no-thumbnail call), the Advanced foldout with per-reference fit weights (A5),
     /// the fit-source status line + explicit Fit Look button + error boxes (A6-A8,
     /// D-04: one render pipeline, never debounced, never automatic), the EDITABLE
     /// fitted parameters (A9-A10 — the 5.1 read-only rows re-homed as the artist
@@ -32,6 +33,9 @@ namespace GraffitiEntertainment.Namer.Editor
         private bool isFitting;
         private string fitError;
         private string volumeError;
+
+        /// <summary>Reference-slot thumbnail size in pixels (material-inspector row style; 2026-09-28 user amendment).</summary>
+        private const int kThumbnailSize = 64;
 
         /// <summary>
         /// Pure prerequisite state of the A7 Fit Look button (05.2 plan 05; the
@@ -104,9 +108,9 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>
         /// A2 slot rows, or the empty-state block when the list has no slots. Each
-        /// row is a 1-based "Reference Texture #N" label + ObjectField whose built-in
-        /// thumbnail preview is the only image on the row (2026-09-27 user amendment —
-        /// the 5.1 profile-editor thumbnail element is deliberately not mirrored).
+        /// row is a 1-based "Reference Texture #N" label on the left plus a square
+        /// kThumbnailSize ObjectField whose built-in preview is the thumbnail,
+        /// material-inspector style, per the 2026-09-28 user amendment.
         /// </summary>
         private void DrawReferenceSlots()
         {
@@ -124,8 +128,12 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 Texture2D current = look.References[i];
                 int slot = i + 1;
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Label(new GUIContent("Reference Texture #" + slot));
                 Texture2D assigned = (Texture2D)EditorGUILayout.ObjectField(
-                    new GUIContent("Reference Texture #" + slot), current, typeof(Texture2D), false);
+                    current, typeof(Texture2D), false,
+                    GUILayout.Width(kThumbnailSize), GUILayout.Height(kThumbnailSize));
+                EditorGUILayout.EndHorizontal();
                 if (assigned == current)
                 {
                     continue;

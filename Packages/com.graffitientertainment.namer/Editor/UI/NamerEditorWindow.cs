@@ -1496,10 +1496,13 @@ namespace GraffitiEntertainment.Namer.Editor
                     "After View",
                     "Preview-only lens: NAMER computes the un-stylized packed result; Stylized NAMER "
                         + "applies the attached Style Profile (palette transfer, smoothing, and the "
-                        + "profile's bake-side controls). Stylized + Post additionally applies the "
-                        + "profile's fitted post look (white balance, exposure, contrast, saturation, "
-                        + "curves, bloom) scaled by Tone Match in-shader, matching the generated scene Volume so the look "
-                        + "is approved without play mode. Process always bakes with the attached profile "
+                        + "profile's bake-side controls). Stylized NAMER applies palette transfer, which "
+                        + "never touches tonality — the source keeps its own luma (expected to look "
+                        + "flatter than a graded render). Stylized + Post additionally applies the "
+                        + "selected Post Look asset's fitted post look (white balance, exposure, "
+                        + "contrast, saturation, curves, bloom) in-shader, matching the asset's "
+                        + "generated scene Volume so the look is approved without play mode. Process "
+                        + "always bakes with the attached profile "
                         + "regardless of this popup. Recomputes the preview in memory "
                         + NamerEditorConstants.DebounceSeconds + " s after the change — nothing is written to disk."),
                 _afterView,
@@ -1521,18 +1524,70 @@ namespace GraffitiEntertainment.Namer.Editor
 
             EditorGUI.EndDisabledGroup();
 
-            // 05.1 W6: the post lens needs a FITTED post look; without one the pane
-            // silently degrades to plain Stylized NAMER (ApplyPostLook's enable
-            // gate), so say so. Only meaningful with an attached profile — the
-            // null-profile case already shows the attach hint above.
-            if (_afterView == kAfterViewPost && lensProfile != null && !lensProfile.HasPostFit)
+            // 05.2 W10 (D-08; W6 donor): the post lens is honest about its degrade —
+            // without a selected NamerPostLook asset, or without a fit on the
+            // selected one, the pane falls back to plain Stylized NAMER
+            // (ApplyPostLook's enable gate), so say so. Only meaningful with an
+            // attached profile — the null-profile case already shows the attach
+            // hint above.
+            if (_afterView == kAfterViewPost && lensProfile != null)
             {
-                EditorGUILayout.HelpBox(
-                    "No fitted post look on " + lensProfile.name
-                        + " — showing Stylized NAMER. Press Fit Look in the profile's "
-                        + "Fitted Post Look section.",
-                    MessageType.Info);
+                NamerPostLook lensLook = NamerProcessor.ResolvePostLook(_settings);
+                if (lensLook == null)
+                {
+                    EditorGUILayout.HelpBox(
+                        "No Post Look asset selected — showing Stylized NAMER. Assign or create a NamerPostLook below.",
+                        MessageType.Info);
+                }
+                else if (!lensLook.HasFit)
+                {
+                    EditorGUILayout.HelpBox(
+                        "No fit on " + lensLook.name + " — showing Stylized NAMER. Press Fit Look in the asset's inspector.",
+                        MessageType.Info);
+                }
             }
+
+            // 05.2 W9: the Post Look selection row directly under the After View
+            // popup — the lens it feeds. GUID persistence mirrors the Style Profile
+            // row (survives domain reload); assign/create/detach all route through
+            // the debounced preview recompute. The post look is per-scene: the
+            // fit/tweak surface is the asset's own inspector (plan 05), never here.
+            EditorGUI.BeginDisabledGroup(_busy);
+            NamerPostLook selectedLook = NamerProcessor.ResolvePostLook(_settings);
+            EditorGUILayout.BeginHorizontal();
+            NamerPostLook newLook = (NamerPostLook)EditorGUILayout.ObjectField(
+                new GUIContent(
+                    "Post Look",
+                    "Selects the NamerPostLook asset whose fitted parameters drive the Stylized + Post "
+                        + "After View (white balance, exposure, contrast, saturation, curves, bloom), "
+                        + "previewed in-shader to match the asset's generated scene Volume. The post "
+                        + "look is per-scene — create, fit, and tweak it on the asset itself. Recomputes "
+                        + "the preview in memory "
+                        + NamerEditorConstants.DebounceSeconds + " s after the change — nothing is written to disk."),
+                selectedLook,
+                typeof(NamerPostLook),
+                false);
+            // Change-check BEFORE the Create button (Style Profile donor): a
+            // same-frame create sets `selectedLook` itself, and a stale
+            // `newLook != selectedLook` read would otherwise wipe the GUID the
+            // button just wrote.
+            if (newLook != selectedLook)
+            {
+                _settings.PostLookGuid = newLook != null
+                    ? AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(newLook))
+                    : string.Empty;
+                selectedLook = newLook;
+                _afterPanelState.MarkTweaking();
+                MarkDirty();
+            }
+
+            if (GUILayout.Button("Create Post Look…", EditorStyles.miniButton, GUILayout.Width(kCreateProfileButtonWidth)))
+            {
+                CreateAndAttachPostLook(ref selectedLook);
+            }
+
+            EditorGUILayout.EndHorizontal();
+            EditorGUI.EndDisabledGroup();
 
             if (_previewMesh == null || inspection == null)
             {
@@ -2313,6 +2368,36 @@ namespace GraffitiEntertainment.Namer.Editor
             _settings.StyleProfileGuid = AssetDatabase.AssetPathToGUID(path);
             attached = profile;
             EditorGUIUtility.PingObject(profile);
+            _afterPanelState.MarkTweaking();
+            MarkDirty();
+        }
+
+        /// <summary>
+        /// Creates a new <see cref="NamerPostLook"/> asset at a user-chosen in-project
+        /// path and selects it for the Stylized + Post view in one step (the same GUID
+        /// mechanism as the Post Look ObjectField handler — 05.2 W9, the Style Profile
+        /// create donor). A cancelled save dialog is a no-op. The created asset is
+        /// pinged in the Project window and the preview is marked dirty so the post
+        /// lens reacts immediately.
+        /// </summary>
+        private void CreateAndAttachPostLook(ref NamerPostLook selected)
+        {
+            string path = EditorUtility.SaveFilePanelInProject(
+                NamerEditorConstants.PostLookCreateDialogTitle,
+                NamerEditorConstants.PostLookDefaultAssetName,
+                "asset",
+                "Create a new NAMER Post Look asset and select it for the Stylized + Post view.");
+            if (string.IsNullOrEmpty(path))
+            {
+                return;
+            }
+
+            NamerPostLook look = ScriptableObject.CreateInstance<NamerPostLook>();
+            AssetDatabase.CreateAsset(look, path);
+            AssetDatabase.SaveAssets();
+            _settings.PostLookGuid = AssetDatabase.AssetPathToGUID(path);
+            selected = look;
+            EditorGUIUtility.PingObject(look);
             _afterPanelState.MarkTweaking();
             MarkDirty();
         }

@@ -135,17 +135,18 @@ All four sliders respond live without re-Process: each change recomputes the pre
 
 ## Stylization
 
-Stylization is driven by a `NamerStyleProfile` asset: you assign reference images, press **Extract Style Stats**, and the extracted palette drives the stylized After View and the Process output. The profile inspector — embedded in the Processor window or the Project window — is where the style is reviewed and fitted.
+Stylization is driven by a `NamerStyleProfile` asset: you assign reference images, press **Extract Style Stats**, and the extracted palette drives the stylized After View and the Process output. The profile inspector — embedded in the Processor window or the Project window — is where the palette is reviewed and tuned. The reference-fitted post-processing look lives on its own asset (below).
 
-### Fit Look
+### Post Look
 
-The **Fitted Post Look** block fits the references' global post-processing grade — white balance, post-exposure, contrast, saturation, master + R/G/B color curves, and a bloom threshold — onto the profile, then regenerates it into a URP Volume asset (`{ProfileName}_Post.asset` under the configured destination). The workflow:
+The post look — the references' global post-processing grade: white balance, post-exposure, contrast, saturation, master + R/G/B color curves, and a bloom threshold, plus a bloom intensity knob — lives on a **`NamerPostLook`** asset, created via `Assets/Create/NAMER/Post Look`. The asset inspector is the whole workflow:
 
-1. Press **Extract Style Stats** and review the statistics (Fit Look stays disabled with a reason until statistics exist).
-2. Load the object to use as the fit exemplar into the Processor window (`Tools > NAMER > Processor`).
-3. Press **Fit Look**. The fitted parameters fill the block's read-only rows (`—` before the first fit; Tonemapping is fixed ACES and Bloom Intensity is defaulted — tweak it on the Volume), and the regenerated Volume asset is pinged.
+1. Assign graded reference screenshots to the asset's reference rows (up to 10; at least one must have a weight above 0 — weights live under its **Advanced** foldout).
+2. Load the object to use as the fit exemplar into the Processor window (`Tools > NAMER > Processor`) and attach a Style Profile there — Fit Look stays disabled with a reason until both exist.
+3. Press **Fit Look**. The fitted parameters fill the asset's editable rows (Tonemapping is fixed ACES; Bloom Intensity is defaulted — tweak it on the asset), and the generated URP Volume asset is pinged.
+4. Tweak the fitted parameters and curves directly on the asset, then press **Regenerate Volume** to update the scene look (parameter edits mark the Volume stale with a warning until regenerated).
 
-Fit Look is an explicit action — it never runs on the slider debounce and never automatically on Process. The profile is the source of truth: one fit per profile, and refitting with another object replaces the scene look; hand-tweaks made on the generated Volume are lost on re-fit. When the reference images change after a fit, the block warns `References changed since the fit — Fit Look again to refresh the post look.` Whenever Process runs with a fitted profile attached, the companion Volume is regenerated so the generated bundle never desyncs from profile truth.
+Fit Look is an explicit action — it never runs on the slider debounce and never automatically on Process. The asset is the source of truth: one fit per asset, and refitting with another object replaces the look; hand-tweaks made on the generated Volume are lost on re-fit or regeneration. When the reference images change after a fit, the inspector warns `References changed since the fit — Fit Look again to refresh the post look.` For a per-scene look, duplicate the asset and tweak the copy — each asset owns its own Volume. Select the asset in the Processor window's **Post Look** row to drive its `Stylized + Post` preview (below).
 
 ### After View
 
@@ -153,9 +154,9 @@ The **After View** popup (top of Preview/Debug) is a preview-only lens over the 
 
 - `NAMER` — the un-stylized packed result, byte-identical to the no-profile baseline.
 - `Stylized NAMER` — applies the attached Style Profile (palette transfer, smoothing, and the profile's bake-side controls). The albedo preview below shows its own caption and the `View Stylized` flipper disappears.
-- `Stylized + Post` — the stylized base plus the profile's fitted post look (white balance, exposure, contrast, saturation, curves, bloom) applied in-shader to the After pane, matching the generated scene Volume so the look can be approved without play mode. The albedo preview caption reads `Stylized albedo — the fitted post look renders in the 3D After pane only` because the grade belongs to the lit 3D view, not the flat albedo strip.
+- `Stylized + Post` — the stylized base plus the selected Post Look asset's fitted post look (white balance, exposure, contrast, saturation, curves, bloom) applied in-shader to the After pane, matching the asset's generated scene Volume so the look can be approved without play mode. The albedo preview caption reads `Stylized albedo — the fitted post look renders in the 3D After pane only` because the grade belongs to the lit 3D view, not the flat albedo strip.
 
-Without a fitted post look, `Stylized + Post` falls back to plain `Stylized NAMER` and an info box explains: `No fitted post look on {ProfileName} — showing Stylized NAMER. Press Fit Look in the profile's Fitted Post Look section.` Switching entries recomputes the preview in memory 0.3 s after the change; nothing is written to disk.
+Without a selected, fitted Post Look asset, `Stylized + Post` falls back to plain `Stylized NAMER` and an info box explains which: `No Post Look asset selected — showing Stylized NAMER. Assign or create a NamerPostLook below.` or `No fit on {AssetName} — showing Stylized NAMER. Press Fit Look in the asset's inspector.` Switching entries recomputes the preview in memory 0.3 s after the change; nothing is written to disk.
 
 ## Decomposition
 

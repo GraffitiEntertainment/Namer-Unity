@@ -437,7 +437,19 @@ namespace GraffitiEntertainment.Namer.Editor
                 // own companion Volume from the overwrite opt-in, so re-fits succeed
                 // on default settings as the CTA tooltip promises.
                 NamerProcessorSettings settings = new NamerProcessorSettings();
-                NamerStyleVolumeWriter.PreflightWriteGate(look, settings);
+                // WR-01 (05.2): the gate still runs BEFORE Undo.RecordObject so a
+                // refusal leaves the asset untouched, but inside its own catch so
+                // it surfaces as the locked "Fit failed: …" HelpBox (A8) instead
+                // of an uncaught GUI exception.
+                try
+                {
+                    NamerStyleVolumeWriter.PreflightWriteGate(look, settings);
+                }
+                catch (Exception exception)
+                {
+                    fitError = "Fit failed: " + exception.Message;
+                    return;
+                }
 
                 Undo.RecordObject(look, "Fit Look");
                 NamerStylePostFit.ApplyToPostLook(look, result.Params, result.ExemplarName);

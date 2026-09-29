@@ -31,7 +31,7 @@
     "pattern_mapper": true,
     "ai_integration_phase": true,
     "tdd_mode": false,
-    "code_review_command": "claude -p --model glm-5.2",
+    "code_review_command": "codex --profile deep-review exec -s read-only",
     "ui_review": true,
     "_auto_chain_active": false,
     "use_worktrees": false

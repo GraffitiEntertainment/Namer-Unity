@@ -87,15 +87,10 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 Texture2D current = profile.References[i];
                 EditorGUILayout.BeginHorizontal();
-                Rect thumbnail = GUILayoutUtility.GetRect(kThumbnailSize, kThumbnailSize);
-                Texture image = EditorGUIUtility.ObjectContent(current, typeof(Texture2D)).image;
-                if (image != null)
-                {
-                    GUI.DrawTexture(thumbnail, image, ScaleMode.ScaleToFit);
-                }
-
+                GUILayout.Label(new GUIContent("Reference Texture #" + (i + 1)));
                 Texture2D assigned = (Texture2D)EditorGUILayout.ObjectField(
-                    GUIContent.none, current, typeof(Texture2D), false);
+                    current, typeof(Texture2D), false,
+                    GUILayout.Width(kThumbnailSize), GUILayout.Height(kThumbnailSize));
                 EditorGUILayout.EndHorizontal();
                 if (assigned == current)
                 {

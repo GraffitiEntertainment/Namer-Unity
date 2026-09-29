@@ -40,7 +40,6 @@ namespace GraffitiEntertainment.Namer.Tests
         private const float kWhiteBalanceRecoveryTolerance = 0.5f; // plan-specified recovery bar
         private const double kEstimatorTolerance = 1e-3;      // hand-formula agreement on constructed populations
         private const double kBloomExactTolerance = 1e-5;     // bin-center arithmetic is exact to float rounding
-        private const float kUniformGain = 1.6f;              // reference post-tonemap gain for the EV pin
 
         /// <summary>
         /// Fixture sRGB encode of one linear channel (inverse of NamerStyleExtractor.SrgbToLinear).
@@ -114,12 +113,16 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         /// <summary>
-        /// Source == reference distribution is the neutral fixed point: WB, EV,
-        /// contrast, saturation all ~0 and the master curve is the identity on keys
-        /// inside the fixture's tonemapped support (keys above the support ceiling
-        /// pin to the ceiling — correct estimator behavior, so the assertion is
-        /// restricted to keys with time &lt;= 0.5, which the dense fixture populates).
-        /// WB tolerance derivation at kNeutralWhiteBalanceTolerance.
+        /// Source == reference distribution is the neutral fixed point: WB, contrast,
+        /// saturation all ~0 and the master curve is the identity on keys inside the
+        /// fixture's tonemapped support (keys above the support ceiling pin to the
+        /// ceiling — correct estimator behavior, so the assertion is restricted to keys
+        /// with time &lt;= 0.5, which the dense fixture populates). EV is NOT ~0 here:
+        /// the full-range 256-level ramp is maximally wide, so tonemap-of-mean vs
+        /// mean-of-tonemap curvature is FIRST-order (with the twin's constants,
+        /// tonemap-of-mean(0.5) = 0.3673 vs mean-of-tonemap = 0.3364, identity EV
+        /// ~ -0.13) — asserted against the twin-mirrored bisection instead of a
+        /// constant. WB tolerance derivation at kNeutralWhiteBalanceTolerance.
         /// </summary>
         [Test]
         public void Fit_IdenticalPair_IsNeutral()
@@ -135,14 +138,15 @@ namespace GraffitiEntertainment.Namer.Tests
                 reference[i] = EncodePixel(new float3(tonemapped, tonemapped, tonemapped));
             }
 
-            NamerStylePostFitParams fitted = NamerStylePostFit.Fit(
-                NamerStylePostFit.AccumulateSource(source),
-                AccumulateReferencePixels(reference, 1f),
-                "identical");
+            NamerStylePostStats sourceStats = NamerStylePostFit.AccumulateSource(source);
+            NamerStylePostStats referenceStats = AccumulateReferencePixels(reference, 1f);
+            NamerStylePostFitParams fitted = NamerStylePostFit.Fit(sourceStats, referenceStats, "identical");
 
             Assert.AreEqual(0.0, (double)fitted.Temperature, kNeutralWhiteBalanceTolerance);
             Assert.AreEqual(0.0, (double)fitted.Tint, kNeutralWhiteBalanceTolerance);
-            Assert.AreEqual(0.0, (double)fitted.PostExposureEv, kNeutralKnobTolerance);
+            double expectedRampEv = SolveExposureMirrorForTest(sourceStats, referenceStats);
+            Assert.AreEqual(expectedRampEv, (double)fitted.PostExposureEv, kEstimatorTolerance,
+                "ramp identity EV must equal the twin-mirrored bisection (first-order curvature, ~ -0.13)");
             Assert.AreEqual(0.0, (double)fitted.Contrast, kNeutralKnobTolerance);
             Assert.AreEqual(0.0, (double)fitted.Saturation, kNeutralKnobTolerance);
             for (int i = 0; i < fitted.MasterKeys.Length; i++)
@@ -157,30 +161,149 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         /// <summary>
-        /// Reference = uniform post-tonemap gain k of the source: expected EV is
-        /// log2(k) = log2(1.6) = 0.67807191 (the estimator is the plain post-tonemap
-        /// linear mean-luma ratio, planner decision 1 — this pins the wiring).
+        /// Root-cause regression for the pre-tonemap EV model (260927-jkb): the fixture
+        /// is built BACKWARD from a known EV so the model inverts exactly — for a
+        /// uniform single-tone population, mean-of-tonemap equals tonemap-of-mean, so
+        /// the construction is exact up to the sRGB encode/decode round trip and the
+        /// bisection's float convergence. Raw gray 0.8 * 2^0.75 ~ 1.35 sits well into
+        /// the ACES shoulder where compression — the retired dark-bias defect — is
+        /// strong. Three assertions: (1) the bisection recovers kKnownPreTonemapEv;
+        /// (2) root cause — the retired post-tonemap log2 luma ratio, computed in-test
+        /// from the exact post-tonemap means the old code consumed, undershoots the
+        /// known EV by strictly more than kDarkBiasMargin; (3) model closure — the
+        /// fitted EV reproduces the reference mean luma through the CPU twin.
         /// </summary>
         [Test]
-        public void Fit_UniformGain_MatchesPostTonemapMeanRatio()
+        public void Fit_Exposure_SolvesPreTonemapThroughTonemap()
+        {
+            const int kFixturePixelCount = 64;
+            const float kKnownPreTonemapEv = 0.75f;
+            const float kDarkBiasMargin = 0.01f; // shoulder compression makes the old post-tonemap ratio undershoot EV by strictly more than this — the reported dark bias
+            float3 rawGray = new float3(0.8f, 0.8f, 0.8f);
+            float3 tonemappedKnown = NamerStylePostMath.TonemapLdr(rawGray * exp2(kKnownPreTonemapEv));
+            Color[] source = new Color[kFixturePixelCount];
+            Color[] reference = new Color[kFixturePixelCount];
+            for (int i = 0; i < kFixturePixelCount; i++)
+            {
+                source[i] = GrayPixel(rawGray.x);
+                reference[i] = EncodePixel(tonemappedKnown);
+            }
+
+            NamerStylePostFitParams fitted = NamerStylePostFit.Fit(
+                NamerStylePostFit.AccumulateSource(source),
+                AccumulateReferencePixels(reference, 1f),
+                "exposure");
+
+            Assert.AreEqual((double)kKnownPreTonemapEv, (double)fitted.PostExposureEv, kEstimatorTolerance,
+                "the bisection must invert the known pre-tonemap EV exactly on a single-tone pair");
+
+            // Root cause: the retired v1 formula consumed the exact post-tonemap means —
+            // the source's mean of tonemapped 0.8s and the reference triple's luma — and
+            // its log2 ratio undershoots the true pre-tonemap EV by the shoulder compression.
+            float srcLumaMean = NamerStylePostMath.Luma709(NamerStylePostMath.TonemapLdr(rawGray));
+            float refLumaMean = NamerStylePostMath.Luma709(tonemappedKnown);
+            float oldEv = log2(refLumaMean / srcLumaMean);
+            Assert.Greater((double)kKnownPreTonemapEv, (double)(oldEv + kDarkBiasMargin),
+                "the old post-tonemap ratio must undershoot EV by strictly more than kDarkBiasMargin (the reported dark bias)");
+
+            // Model closure: the fitted EV pushed through the pre-tonemap model lands on
+            // the reference mean luma (pin the wiring, never re-implement the math).
+            float closure = NamerStylePostMath.Luma709(
+                NamerStylePostMath.TonemapLdr(rawGray * exp2(fitted.PostExposureEv)));
+            Assert.AreEqual((double)refLumaMean, (double)closure, kEstimatorTolerance,
+                "the fitted EV must reproduce the reference mean luma through the tonemapped model");
+        }
+
+        /// <summary>
+        /// Single-tone identity pair: source 64 pixels of raw gray 0.4, reference the
+        /// sRGB encoding of the tonemapped source. Mean-of-tonemap equals
+        /// tonemap-of-mean on a single tone, so the identity EV is exactly 0 up to the
+        /// sRGB round trip and bisection float noise (kNeutralKnobTolerance). The
+        /// full-range ramp fixture is deliberately NOT reused here because its Jensen
+        /// gap moves EV off exact zero.
+        /// </summary>
+        [Test]
+        public void Fit_Exposure_SingleToneIdentity_IsExactZero()
+        {
+            const int kFixturePixelCount = 64;
+            float3 rawGray = new float3(0.4f, 0.4f, 0.4f);
+            float3 tonemapped = NamerStylePostMath.TonemapLdr(rawGray);
+            Color[] source = new Color[kFixturePixelCount];
+            Color[] reference = new Color[kFixturePixelCount];
+            for (int i = 0; i < kFixturePixelCount; i++)
+            {
+                source[i] = GrayPixel(rawGray.x);
+                reference[i] = EncodePixel(tonemapped);
+            }
+
+            NamerStylePostFitParams fitted = NamerStylePostFit.Fit(
+                NamerStylePostFit.AccumulateSource(source),
+                AccumulateReferencePixels(reference, 1f),
+                "exposure-identity");
+
+            Assert.AreEqual(0.0, (double)fitted.PostExposureEv, kNeutralKnobTolerance);
+        }
+
+        /// <summary>
+        /// Positive rail: the fit's ACES asymptote is 1/kFitC = 1/0.983729 ~ 1.0165 &gt; 1.0
+        /// (NamerStylePostMath RRTAndODTFit constants, URP RRTAndODT rational fit) and
+        /// TonemapLdr's final saturate clamps the overshoot to exactly 1.0 (first
+        /// reached at raw input ~25.7), so a white target IS reachable for bright
+        /// sources — the fixture must make it unreachable INSIDE the bracket instead:
+        /// the dim raw gray 0.01 source caps the model input at 0.01 * 2^10 = 10.24,
+        /// whose tonemapped luma ~0.97 &lt; 1.0 (0.01's post-tonemap mean luma
+        /// ~9.2e-4 clears the 1e-6 near-black guard, so Fit does not throw). The
+        /// bisection converges to exactly +10 — the float-collapsed bracket endpoint;
+        /// asserted with NO tolerance (rail semantics preserved).
+        /// </summary>
+        [Test]
+        public void Fit_Exposure_UnreachableBrightTarget_RailsAtPlusTen()
         {
             const int kFixturePixelCount = 64;
             Color[] source = new Color[kFixturePixelCount];
             Color[] reference = new Color[kFixturePixelCount];
             for (int i = 0; i < kFixturePixelCount; i++)
             {
-                float tonemapped = NamerStylePostMath.TonemapLdr(new float3(0.5f, 0.5f, 0.5f)).x;
-                source[i] = GrayPixel(0.5f);
-                float scaled = tonemapped * kUniformGain;
-                reference[i] = EncodePixel(new float3(scaled, scaled, scaled));
+                source[i] = GrayPixel(0.01f);
+                reference[i] = new Color(1f, 1f, 1f, 1f); // raw sRGB white decodes to exactly 1.0
             }
 
             NamerStylePostFitParams fitted = NamerStylePostFit.Fit(
                 NamerStylePostFit.AccumulateSource(source),
                 AccumulateReferencePixels(reference, 1f),
-                "gain");
+                "exposure-rail+");
 
-            Assert.AreEqual(0.67807191, (double)fitted.PostExposureEv, kEstimatorTolerance);
+            Assert.AreEqual(10.0, (double)fitted.PostExposureEv);
+        }
+
+        /// <summary>
+        /// Negative rail: HDR gray 30f source (AccumulateSource's documented HDR
+        /// contract — TonemapLdr(30) is saturate-clamped to 1.0, so the near-black
+        /// source guard passes) onto black reference pixels at weight 1 each (WR-01
+        /// refuses only zero WEIGHT; MeanLuma 0 floors to kStatEpsilon via the existing
+        /// max, and Luma709(TonemapLdr(30/1024)) ~ 7e-3 &gt;&gt; 1e-6 stays above it at
+        /// ev = -10), so the target is unreachable below and the bisection converges to
+        /// exactly -10 — the float-collapsed bracket endpoint; asserted with NO
+        /// tolerance.
+        /// </summary>
+        [Test]
+        public void Fit_Exposure_UnreachableDarkTarget_RailsAtMinusTen()
+        {
+            const int kFixturePixelCount = 64;
+            Color[] source = new Color[kFixturePixelCount];
+            Color[] reference = new Color[kFixturePixelCount];
+            for (int i = 0; i < kFixturePixelCount; i++)
+            {
+                source[i] = GrayPixel(30f);
+                reference[i] = new Color(0f, 0f, 0f, 1f);
+            }
+
+            NamerStylePostFitParams fitted = NamerStylePostFit.Fit(
+                NamerStylePostFit.AccumulateSource(source),
+                AccumulateReferencePixels(reference, 1f),
+                "exposure-rail-");
+
+            Assert.AreEqual(-10.0, (double)fitted.PostExposureEv);
         }
 
         /// <summary>
@@ -262,11 +385,13 @@ namespace GraffitiEntertainment.Namer.Tests
 
         /// <summary>
         /// Extreme cast stays hue-preserving: the solver recovers ~(-100, +100) but the
-        /// fitted knobs clamp to exactly (-15, +15) = ±kFittedWhiteBalanceLimit. No
-        /// tolerance — the clamp yields exactly ±15 as floats.
+        /// fitted knobs clamp to exactly (-50, +50) = ±kFittedWhiteBalanceLimit after
+        /// the widened hue-preservation bound (260927-jkb: 15 -> 50 — strong warm/cool
+        /// while keeping the von Kries hue rotation bounded; the solve still searches
+        /// the full ±100). No tolerance — the clamp yields exactly ±50 as floats.
         /// </summary>
         [Test]
-        public void Fit_WhiteBalance_ExtremeCast_ClampsToFifteen()
+        public void Fit_WhiteBalance_ExtremeCast_ClampsToFifty()
         {
             const int kFixturePixelCount = 64;
             Color[] source = new Color[kFixturePixelCount];
@@ -286,8 +411,8 @@ namespace GraffitiEntertainment.Namer.Tests
                 AccumulateReferencePixels(reference, 1f),
                 "wb-clamp");
 
-            Assert.AreEqual(-15.0, (double)fitted.Temperature);
-            Assert.AreEqual(15.0, (double)fitted.Tint);
+            Assert.AreEqual(-50.0, (double)fitted.Temperature);
+            Assert.AreEqual(50.0, (double)fitted.Tint);
         }
 
         /// <summary>
@@ -521,6 +646,43 @@ namespace GraffitiEntertainment.Namer.Tests
                 Assert.AreEqual(expected[i].time, actual[i].time, $"key {i} time");
                 Assert.AreEqual(expected[i].value, actual[i].value, $"key {i} value");
             }
+        }
+
+        /// <summary>
+        /// Test-local mirror of the production exposure bisection (260927-jkb,
+        /// NamerStylePostFit.Fit step (2)): derives the identity-pair EV expectation
+        /// from the CPU twin so the pin is wiring, not a magic constant (house rule).
+        /// Verbatim same bracket, per-channel epsilon floor, sign rule, fixed iteration
+        /// count and float ops, consuming the SAME accumulated stats — a verbatim
+        /// mirror is float-identical, and the kEstimatorTolerance on the assertion
+        /// absorbs trivial ordering drift.
+        /// </summary>
+        private static float SolveExposureMirrorForTest(NamerStylePostStats source, NamerStylePostStats reference)
+        {
+            const int kMirrorBisectionIterations = 48;
+            const float kMirrorBracketEv = 10f;
+            const float kMirrorStatEpsilon = 1e-6f;
+            float3 srcRawMean = max(
+                new float3(source.RawMeanLinear.r, source.RawMeanLinear.g, source.RawMeanLinear.b),
+                kMirrorStatEpsilon);
+            float refLumaMean = max(reference.MeanLuma, kMirrorStatEpsilon);
+            float evLow = -kMirrorBracketEv;
+            float evHigh = kMirrorBracketEv;
+            for (int i = 0; i < kMirrorBisectionIterations; i++)
+            {
+                float evMid = (evLow + evHigh) * 0.5f;
+                float predicted = NamerStylePostMath.Luma709(NamerStylePostMath.TonemapLdr(srcRawMean * exp2(evMid)));
+                if (predicted < refLumaMean)
+                {
+                    evLow = evMid;
+                }
+                else
+                {
+                    evHigh = evMid;
+                }
+            }
+
+            return clamp((evLow + evHigh) * 0.5f, -kMirrorBracketEv, kMirrorBracketEv);
         }
 
         /// <summary>

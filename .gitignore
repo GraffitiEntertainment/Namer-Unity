@@ -23,3 +23,7 @@ riderModule.iml
 
 # Rider per-user solution settings
 *.DotSettings.user
+
+# 3rd party plugins
+Assets/Plugins
+Assets/Plugins.meta

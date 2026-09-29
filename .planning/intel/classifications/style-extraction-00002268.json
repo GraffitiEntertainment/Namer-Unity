@@ -1,0 +1,24 @@
+{
+  "source_path": "/Users/Shared/SSDevelopment/Development/Namer-Unity/.planning/research/style_extraction.md",
+  "type": "DOC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "style_extraction.md",
+  "summary": "Research note proposing to restructure Phase 5 style extraction around reference scene decomposition: recovering base colors from graded screenshots before OKLab palette mapping and Unity Volume validation.",
+  "scope": [
+    "style extraction",
+    "reference scene decomposition",
+    "post-process estimation (exposure, white balance, tone curve, LUT)",
+    "base color recovery",
+    "image decomposition (albedo, shading, specular, emissive, bloom)",
+    "OKLab palette model",
+    "hue/role-aware vertex-color palette remapping",
+    "NAMERStyleProfile asset",
+    "Unity Volume/LUT forward validation",
+    "Phase 5 roadmap restructuring (plans 05-01 through 05-04)"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": ""
+}

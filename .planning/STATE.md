@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: completed
-stopped_at: Completed 05.2-04-PLAN.md
-last_updated: "2026-09-28T22:40:11.129Z"
-last_activity: 2026-09-28
+status: in_progress
+stopped_at: Phase 05.3 defined via doc ingest — awaiting plan-phase
+last_updated: "2026-09-29T00:00:00.000Z"
+last_activity: 2026-09-29
 progress:
-  total_phases: 11
+  total_phases: 12
   completed_phases: 11
   total_plans: 50
   completed_plans: 50
-  percent: 100
+  percent: 92
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-25)
 
 **Core value:** A user can select a textured FBX in Unity, run `Process with NAMER`, and get a correctly rendering, source-compatible NAMER material without ever modifying the imported source assets or leaving the Unity Editor.
-**Current focus:** Milestone complete
+**Current focus:** Phase 05.3 — reference scene decomposition + merged style asset (planning)
 
 ## Current Position
 
-Phase: 05.2
+Phase: 05.3
 Plan: Not started
-Status: Milestone complete
-Last activity: 2026-09-28
+Status: Planning (defined via doc ingest 2026-09-29)
+Last activity: 2026-09-29
 
-Progress: [██████████] 98%
+Progress: [█████████▏] 92%
 
 ## Performance Metrics
 

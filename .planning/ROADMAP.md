@@ -383,6 +383,23 @@ Plans:
 
 - [x] 05.2-06-PLAN.md — R4 profile slim-down + W12 + ApplyToProfile/writer-profile/migration deletions + full-suite live regression + consistency grep (STYL-10/11/12)
 
+### Phase 05.3: Reference scene decomposition + merged style asset (INSERTED)
+
+**Goal**: Add the model-free inverse front end to the shipped stylization pipeline: from ONE shared weighted reference list, estimate the reference grade (exposure, white balance, tone curve, contrast, saturation, bloom), classify pixels and recover de-graded base colors, then derive BOTH style blocks from that same list — the HSL palette (from the de-graded base colors) and the fitted post block (from the grade estimate) — living on ONE merged style asset. Palette application remaps the albedo texture to its closest palette entry BEFORE the vertex-color build (upholds 05-CONTEXT D-01). Creation is menu-only; the NAMER Processor panel only loads/uses the asset via an object field.
+
+**Depends on**: Phase 5, Phase 5.1, Phase 5.2
+**Requirements**: STYL-13, STYL-14, STYL-15, STYL-16, STYL-17
+**Success Criteria** (what must be TRUE):
+
+1. From the shared reference list, a model-free decomposition estimates the reference grade and classifies pixels (albedo / shading / specular / emissive / bloom) with a confidence mask, recovering de-graded base colors — consuming/inverting `NamerStylePostFit` math, not introducing a second estimator family
+2. Contaminated pixels (bloom, specular, emissive, deep shadow, fog, transparency) carry zero/low palette weight via the confidence mask
+3. The HSL palette is derived from the de-graded base colors by default, with the raw-pixel mode behind a switch; de-grade and the fitted post look are inverse-consistent (grade applied once, never doubled)
+4. ONE merged style asset owns ONE weighted reference list and ONE editor producing both blocks; creation is menu-only (`Assets/Create/NAMER/…`) and the Processor panel exposes only a load/use object field (no Create button); migration merges existing `NamerStyleProfile` + `NamerPostLook` assets losing neither extracted palettes nor fitted looks; per-asset Volume generation carries over (05.2 D-06)
+5. Closest-match albedo remap runs pre-fit (before the VC build); hue identity (STYL-03) and no-luma-transfer (STYL-11) remain pinned; post-fit VC remapping is a recorded rejected alternative
+6. Forward validation renders NAMER VCs + surface + recovered Volume against the reference style; visible residual mismatch is the unlock condition for the 3D-LUT fallback (locked 5.1 decision)
+
+**Plans:** 0/0 plans — none yet (created by plan-phase)
+
 ## Progress
 
 **Execution Order:**
@@ -396,5 +413,9 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 03.1. AO Extraction (INSERTED) | 3/3 | Complete | 2026-08-31 |
 | 4. Vertex-Color Decomposition + Residual | 5/5 | Complete   | 2026-09-01 |
 | 04.1. Roughness Extraction + One-Texture (INSERTED) | 7/7 | Complete   | 2026-09-16 |
+| 04.2. Gouraud projection one-texture (INSERTED) | 10/10 | Complete | 2026-09-17 |
+| 04.3. Adaptive residual coverage (INSERTED) | 3/3 | Complete | 2026-09-22 |
 | 5. Stylization | 3/3 | Complete   | 2026-09-24 |
 | 5.1. Reference-fitted URP Post-processing Look (INSERTED) | 4/4 | Complete   | 2026-09-25 |
+| 05.2. Standalone post-look asset (INSERTED) | 6/6 | Complete | 2026-09-28 |
+| 05.3. Reference decomposition + merged style asset (INSERTED) | 0/0 | Not Started | — |

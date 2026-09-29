@@ -44,7 +44,9 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>
         /// CR-01 gate discipline carried over verbatim from the profile path (05.2 D-06):
         /// the write gates <see cref="Write(NamerPostLook, NamerProcessorSettings)"/>
-        /// will run, evaluated WITHOUT writing — destination confinement
+        /// will run, evaluated WITHOUT writing — destination-folder existence
+        /// (ensure-not-create: the gate refuses, it never creates the folder),
+        /// destination confinement
         /// (<see cref="AssetGenerator.ValidateComposedPath"/>) plus the
         /// NamerGenerated-label check with the own-companion exemption
         /// (<see cref="AssetGenerator.EnsureWritableTarget"/>, overwriteGenerated:
@@ -53,6 +55,24 @@ namespace GraffitiEntertainment.Namer.Editor
         /// </summary>
         internal static void PreflightWriteGate(NamerPostLook look, NamerProcessorSettings settings)
         {
+            // CR-01 (05.2): a destination folder that legitimately does not exist
+            // (renamed/deleted folder, restored prefs on a new machine) makes
+            // CreateAsset log "Couldn't create asset file" WITHOUT throwing —
+            // refuse up front instead, before any fit mutates the asset.
+            // "Assets"/empty always exist, mirroring NamerProcessor.EnsureFolder's
+            // own special case (IsValidFolder answers only for sub-folders).
+            string destinationFolder = settings.Destination.TrimEnd('/', '\\');
+            bool folderMissing = !string.IsNullOrEmpty(destinationFolder)
+                && destinationFolder != "Assets"
+                && !AssetDatabase.IsValidFolder(destinationFolder);
+            if (folderMissing)
+            {
+                throw new InvalidOperationException(
+                    "Refusing to generate the post Volume: the destination folder '"
+                    + destinationFolder + "' does not exist. "
+                    + "Create it (or run Process once) and retry.");
+            }
+
             string path = ComposeVolumePath(look, settings);
             AssetGenerator.ValidateComposedPath(path, settings.Destination);
             AssetGenerator.EnsureWritableTarget(path, overwriteGenerated: true);
@@ -64,9 +84,12 @@ namespace GraffitiEntertainment.Namer.Editor
         /// of truth — this writer derives the Volume from it; hand-tweaks made on the
         /// generated Volume are accepted-lost on re-fit/regeneration). Throws
         /// <see cref="InvalidOperationException"/> when the asset is null or unfitted,
-        /// when the composed path escapes the configured destination, or when a
-        /// non-generated asset sits at the target path (carried-over profile-path
-        /// gates: <see cref="PreflightWriteGate(NamerPostLook, NamerProcessorSettings)"/>).
+        /// when the destination folder does not exist, when the composed path escapes
+        /// the configured destination, or when a non-generated asset sits at the
+        /// target path (carried-over profile-path gates:
+        /// <see cref="PreflightWriteGate(NamerPostLook, NamerProcessorSettings)"/>),
+        /// and when the generated VolumeProfile fails to persist (verified BEFORE
+        /// the A13 fingerprint stamp so staleness never reports a phantom write).
         /// Every parameter applies at FULL STRENGTH — the UNSCALED
         /// <c>look.Post*</c> fields (05.2 R7: post owns tone unconditionally, no
         /// tone-match scaling anywhere) — and bloom intensity reads the asset's own
@@ -149,6 +172,17 @@ namespace GraffitiEntertainment.Namer.Editor
             AssetDatabase.SaveAssetIfDirty(volume);
 
             VolumeProfile loaded = AssetDatabase.LoadAssetAtPath<VolumeProfile>(path);
+            // CR-01 (05.2): CreateAsset logs "Couldn't create asset file" WITHOUT
+            // throwing when the write fails, so verify the asset actually
+            // persisted BEFORE stamping — otherwise the fingerprint below would
+            // mark a Volume that does not exist as fresh, suppressing the A13
+            // staleness warning while the callers' locked HelpBox stays silent.
+            if (loaded == null)
+            {
+                throw new InvalidOperationException(
+                    "Failed to generate the post Volume at '" + path
+                    + "'. Ensure the destination folder exists (run Process once) and retry.");
+            }
             AssetGenerator.Stamp(loaded);
 
             // A13 seam: record the params fingerprint at write time so IsVolumeStale

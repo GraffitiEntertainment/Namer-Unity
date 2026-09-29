@@ -12,7 +12,7 @@ There are three entry points:
 
 The context-menu commands are the fast path: select an asset, right-click, and the NAMER material is generated without opening the window. The result line reads `[NAMER] Process with NAMER: N material(s) generated`, with any warnings logged below it. Use the full window when you want the preview, the debug views, or non-default settings.
 
-You can select a GameObject (in the scene or a prefab), a prefab, a model (for example an FBX), a single material, or a folder — every inspectable PBR material found in the selection is processed. The window tracks the current Editor selection automatically, so whatever you select appears in the Source section and the preview.
+You can select a GameObject (in the scene or a prefab), a prefab, a model (for example an FBX), a single material, or a folder — every inspectable PBR material found in the selection is processed. The Source is an explicit pick: assign it in the Processor window's Source field. The pick is persistent — it does not follow the current Editor selection, so clicking other items or empty space leaves it unchanged.
 
 ## Contents
 

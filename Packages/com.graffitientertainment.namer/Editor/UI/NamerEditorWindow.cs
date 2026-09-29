@@ -46,6 +46,14 @@ namespace GraffitiEntertainment.Namer.Editor
         };
 
         /// <summary>
+        /// Pane channel (<see cref="ChannelPaneLabels"/> index) for each
+        /// <see cref="ShaderInputToggleLabels"/> column, or -1 when that input has
+        /// no packed-texture view — Vertex Color decodes from mesh vertex data, so
+        /// there is no texture to render for its column.
+        /// </summary>
+        private static readonly int[] ChannelPaneForToggle = { 0, 1, 2, 3, 4, -1, 5 };
+
+        /// <summary>
         /// Decomposition statistics row labels (D-09 / VCOL-04), relabeled in 04.2 to
         /// removed-detail semantics: Coverage / Avg Error / Max Error / Removed-detail max
         /// error / Residual. Read via reflection by <c>NamerUIControlsTests</c>; the Residual
@@ -129,8 +137,15 @@ namespace GraffitiEntertainment.Namer.Editor
         private static readonly int WireColorId = Shader.PropertyToID("_WireColor");
         private static readonly Color TriangleWireframeColor = new Color(0f, 1f, 1f, 1f);
 
-        private const float ChannelPaneSize = 48f;
+        // Debug-strip grid (2026-09-28 user amendment): ONE row of seven
+        // kDebugColumnWidth columns separated by kDebugColumnGap — checkbox+label
+        // above (own automatic rect, pinned to the column width), channel pane
+        // centered below. DrawStepSwitches pins its five gate toggles to the same
+        // grid (columns 0-4).
+        private const float ChannelPaneSize = 64f;
         private const float ChannelPopupSize = 384f;
+        private const float kDebugColumnWidth = 96f;
+        private const float kDebugColumnGap = 10f;
         private const float kCoverageSliderStep = 0.005f;
         private const float kAlbedoPreviewHeight = 512f;
         private const float kCreateProfileButtonWidth = 110f;
@@ -1350,7 +1365,9 @@ namespace GraffitiEntertainment.Namer.Editor
         /// the existing <see cref="NamerProcessorSettings.DecompositionEnabled"/> setting;
         /// Roughness/AO hard-gate the matching pipeline stages independently of their strength
         /// sliders; Metallic/Emissive gate the shader only (no pipeline stage exists). Each
-        /// toggle writes through to its persisted setting.
+        /// toggle writes through to its persisted setting. The five toggles pin to the debug
+        /// strip's <see cref="kDebugColumnWidth"/> + <see cref="kDebugColumnGap"/> grid
+        /// (columns 0-4, own automatic rects).
         /// </summary>
         private void DrawStepSwitches()
         {
@@ -1362,7 +1379,8 @@ namespace GraffitiEntertainment.Namer.Editor
             bool newDecomposition = EditorGUILayout.ToggleLeft(
                 new GUIContent("VC + Residual",
                     "Hard stage gate for vertex-color decomposition + residual (reuses DecompositionEnabled). Independent of the strength sliders."),
-                _decompositionEnabled);
+                _decompositionEnabled,
+                GUILayout.Width(kDebugColumnWidth));
             if (newDecomposition != _decompositionEnabled)
             {
                 _decompositionEnabled = newDecomposition;
@@ -1371,10 +1389,13 @@ namespace GraffitiEntertainment.Namer.Editor
                 MarkDirty();
             }
 
+            GUILayout.Space(kDebugColumnGap);
+
             bool newRoughness = EditorGUILayout.ToggleLeft(
                 new GUIContent("Roughness",
                     "Hard stage gate for roughness extraction — skips extraction without touching the strength slider."),
-                _roughnessStageEnabled);
+                _roughnessStageEnabled,
+                GUILayout.Width(kDebugColumnWidth));
             if (newRoughness != _roughnessStageEnabled)
             {
                 _roughnessStageEnabled = newRoughness;
@@ -1382,10 +1403,13 @@ namespace GraffitiEntertainment.Namer.Editor
                 MarkDirty();
             }
 
+            GUILayout.Space(kDebugColumnGap);
+
             bool newAo = EditorGUILayout.ToggleLeft(
                 new GUIContent("AO",
                     "Hard stage gate for the AO stage: OFF packs surface B white (no synthetic AO); ON packs the AO map — an authored _OcclusionMap always transfers either way, and without one the geometry bake is the synthetic source. The un-multiply strength slider is independent of this gate."),
-                _aoStageEnabled);
+                _aoStageEnabled,
+                GUILayout.Width(kDebugColumnWidth));
             if (newAo != _aoStageEnabled)
             {
                 _aoStageEnabled = newAo;
@@ -1393,10 +1417,13 @@ namespace GraffitiEntertainment.Namer.Editor
                 MarkDirty();
             }
 
+            GUILayout.Space(kDebugColumnGap);
+
             bool newMetallic = EditorGUILayout.ToggleLeft(
                 new GUIContent("Metallic",
                     "Shader-only gate for the metallic contribution (no pipeline stage exists)."),
-                _metallicContributionEnabled);
+                _metallicContributionEnabled,
+                GUILayout.Width(kDebugColumnWidth));
             if (newMetallic != _metallicContributionEnabled)
             {
                 _metallicContributionEnabled = newMetallic;
@@ -1406,10 +1433,13 @@ namespace GraffitiEntertainment.Namer.Editor
                 Repaint();
             }
 
+            GUILayout.Space(kDebugColumnGap);
+
             bool newEmissive = EditorGUILayout.ToggleLeft(
                 new GUIContent("Emissive",
                     "Shader-only gate for the emissive contribution (no pipeline stage exists)."),
-                _emissiveContributionEnabled);
+                _emissiveContributionEnabled,
+                GUILayout.Width(kDebugColumnWidth));
             if (newEmissive != _emissiveContributionEnabled)
             {
                 _emissiveContributionEnabled = newEmissive;
@@ -1675,13 +1705,28 @@ namespace GraffitiEntertainment.Namer.Editor
             EditorGUI.BeginDisabledGroup(_busy);
             EditorGUILayout.BeginHorizontal();
             DrawShaderInputToggle(0, ref _dbgResidualEnabled);
+            GUILayout.Space(kDebugColumnGap);
             DrawShaderInputToggle(1, ref _dbgRoughnessEnabled);
+            GUILayout.Space(kDebugColumnGap);
             DrawShaderInputToggle(2, ref _dbgAoEnabled);
+            GUILayout.Space(kDebugColumnGap);
             DrawShaderInputToggle(3, ref _dbgMetallicEnabled);
+            GUILayout.Space(kDebugColumnGap);
             DrawShaderInputToggle(4, ref _dbgEmissiveEnabled);
+            GUILayout.Space(kDebugColumnGap);
             DrawShaderInputToggle(5, ref _dbgVertexColorEnabled);
+            GUILayout.Space(kDebugColumnGap);
             DrawShaderInputToggle(6, ref _dbgNormalEnabled);
             EditorGUILayout.EndHorizontal();
+            if (Event.current.type == EventType.Repaint)
+            {
+                // Capture the single toggle row as the strip's overflow detector
+                // input — DrawChannelPanes consumes it for the pane clip band.
+                // Repaint-gated GetLastRect-after-EndHorizontal (degenerate during
+                // Layout); reused on other event types.
+                _channelToggleRowRect = GUILayoutUtility.GetLastRect();
+            }
+
             EditorGUI.EndDisabledGroup();
             DrawChannelPanes();
             EditorGUILayout.LabelField(
@@ -1708,11 +1753,18 @@ namespace GraffitiEntertainment.Namer.Editor
         /// </summary>
         private void DrawShaderInputToggle(int index, ref bool enabled)
         {
+            // 2026-09-28 amendment: the checkbox and label keep their OWN automatic
+            // rect calculation — EditorGUILayout.ToggleLeft sizes its own
+            // checkbox+label slot with default styles (the padding-zeroed style and
+            // manual CalcHeight slot are NOT restored) — but the slot is pinned to
+            // the kDebugColumnWidth grid column so it stays above its pane.
+            // kDebugColumnGap spacing lives in the caller.
             bool newValue = EditorGUILayout.ToggleLeft(
                 new GUIContent(ShaderInputToggleLabels[index],
                     "Neutralizes the '" + ShaderInputToggleLabels[index]
                         + "' input in the full shaded After view (shader-only, no GPU recompute)."),
-                enabled);
+                enabled,
+                GUILayout.Width(kDebugColumnWidth));
             if (newValue != enabled)
             {
                 enabled = newValue;
@@ -1723,8 +1775,25 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// D-12 channel pane row: six small panes directly under the shaded-view toggle
-        /// row, each drawn through the <c>NamerChannelView</c> material so the pane shows
+        /// Lazily creates the zero-margin/zero-padding style used by the channel
+        /// pane row slots (lazily — EditorStyles needs the editor skin).
+        /// </summary>
+        private void EnsureChannelStripStyles()
+        {
+            if (_channelPaneSlotStyle == null)
+            {
+                _channelPaneSlotStyle = new GUIStyle(EditorStyles.toggle)
+                {
+                    margin = new RectOffset(0, 0, 0, 0),
+                    padding = new RectOffset(0, 0, 0, 0)
+                };
+            }
+        }
+
+        /// <summary>
+        /// D-12 channel pane row: six small panes in ONE row directly under the
+        /// matching shaded-view toggle row, each drawn through the
+        /// <c>NamerChannelView</c> material so the pane shows
         /// exactly what the After material's packed textures decode to via the shared
         /// NAMER decode (no drift from the runtime material). Neutral no-op boxes when
         /// the After material has no generated textures yet. Clicking a pane opens a
@@ -1736,29 +1805,17 @@ namespace GraffitiEntertainment.Namer.Editor
                 ? _generatedMaterial
                 : _namerMaterial;
 
-            // W14 gap fix: reserve the pane slots with a zero-MARGIN copy of the
-            // toggle style (lazily created — EditorStyles needs the editor skin).
-            // Measurement is untouched (same content, same padding), so the pane
-            // columns stay aligned with the toggle row; only the style-owned
-            // vertical margin stacking is removed, landing the strip one platform
-            // row spacing under its toggle row.
-            if (_channelPaneSlotStyle == null)
-            {
-                _channelPaneSlotStyle = new GUIStyle(EditorStyles.toggle) { margin = new RectOffset(0, 0, 0, 0) };
-            }
+            // W14 gap fix: the pane slots use the zero-margin/zero-padding style
+            // from EnsureChannelStripStyles so no style-owned vertical margin
+            // stacks between the toggle row and the pane row.
+            EnsureChannelStripStyles();
 
             // W14 clip: the panes are CONTENT-space rects inside the scroll view and
             // Graphics.DrawTexture does not clip to it (the mtv 260926-mtv defect
             // class) — derive the visible band from the captured widget rect
-            // exactly like DrawAlbedoPreview. GetLastRect() here (immediately after
-            // the toggle row's EndHorizontal) reads the toggle row's rect during
-            // Repaint and is degenerate during Layout, so capture Repaint-gated and
-            // reuse the field on other event types.
-            if (Event.current.type == EventType.Repaint)
-            {
-                _channelToggleRowRect = GUILayoutUtility.GetLastRect();
-            }
-
+            // exactly like DrawAlbedoPreview. _channelToggleRowRect is captured at
+            // the toggle-row site (the single strip row) because GetLastRect here
+            // would read the pane row and miss toggle-driven overflow.
             float vbarW = GUI.skin.verticalScrollbar.fixedWidth;
             float hbarH = GUI.skin.horizontalScrollbar.fixedHeight;
             // The vertical scrollbar is always shown in this window (the foldout
@@ -1773,22 +1830,30 @@ namespace GraffitiEntertainment.Namer.Editor
             Rect visibleBand = new Rect(_scrollPosition.x, _scrollPosition.y, viewWidth, viewHeight);
 
             EditorGUILayout.BeginHorizontal();
-            for (int i = 0; i < ChannelPaneLabels.Length; i++)
+            for (int toggle = 0; toggle < ShaderInputToggleLabels.Length; toggle++)
             {
-                if (i == 5)
+                if (toggle > 0)
                 {
-                    // No pane for the Vertex Color column; reserve its slot so the
-                    // Normal pane still lands under the Normal toggle.
-                    GUILayoutUtility.GetRect(new GUIContent(ShaderInputToggleLabels[5]),
-                        _channelPaneSlotStyle, GUILayout.Height(ChannelPaneSize));
+                    // Same fixed gap as the toggle row so pane columns stay under
+                    // their own toggles in the uniform 7-column grid.
+                    GUILayout.Space(kDebugColumnGap);
                 }
 
-                int toggleIndex = i < 5 ? i : 6;
-                Rect slot = GUILayoutUtility.GetRect(
-                    new GUIContent(ShaderInputToggleLabels[toggleIndex]),
-                    _channelPaneSlotStyle, GUILayout.Height(ChannelPaneSize));
-                Rect paneRect = new Rect(slot.x, slot.y,
-                    Mathf.Min(ChannelPaneSize, slot.width), ChannelPaneSize);
+                // One uniform kDebugColumnWidth slot per toggle column — the pane
+                // texture itself stays ChannelPaneSize, horizontally centered in
+                // its column.
+                Rect slot = GUILayoutUtility.GetRect(GUIContent.none, _channelPaneSlotStyle,
+                    GUILayout.Width(kDebugColumnWidth), GUILayout.Height(ChannelPaneSize));
+                int channel = ChannelPaneForToggle[toggle];
+                if (channel < 0)
+                {
+                    // No texture for this input (Vertex Color); slot is already
+                    // reserved, nothing to draw.
+                    continue;
+                }
+
+                Rect paneRect = new Rect(slot.x + (slot.width - ChannelPaneSize) * 0.5f, slot.y,
+                    ChannelPaneSize, ChannelPaneSize);
 
                 if (afterMaterial == null || afterMaterial.GetTexture(SurfaceMapId) == null)
                 {
@@ -1812,7 +1877,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 _channelViewMaterial.SetTexture(SurfaceMapId, afterMaterial.GetTexture(SurfaceMapId));
                 _channelViewMaterial.SetTexture(BaseResidualMapId, afterMaterial.GetTexture(BaseResidualMapId));
                 _channelViewMaterial.SetFloat(OcclusionStrengthId, afterMaterial.GetFloat(OcclusionStrengthId));
-                _channelViewMaterial.SetFloat(ChannelId, i);
+                _channelViewMaterial.SetFloat(ChannelId, channel);
                 if (Event.current.type == EventType.Repaint)
                 {
                     // Per-draw _UvRect window (mtv): a partially clipped pane
@@ -1826,13 +1891,13 @@ namespace GraffitiEntertainment.Namer.Editor
                 }
 
                 GUI.Label(clippedRect, new GUIContent(string.Empty,
-                    ChannelPaneLabels[i] + " — source: " + (i == 0 ? "_BaseResidualMap" : "_SurfaceMap")));
+                    ChannelPaneLabels[channel] + " — source: " + (channel == 0 ? "_BaseResidualMap" : "_SurfaceMap")));
                 EditorGUIUtility.AddCursorRect(clippedRect, MouseCursor.Zoom);
 
                 if (Event.current.type == EventType.MouseDown && clippedRect.Contains(Event.current.mousePosition))
                 {
                     Event.current.Use();
-                    ShowChannelPopup(clippedRect, i, afterMaterial);
+                    ShowChannelPopup(clippedRect, channel, afterMaterial);
                 }
             }
 

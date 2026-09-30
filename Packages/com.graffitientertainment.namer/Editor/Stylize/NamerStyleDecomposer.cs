@@ -131,20 +131,24 @@ namespace GraffitiEntertainment.Namer.Editor
     public static class NamerStyleDecomposer
     {
         // -------- classification thresholds (RESEARCH Pattern 4; A5 — fixture-revisitable) --------
+        // Internal (05.3-03): the test seam — NamerStyleDecomposerTests builds its
+        // per-class cue combinations FROM these named constants so a revisited
+        // threshold (A5) retargets the fixtures instead of pinning stale literals
+        // (kDefaultBloomHighlightPercentile widening precedent).
 
         /// <summary>Clipping cut: raw sRGB max channel at or above 254/255 (one 8-bit
         /// code below rail) is clipped — also the exact non-invertible set of the
         /// tonemap inverse, so the mask and the inverse's domain gaps coincide.</summary>
-        private const float kClipThresholdSrgb = 254f / 255f;
+        internal const float kClipThresholdSrgb = 254f / 255f;
 
         /// <summary>Chroma cut separating desaturated-bright (specular/bloom, and the
         /// low-chroma fog cue) from saturated-bright (emissive): HSV-style
         /// (max-min)/max on the raw sRGB texel. A5 — fixture-revisitable.</summary>
-        private const float kSpecularChromaMax = 0.15f;
+        internal const float kSpecularChromaMax = 0.15f;
 
         /// <summary>Absolute deep-shadow luma floor (decoded linear Rec.709): texels at
         /// or below it are noise-dominated and non-invertible near black. A5.</summary>
-        private const float kShadowLumaFloor = 0.02f;
+        internal const float kShadowLumaFloor = 0.02f;
 
         /// <summary>Deep-shadow percentile cut: the p5 of the merged decoded-luma
         /// histogram (the shadow-side twin of the fit's p95 highlight percentile).</summary>
@@ -152,16 +156,16 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>Fog/veil cue: per-texel local luma box-gradient below this value
         /// marks flat regions (the 3x3 box mean vs the center texel). A5.</summary>
-        private const float kFogGradientThreshold = 0.02f;
+        internal const float kFogGradientThreshold = 0.02f;
 
         /// <summary>Fog/veil weight: conservative LOW, not zero — the most fragile
         /// heuristic keeps partial palette mass (RESEARCH Pattern 4). A5.</summary>
-        private const float kFogWeight = 0.25f;
+        internal const float kFogWeight = 0.25f;
 
         /// <summary>Fog/veil mid-luma floor: a veil is mid-to-high luma, above the
         /// shadow band (extractor kShadowBandUpperBound = 1/3 precedent) so flat dark
         /// regions never read as fog (the shadow class returns first regardless).</summary>
-        private const float kFogMidLumaFloor = 1f / 3f;
+        internal const float kFogMidLumaFloor = 1f / 3f;
 
         /// <summary>Half-extent of the local-gradient box neighborhood (1 = 3x3 box
         /// on the cached downsampled grid — the extractor fixed-grid discipline).</summary>

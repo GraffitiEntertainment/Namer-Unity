@@ -194,7 +194,10 @@ namespace GraffitiEntertainment.Namer.Editor
         public const int kPostHistogramBins = 256;
 
         private const int kCurveKeyCount = 9;                    // uniform key grid per curve
-        private const float kDefaultBloomHighlightPercentile = 0.95f; // p95 of raw sRGB Max3
+        /// <summary>Internal (05.3-03): reused by NamerStyleDecomposer as the p95 Max3
+        /// highlight-cut percentile of the classifier (Pattern 4 specular/bloom cue) —
+        /// the same cut the fit itself uses for the bloom threshold.</summary>
+        internal const float kDefaultBloomHighlightPercentile = 0.95f; // p95 of raw sRGB Max3
         private const float kPercentile10 = 0.1f;                // contrast spread low pick (extractor precedent)
         private const float kPercentile90 = 0.9f;                // contrast spread high pick (extractor precedent)
         private const float kContrastDenominatorFloor = 0.001f;  // extractor kContrastDenominatorFloor precedent
@@ -525,8 +528,11 @@ namespace GraffitiEntertainment.Namer.Editor
         /// Weighted-bin percentile with linear interpolation between occupied-bin
         /// centers (extractor PercentileLuma precedent). The first occupied bin returns
         /// its own center; fraction is a mass fraction in [0, 1].
+        /// Internal (05.3-03): reused by <see cref="NamerStyleDecomposer"/> for the
+        /// classifier's p95 Max3 and p5 luma cuts (MasterInverse private-&gt;internal
+        /// widening precedent — one percentile home).
         /// </summary>
-        private static float WeightedPercentile(float[] histogram, float total, float fraction)
+        internal static float WeightedPercentile(float[] histogram, float total, float fraction)
         {
             if (total <= 0f)
             {

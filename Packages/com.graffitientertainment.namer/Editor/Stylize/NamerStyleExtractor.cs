@@ -326,8 +326,11 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <see cref="kAchromaticAnchorSlots"/> slots reserved for achromatic/low-sat
         /// bins, followed by <see cref="kKMeansIterations"/> fixed Lloyd iterations over
         /// the bin centers. No random number generation anywhere.
+        /// Internal (05.3-03): reused verbatim by <see cref="NamerStyleDecomposer"/>
+        /// over the de-graded histogram (D-02/D-04 — one palette-clustering home, so
+        /// the decomposer's anchors cannot drift from the extractor's).
         /// </summary>
-        private static NamerStyleAnchor[] BuildAnchors(float[] histogram)
+        internal static NamerStyleAnchor[] BuildAnchors(float[] histogram)
         {
             List<int> chromaticBins = new List<int>();
             List<int> achromaticBins = new List<int>();

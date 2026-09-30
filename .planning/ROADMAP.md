@@ -398,7 +398,27 @@ Plans:
 5. Closest-match albedo remap runs pre-fit (before the VC build); hue identity (STYL-03) and no-luma-transfer (STYL-11) remain pinned; post-fit VC remapping is a recorded rejected alternative
 6. Forward validation renders NAMER VCs + surface + recovered Volume against the reference style; visible residual mismatch is the unlock condition for the 3D-LUT fallback (locked 5.1 decision)
 
-**Plans:** 0/0 plans — none yet (created by plan-phase)
+**Plans:** 6 plans
+
+Plans:
+
+**Wave 1** *(parallel — disjoint files)*
+
+- [ ] 05.3-01-PLAN.md — Inverse grade math twin: NamerStyleGradeMath (LUT-stage CPU twins + five deterministic inverses + fixture-defined BuildNeutralSourceStats) + golden/round-trip pins (STYL-13/14)
+
+- [ ] 05.3-02-PLAN.md — Merged style asset foundation: NamerStyleAsset SO (three-flag state model, clamp/fingerprints) + menu-only creation M1 + legacy menu retirement M2/R4 + Volume writer merged overload + StyleAssetGuid pref/ResolveStyleAsset + sandbox mirroring + asset tests (STYL-15)
+
+**Wave 2** *(blocked on Wave 1; 03/04/05 disjoint files)*
+
+- [ ] 05.3-03-PLAN.md — Decomposer: per-pixel-confidence AccumulateReference seam + NamerStyleDecomposer two-pass (classification mask, Fit-over-neutral grade, de-graded/raw palette, confidence stats) + validation metric pure static + determinism/self-consistency tests (STYL-13/14/17)
+
+- [ ] 05.3-04-PLAN.md — Merge dialog: Tools > NAMER/Merge Style Assets… + pure carry core (union first-wins, cap honesty before creation, sources untouched, never-silent) + no-silent-loss tests (STYL-15)
+
+- [ ] 05.3-05-PLAN.md — Window rewire + STYL-16 data retarget: NamerStyleStylization.Create(NamerStyleAsset) pre-fit composition, W15-W18 Style Asset object field, R1-R8 retirements, RunStylePostFit retarget seam, zero-dispatch identity gate (STYL-15/16)
+
+**Wave 3** *(blocked on Waves 1-2)*
+
+- [ ] 05.3-06-PLAN.md — Merged asset editor S1-S17: shared list + Decompose Style transaction (neutral primary, exemplar-refined named complement) + Palette Source switch + carried post/Volume blocks + Validate Look (STYL-17 LUT-unlock evidence) + prereq-seam tests + USER_GUIDE collapse (STYL-14/15/17)
 
 ## Progress
 

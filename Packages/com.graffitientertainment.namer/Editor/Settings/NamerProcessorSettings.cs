@@ -41,6 +41,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private const string AfterViewKey = "NamerProcessor.AfterView";
         private const string StyleProfileGuidKey = "NamerProcessor.StyleProfileGuid";
         private const string PostLookGuidKey = "NamerProcessor.PostLookGuid";
+        private const string StyleAssetGuidKey = "NamerProcessor.StyleAssetGuid";
 
         /// <summary>Generated-output root folder (D-01 default: Assets/NAMERGenerated/).</summary>
         public string Destination
@@ -246,6 +247,17 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             get { return EditorPrefs.GetString(PostLookGuidKey, string.Empty); }
             set { EditorPrefs.SetString(PostLookGuidKey, value); }
+        }
+
+        /// <summary>Attached <see cref="NamerStyleAsset"/> GUID (05.3 STYL-15; empty =
+        /// no style asset). DEDICATED key — the legacy
+        /// <see cref="StyleProfileGuid"/> pref is never read for the merged asset
+        /// (A9: a stale legacy GUID must not silently resolve to a split-shape
+        /// profile); it detaches cleanly by no longer being read by new surfaces.</summary>
+        public string StyleAssetGuid
+        {
+            get { return EditorPrefs.GetString(StyleAssetGuidKey, string.Empty); }
+            set { EditorPrefs.SetString(StyleAssetGuidKey, value); }
         }
     }
 }

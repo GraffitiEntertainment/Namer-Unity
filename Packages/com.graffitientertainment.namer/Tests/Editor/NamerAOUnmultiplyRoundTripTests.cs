@@ -635,9 +635,11 @@ namespace GraffitiEntertainment.Namer.Tests
             public string Prefix;
             public string Suffix;
             public bool OverwriteGenerated;
+            public string StyleAssetGuid;
             public bool HadPrefix;
             public bool HadSuffix;
             public bool HadOverwriteGenerated;
+            public bool HadStyleAssetGuid;
         }
 
         private static PrefsSnapshot CapturePrefs()
@@ -647,9 +649,11 @@ namespace GraffitiEntertainment.Namer.Tests
                 Prefix = EditorPrefs.GetString("NamerProcessor.Prefix", string.Empty),
                 Suffix = EditorPrefs.GetString("NamerProcessor.Suffix", string.Empty),
                 OverwriteGenerated = EditorPrefs.GetBool("NamerProcessor.OverwriteGenerated", false),
+                StyleAssetGuid = EditorPrefs.GetString("NamerProcessor.StyleAssetGuid", string.Empty),
                 HadPrefix = EditorPrefs.HasKey("NamerProcessor.Prefix"),
                 HadSuffix = EditorPrefs.HasKey("NamerProcessor.Suffix"),
                 HadOverwriteGenerated = EditorPrefs.HasKey("NamerProcessor.OverwriteGenerated"),
+                HadStyleAssetGuid = EditorPrefs.HasKey("NamerProcessor.StyleAssetGuid"),
             };
         }
 
@@ -663,6 +667,9 @@ namespace GraffitiEntertainment.Namer.Tests
 
             if (snapshot.HadOverwriteGenerated) { EditorPrefs.SetBool("NamerProcessor.OverwriteGenerated", snapshot.OverwriteGenerated); }
             else { EditorPrefs.DeleteKey("NamerProcessor.OverwriteGenerated"); }
+
+            if (snapshot.HadStyleAssetGuid) { EditorPrefs.SetString("NamerProcessor.StyleAssetGuid", snapshot.StyleAssetGuid); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.StyleAssetGuid"); }
         }
     }
 }

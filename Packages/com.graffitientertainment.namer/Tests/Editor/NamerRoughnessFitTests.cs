@@ -602,6 +602,7 @@ namespace GraffitiEntertainment.Namer.Tests
             public int DipSource;
             public bool WriteResidual;
             public string StyleProfileGuid;
+            public string StyleAssetGuid;
             public bool FoldoutStylization;
             public int AfterView;
             public bool HadDestination;
@@ -616,6 +617,7 @@ namespace GraffitiEntertainment.Namer.Tests
             public bool HadDipSource;
             public bool HadWriteResidual;
             public bool HadStyleProfileGuid;
+            public bool HadStyleAssetGuid;
             public bool HadFoldoutStylization;
             public bool HadAfterView;
         }
@@ -636,6 +638,7 @@ namespace GraffitiEntertainment.Namer.Tests
                 DipSource = EditorPrefs.GetInt("NamerProcessor.DipSource", 0),
                 WriteResidual = EditorPrefs.GetBool("NamerProcessor.WriteResidual", false),
                 StyleProfileGuid = EditorPrefs.GetString("NamerProcessor.StyleProfileGuid", string.Empty),
+                StyleAssetGuid = EditorPrefs.GetString("NamerProcessor.StyleAssetGuid", string.Empty),
                 FoldoutStylization = EditorPrefs.GetBool("NamerProcessor.FoldoutStylization", false),
                 AfterView = EditorPrefs.GetInt("NamerProcessor.AfterView", 0),
                 HadDestination = EditorPrefs.HasKey("NamerProcessor.Destination"),
@@ -650,6 +653,7 @@ namespace GraffitiEntertainment.Namer.Tests
                 HadDipSource = EditorPrefs.HasKey("NamerProcessor.DipSource"),
                 HadWriteResidual = EditorPrefs.HasKey("NamerProcessor.WriteResidual"),
                 HadStyleProfileGuid = EditorPrefs.HasKey("NamerProcessor.StyleProfileGuid"),
+                HadStyleAssetGuid = EditorPrefs.HasKey("NamerProcessor.StyleAssetGuid"),
                 HadFoldoutStylization = EditorPrefs.HasKey("NamerProcessor.FoldoutStylization"),
                 HadAfterView = EditorPrefs.HasKey("NamerProcessor.AfterView"),
             };
@@ -692,6 +696,9 @@ namespace GraffitiEntertainment.Namer.Tests
 
             if (snapshot.HadStyleProfileGuid) { EditorPrefs.SetString("NamerProcessor.StyleProfileGuid", snapshot.StyleProfileGuid); }
             else { EditorPrefs.DeleteKey("NamerProcessor.StyleProfileGuid"); }
+
+            if (snapshot.HadStyleAssetGuid) { EditorPrefs.SetString("NamerProcessor.StyleAssetGuid", snapshot.StyleAssetGuid); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.StyleAssetGuid"); }
 
             if (snapshot.HadFoldoutStylization) { EditorPrefs.SetBool("NamerProcessor.FoldoutStylization", snapshot.FoldoutStylization); }
             else { EditorPrefs.DeleteKey("NamerProcessor.FoldoutStylization"); }

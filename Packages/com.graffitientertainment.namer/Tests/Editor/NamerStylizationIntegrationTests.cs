@@ -1915,6 +1915,7 @@ namespace GraffitiEntertainment.Namer.Tests
         {
             public string Destination;
             public string StyleProfileGuid;
+            public string StyleAssetGuid;
             public bool DecompositionEnabled;
             public bool AoStageEnabled;
             public bool RoughnessStageEnabled;
@@ -1926,6 +1927,7 @@ namespace GraffitiEntertainment.Namer.Tests
             public float AoBlurRadius;
             public bool HadDestination;
             public bool HadStyleProfileGuid;
+            public bool HadStyleAssetGuid;
             public bool HadDecompositionEnabled;
             public bool HadAoStageEnabled;
             public bool HadRoughnessStageEnabled;
@@ -1943,6 +1945,7 @@ namespace GraffitiEntertainment.Namer.Tests
             {
                 Destination = EditorPrefs.GetString("NamerProcessor.Destination", string.Empty),
                 StyleProfileGuid = EditorPrefs.GetString("NamerProcessor.StyleProfileGuid", string.Empty),
+                StyleAssetGuid = EditorPrefs.GetString("NamerProcessor.StyleAssetGuid", string.Empty),
                 DecompositionEnabled = EditorPrefs.GetBool("NamerProcessor.DecompositionEnabled", false),
                 AoStageEnabled = EditorPrefs.GetBool("NamerProcessor.AoStageEnabled", true),
                 RoughnessStageEnabled = EditorPrefs.GetBool("NamerProcessor.RoughnessStageEnabled", true),
@@ -1954,6 +1957,7 @@ namespace GraffitiEntertainment.Namer.Tests
                 AoBlurRadius = EditorPrefs.GetFloat("NamerProcessor.AoBlurRadius", 0f),
                 HadDestination = EditorPrefs.HasKey("NamerProcessor.Destination"),
                 HadStyleProfileGuid = EditorPrefs.HasKey("NamerProcessor.StyleProfileGuid"),
+                HadStyleAssetGuid = EditorPrefs.HasKey("NamerProcessor.StyleAssetGuid"),
                 HadDecompositionEnabled = EditorPrefs.HasKey("NamerProcessor.DecompositionEnabled"),
                 HadAoStageEnabled = EditorPrefs.HasKey("NamerProcessor.AoStageEnabled"),
                 HadRoughnessStageEnabled = EditorPrefs.HasKey("NamerProcessor.RoughnessStageEnabled"),
@@ -1973,6 +1977,9 @@ namespace GraffitiEntertainment.Namer.Tests
 
             if (snapshot.HadStyleProfileGuid) { EditorPrefs.SetString("NamerProcessor.StyleProfileGuid", snapshot.StyleProfileGuid); }
             else { EditorPrefs.DeleteKey("NamerProcessor.StyleProfileGuid"); }
+
+            if (snapshot.HadStyleAssetGuid) { EditorPrefs.SetString("NamerProcessor.StyleAssetGuid", snapshot.StyleAssetGuid); }
+            else { EditorPrefs.DeleteKey("NamerProcessor.StyleAssetGuid"); }
 
             if (snapshot.HadDecompositionEnabled) { EditorPrefs.SetBool("NamerProcessor.DecompositionEnabled", snapshot.DecompositionEnabled); }
             else { EditorPrefs.DeleteKey("NamerProcessor.DecompositionEnabled"); }

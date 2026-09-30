@@ -782,6 +782,35 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
+        /// Resolves the attached <see cref="NamerStyleAsset"/> from the settings'
+        /// persisted DEDICATED StyleAssetGuid pref (05.3 STYL-15, A9 — mirrors
+        /// <see cref="ResolvePostLook"/> field-for-field). Empty GUID, a
+        /// deleted/unresolvable asset, or a GUID that no longer points at a style
+        /// asset all return null — the silent detach — so callers degrade to the
+        /// unstyled baseline instead of failing. The legacy
+        /// <see cref="NamerProcessorSettings.StyleProfileGuid"/> pref is NEVER read
+        /// here (A9: a stale legacy profile GUID must not silently resolve to a
+        /// split-shape profile as the merged asset). Process's stylization source
+        /// rewires to this seam in plan 05 — this plan lands the seam only.
+        /// </summary>
+        internal static NamerStyleAsset ResolveStyleAsset(NamerProcessorSettings settings)
+        {
+            string guid = settings.StyleAssetGuid;
+            if (string.IsNullOrEmpty(guid))
+            {
+                return null;
+            }
+
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            if (string.IsNullOrEmpty(path))
+            {
+                return null;
+            }
+
+            return AssetDatabase.LoadAssetAtPath<NamerStyleAsset>(path);
+        }
+
+        /// <summary>
         /// True when the attached profile requests island-gated smoothing and therefore
         /// needs the source mesh split (05-03): profile != null &amp;&amp; Smoothing &gt; 0.
         /// A null profile (or palette-only) never primes a mesh — the identity path adds

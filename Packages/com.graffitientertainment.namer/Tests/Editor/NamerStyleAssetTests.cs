@@ -176,6 +176,7 @@ namespace GraffitiEntertainment.Namer.Tests
         [Test]
         public void Asset_IsPaletteSourceStale_FlipsOnlyOnSourceMismatch()
         {
+            Texture2D first = new Texture2D(4, 4, TextureFormat.RGBA32, false) { name = "StyleAssetPaletteSourceFirst" };
             NamerStyleAsset asset = ScriptableObject.CreateInstance<NamerStyleAsset>();
             try
             {
@@ -184,8 +185,19 @@ namespace GraffitiEntertainment.Namer.Tests
                 Assert.IsFalse(asset.IsPaletteSourceStale,
                     "palette-source staleness is only meaningful once decomposed");
 
+                // Simulate a decomposition that ran against the de-graded source
+                // (plan 03 shape): the shared list carries an assigned reference so
+                // the bare ComputeFingerprint() write is NON-EMPTY (the empty string
+                // is IsDecomposed's never-decomposed sentinel — an empty-list
+                // fingerprint would leave the asset honestly not-decomposed), and
                 // Decompose captures the source it used in the AtExtract twin.
+                asset.References.Add(first);
+                asset.ReferenceWeights.Add(1f);
+                asset.PaletteSource = NamerEditorConstants.kPaletteSourceDeGraded;
+                asset.PaletteSourceAtExtract = NamerEditorConstants.kPaletteSourceDeGraded;
                 asset.DecompositionFingerprint = asset.ComputeFingerprint();
+                Assert.IsTrue(asset.IsDecomposed,
+                    "sanity: the simulated decomposition wrote a non-empty fingerprint");
                 Assert.IsFalse(asset.IsPaletteSourceStale,
                     "matching sources are not stale");
 
@@ -200,6 +212,7 @@ namespace GraffitiEntertainment.Namer.Tests
             finally
             {
                 DestroyImmediate(asset);
+                DestroyImmediate(first);
             }
         }
 

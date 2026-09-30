@@ -594,8 +594,11 @@ namespace GraffitiEntertainment.Namer.Editor
         /// Inverse of the master mapping over its monotone key values: the smallest key
         /// time whose value reaches t. Flat segments resolve to the start of the flat
         /// region; t above the last value maps to 1.
+        /// Internal (05.3-01): reused verbatim by NamerStyleGradeMath.InverseCurves so
+        /// the de-grade's curve inversion cannot drift from the fit's own discipline
+        /// (EvaluateRefitMaxError private->internal widening precedent).
         /// </summary>
-        private static float MasterInverse(float[] masterValues, float t)
+        internal static float MasterInverse(float[] masterValues, float t)
         {
             for (int i = 0; i < masterValues.Length - 1; i++)
             {

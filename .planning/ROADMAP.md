@@ -398,7 +398,7 @@ Plans:
 5. Closest-match albedo remap runs pre-fit (before the VC build); hue identity (STYL-03) and no-luma-transfer (STYL-11) remain pinned; post-fit VC remapping is a recorded rejected alternative
 6. Forward validation renders NAMER VCs + surface + recovered Volume against the reference style; visible residual mismatch is the unlock condition for the 3D-LUT fallback (locked 5.1 decision)
 
-**Plans:** 2/6 plans executed
+**Plans:** 3/6 plans executed
 
 Plans:
 
@@ -410,7 +410,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1; 03/04 disjoint files — the validation threshold landed in plan 02's wave-1 constants block, so plan 03 never edits NamerEditorConstants.cs; only plan 04 adds merge strings there)*
 
-- [ ] 05.3-03-PLAN.md — Decomposer: per-pixel-confidence AccumulateReference seam + NamerStyleDecomposer two-pass (classification mask, Fit-over-neutral grade, de-graded/raw palette, confidence stats) + validation metric pure static + determinism/self-consistency tests (STYL-13/14/17)
+- [x] 05.3-03-PLAN.md — Decomposer: per-pixel-confidence AccumulateReference seam + NamerStyleDecomposer two-pass (classification mask, Fit-over-neutral grade, de-graded/raw palette, confidence stats) + validation metric pure static + determinism/self-consistency tests (STYL-13/14/17)
 
 - [ ] 05.3-04-PLAN.md — Merge dialog: Tools > NAMER/Merge Style Assets… + pure carry core (union first-wins, cap honesty before creation, sources untouched, never-silent) + no-silent-loss tests (STYL-15)
 
@@ -440,4 +440,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 5. Stylization | 3/3 | Complete   | 2026-09-24 |
 | 5.1. Reference-fitted URP Post-processing Look (INSERTED) | 4/4 | Complete   | 2026-09-25 |
 | 05.2. Standalone post-look asset (INSERTED) | 6/6 | Complete | 2026-09-28 |
-| 05.3. Reference decomposition + merged style asset (INSERTED) | 2/6 | In Progress|  |
+| 05.3. Reference decomposition + merged style asset (INSERTED) | 3/6 | In Progress|  |

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05.2-04-PLAN.md
-last_updated: "2026-09-30T21:11:47.929Z"
+stopped_at: Completed 05.3-03-PLAN.md
+last_updated: "2026-09-30T21:57:40.920Z"
 last_activity: 2026-09-30
 progress:
   total_phases: 12
   completed_phases: 11
   total_plans: 56
-  completed_plans: 52
+  completed_plans: 53
   percent: 92
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 ## Current Position
 
 Phase: 05.3 (reference-decomposition-merged-style-asset) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-09-30
 
-Progress: [█████████░] 93%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -105,6 +105,7 @@ Progress: [█████████░] 93%
 | Phase 05.2 P06 | 8m53s | 2 tasks | 11 files |
 | Phase 05.3 P01 | 65 min | 2 tasks | 3 files |
 | Phase 05.3 P02 | 12min | 3 tasks | 16 files |
+| Phase 05.3 P03 | 45min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -239,6 +240,9 @@ Recent decisions affecting current work:
 - [Phase ?]: 05.3-02: kValidationMismatchThreshold (0.10f) landed in wave-1 so plan 03's ComputeValidationMeasure consumes it and wave 2 never edits NamerEditorConstants.cs
 - [Phase ?]: 05.3-02: transient pragma CS0067 around NamerStyleAsset.Changed until plan 06's RaiseChanged partial (event pre-declared so plans 03-06 compile against it)
 - [Phase ?]: 05.3-02: confidence-fraction NaN fallback is the -1 never-decomposed sentinel (NaN-then-identity discipline), then clamps to [-1,1]
+- [Phase ?]: 05.3-03: decomposer percentile cuts flow through the fit's own WeightedPercentile/kDefaultBloomHighlightPercentile (internal widenings, no estimator-math change) - one percentile home (D-02)
+- [Phase ?]: 05.3-03: self-consistency knobs measured down to T5/Tint-2/EV0.2/C5/S5 - frozen-family cross-knob biases quantified by the out-of-editor mono harness; contrast pinned bounded (>= -60), not exact
+- [Phase ?]: 05.3-03: STYL-17 validation metric is pure over Keyframe[] (linear interp on the 9-point MasterInverse grid) - no AnimationCurve evaluation, out-of-editor testable
 
 ### Pending Todos
 
@@ -284,6 +288,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-30T21:11:47.919Z
-Stopped at: Completed 05.2-04-PLAN.md
+Last session: 2026-09-30T21:57:40.911Z
+Stopped at: Completed 05.3-03-PLAN.md
 Resume file: None

@@ -398,7 +398,7 @@ Plans:
 5. Closest-match albedo remap runs pre-fit (before the VC build); hue identity (STYL-03) and no-luma-transfer (STYL-11) remain pinned; post-fit VC remapping is a recorded rejected alternative
 6. Forward validation renders NAMER VCs + surface + recovered Volume against the reference style; visible residual mismatch is the unlock condition for the 3D-LUT fallback (locked 5.1 decision)
 
-**Plans:** 1/6 plans executed
+**Plans:** 2/6 plans executed
 
 Plans:
 
@@ -406,7 +406,7 @@ Plans:
 
 - [x] 05.3-01-PLAN.md — Inverse grade math twin: NamerStyleGradeMath (LUT-stage CPU twins + five deterministic inverses + fixture-defined BuildNeutralSourceStats) + golden/round-trip pins (STYL-13/14)
 
-- [ ] 05.3-02-PLAN.md — Merged style asset foundation: NamerStyleAsset SO (three-flag state model, clamp/fingerprints) + menu-only creation M1 + legacy menu retirement M2/R4 + Volume writer merged overload + StyleAssetGuid pref/ResolveStyleAsset + sandbox mirroring + asset tests (STYL-15)
+- [x] 05.3-02-PLAN.md — Merged style asset foundation: NamerStyleAsset SO (three-flag state model, clamp/fingerprints) + menu-only creation M1 + legacy menu retirement M2/R4 + Volume writer merged overload + StyleAssetGuid pref/ResolveStyleAsset + sandbox mirroring + asset tests (STYL-15)
 
 **Wave 2** *(blocked on Wave 1; 03/04 disjoint files — the validation threshold landed in plan 02's wave-1 constants block, so plan 03 never edits NamerEditorConstants.cs; only plan 04 adds merge strings there)*
 
@@ -440,4 +440,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 5. Stylization | 3/3 | Complete   | 2026-09-24 |
 | 5.1. Reference-fitted URP Post-processing Look (INSERTED) | 4/4 | Complete   | 2026-09-25 |
 | 05.2. Standalone post-look asset (INSERTED) | 6/6 | Complete | 2026-09-28 |
-| 05.3. Reference decomposition + merged style asset (INSERTED) | 1/6 | In Progress|  |
+| 05.3. Reference decomposition + merged style asset (INSERTED) | 2/6 | In Progress|  |

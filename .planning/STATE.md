@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 05.2-04-PLAN.md
-last_updated: "2026-09-30T20:56:28.484Z"
+last_updated: "2026-09-30T21:11:47.929Z"
 last_activity: 2026-09-30
 progress:
   total_phases: 12
   completed_phases: 11
   total_plans: 56
-  completed_plans: 51
-  percent: 91
+  completed_plans: 52
+  percent: 92
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-25)
 ## Current Position
 
 Phase: 05.3 (reference-decomposition-merged-style-asset) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-09-30
 
-Progress: [█████████░] 91%
+Progress: [█████████░] 93%
 
 ## Performance Metrics
 
@@ -104,6 +104,7 @@ Progress: [█████████░] 91%
 | Phase 05.2 P05 | 9min | 3 tasks | 6 files |
 | Phase 05.2 P06 | 8m53s | 2 tasks | 11 files |
 | Phase 05.3 P01 | 65 min | 2 tasks | 3 files |
+| Phase 05.3 P02 | 12min | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -232,6 +233,12 @@ Recent decisions affecting current work:
 - [Phase ?]: 05.2-04: W10 fallbacks render between EndDisabledGroup and the W9 row (fallback #1 says 'below'), guarded by lensProfile != null (W6 donor discipline); W9 row wraps in BeginDisabledGroup(_busy); STYL-10/UI-04 requirement checkboxes deferred to phase close-out (05.2-01 precedent)
 - [Phase 05.2]: 05.2-05: FitButtonState seam takes (look, injectable window, settings) with LOCKED reason order (positive-weight reference, exemplar window, stylized output); busy state stays outside the seam
 - [Phase 05.2]: 05.2-05: load-time migration (D-07 option a) never overwrites an existing '{name} Post.asset' (GEN-03), clears only the source PostFitFingerprint for idempotence, and writes NO Volume (M3); exactly one candidate exists (Assets/Models/Neo/Neo-T-Pose.asset) and converts on the next domain reload
+- [Phase ?]: 05.3-02: Volume-assembly body extracted to NamerStyleVolumeWriter.WriteVolumeAtPath — both public Write overloads are thin shells, NamerPostLook behavior unchanged (one home for the Volume wiring; CR-01 verify-before-stamp inherited)
+- [Phase ?]: 05.3-02: StyleAssetGuid is a DEDICATED EditorPrefs key — the legacy StyleProfileGuid is never read for the merged asset (A9) and detaches by no longer being read
+- [Phase ?]: 05.3-02: Palette presence carries no separate bool — PaletteAnchors.Count > 0 is the third independent flag beside IsDecomposed/HasFit; all three truths pinned simultaneously by the migrated-state test (no-conflation)
+- [Phase ?]: 05.3-02: kValidationMismatchThreshold (0.10f) landed in wave-1 so plan 03's ComputeValidationMeasure consumes it and wave 2 never edits NamerEditorConstants.cs
+- [Phase ?]: 05.3-02: transient pragma CS0067 around NamerStyleAsset.Changed until plan 06's RaiseChanged partial (event pre-declared so plans 03-06 compile against it)
+- [Phase ?]: 05.3-02: confidence-fraction NaN fallback is the -1 never-decomposed sentinel (NaN-then-identity discipline), then clamps to [-1,1]
 
 ### Pending Todos
 
@@ -277,6 +284,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-30T20:56:28.475Z
+Last session: 2026-09-30T21:11:47.919Z
 Stopped at: Completed 05.2-04-PLAN.md
 Resume file: None

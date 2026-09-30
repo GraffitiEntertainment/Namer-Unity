@@ -8,20 +8,24 @@ using UnityEngine.Rendering.Universal;
 namespace GraffitiEntertainment.Namer.Editor
 {
     /// <summary>
-    /// Assembles the generated URP Volume asset from a fitted
-    /// <see cref="NamerPostLook"/> (05.2 D-06: the ASSET is the source of truth —
-    /// this writer derives the Volume from it and re-derives it on every Fit Look /
-    /// Regenerate Volume; hand-tweaks made on the generated Volume are
-    /// accepted-lost on re-fit/regeneration). Asset-only since 05.2 plan 06
-    /// (STYL-10): the 5.1 profile-path members are deleted — the post look exists
-    /// exactly once, on the asset. Every write rides the shared generated-asset
-    /// discipline: <see cref="AssetGenerator.ValidateComposedPath"/> destination
-    /// confinement, <see cref="AssetGenerator.EnsureWritableTarget"/>
-    /// (NamerGenerated-label check with the own-companion exemption — see
-    /// <see cref="PreflightWriteGate(NamerPostLook, NamerProcessorSettings)"/>), and
-    /// the <see cref="AssetGenerator.Stamp"/> that makes the fresh asset
-    /// overwritable by the next regeneration. Ping feedback belongs to the call
-    /// sites (Fit Look / Regenerate Volume), never here.
+    /// Assembles the generated URP Volume asset from a fitted post source — either
+    /// the standalone <see cref="NamerPostLook"/> (05.2 D-06) or the merged
+    /// <see cref="NamerStyleAsset"/> post block (05.3 STYL-15 carry-over; the
+    /// ASSET is the source of truth in both cases — this writer derives the Volume
+    /// from it and re-derives it on every fit / Decompose / Regenerate Volume;
+    /// hand-tweaks made on the generated Volume are accepted-lost on
+    /// re-fit/regeneration). Asset-only since 05.2 plan 06 (STYL-10): every write
+    /// rides the shared generated-asset discipline:
+    /// <see cref="AssetGenerator.ValidateComposedPath"/> destination confinement,
+    /// <see cref="AssetGenerator.EnsureWritableTarget"/> (NamerGenerated-label
+    /// check with the own-companion exemption — see
+    /// <see cref="PreflightWriteGate(NamerPostLook, NamerProcessorSettings)"/>),
+    /// and the <see cref="AssetGenerator.Stamp"/> that makes the fresh asset
+    /// overwritable by the next regeneration. The Volume-assembly body lives
+    /// exactly once, in <see cref="WriteVolumeAtPath"/> — both public overloads
+    /// are thin type-specific shells over it (05.3-02 extraction; the NamerPostLook
+    /// overload's behavior is unchanged). Ping feedback belongs to the call sites
+    /// (Fit Look / Decompose / Regenerate Volume), never here.
     /// </summary>
     public static class NamerStyleVolumeWriter
     {
@@ -36,9 +40,33 @@ namespace GraffitiEntertainment.Namer.Editor
         /// </summary>
         public static string ComposeVolumePath(NamerPostLook look, NamerProcessorSettings settings)
         {
+            return ComposeVolumePathFromName(look.name, settings);
+        }
+
+        /// <summary>
+        /// Composes the generated Volume path for a merged style asset at the
+        /// configured destination ROOT (05.3 STYL-15; 05.2 D-06 carry-over — the
+        /// unchanged name-keyed formula over the MERGED asset's name):
+        /// <c>{prefix}{SanitizeFileName(asset.name)}{suffix}_Post.asset</c>. A merged
+        /// asset therefore owns a Volume at a DIFFERENT path than the source look's
+        /// look-keyed Volume: the old look-keyed Volume orphans in place by design
+        /// (05.2 R8 precedent — orphaned Volumes are never deleted silently), and the
+        /// per-scene duplicate-and-tweak workflow rides the merged asset's naming.
+        /// </summary>
+        public static string ComposeVolumePath(NamerStyleAsset asset, NamerProcessorSettings settings)
+        {
+            return ComposeVolumePathFromName(asset.name, settings);
+        }
+
+        /// <summary>
+        /// The name-keyed GEN-01 path formula shared by both source types:
+        /// <c>{prefix}{SanitizeFileName(name)}{suffix}_Post.asset</c>.
+        /// </summary>
+        private static string ComposeVolumePathFromName(string assetName, NamerProcessorSettings settings)
+        {
             string prefix = settings.Prefix ?? string.Empty;
             string suffix = settings.Suffix ?? string.Empty;
-            return settings.Destination + prefix + AssetGenerator.SanitizeFileName(look.name) + suffix + "_Post.asset";
+            return settings.Destination + prefix + AssetGenerator.SanitizeFileName(assetName) + suffix + "_Post.asset";
         }
 
         /// <summary>
@@ -54,6 +82,28 @@ namespace GraffitiEntertainment.Namer.Editor
         /// mutating the asset, so a refusal leaves the asset untouched.
         /// </summary>
         internal static void PreflightWriteGate(NamerPostLook look, NamerProcessorSettings settings)
+        {
+            PreflightWriteGateAtPath(ComposeVolumePath(look, settings), settings);
+        }
+
+        /// <summary>
+        /// The 05.2 CR-01 gate discipline over the merged style asset's composed
+        /// Volume path (05.3 STYL-15 carry-over — same refusal set as
+        /// <see cref="PreflightWriteGate(NamerPostLook, NamerProcessorSettings)"/>).
+        /// The Decompose / Regenerate Volume transactions call this BEFORE mutating
+        /// the asset, so a refusal leaves the asset untouched.
+        /// </summary>
+        internal static void PreflightWriteGate(NamerStyleAsset asset, NamerProcessorSettings settings)
+        {
+            PreflightWriteGateAtPath(ComposeVolumePath(asset, settings), settings);
+        }
+
+        /// <summary>
+        /// The shared gate body: destination-folder existence (refuses, never
+        /// creates), destination confinement, and the NamerGenerated-label
+        /// overwrite check with the own-companion exemption.
+        /// </summary>
+        private static void PreflightWriteGateAtPath(string path, NamerProcessorSettings settings)
         {
             // CR-01 (05.2): a destination folder that legitimately does not exist
             // (renamed/deleted folder, restored prefs on a new machine) makes
@@ -73,7 +123,6 @@ namespace GraffitiEntertainment.Namer.Editor
                     + "Create it (or run Process once) and retry.");
             }
 
-            string path = ComposeVolumePath(look, settings);
             AssetGenerator.ValidateComposedPath(path, settings.Destination);
             AssetGenerator.EnsureWritableTarget(path, overwriteGenerated: true);
         }
@@ -113,8 +162,91 @@ namespace GraffitiEntertainment.Namer.Editor
 
             PreflightWriteGate(look, settings);
 
-            string path = ComposeVolumePath(look, settings);
+            return WriteVolumeAtPath(
+                ComposeVolumePath(look, settings),
+                look.PostTemperature, look.PostTint, look.PostExposureEv,
+                look.PostContrast, look.PostSaturation,
+                look.PostBloomThreshold, look.PostBloomIntensity,
+                look.PostMasterCurve, look.PostRedCurve, look.PostGreenCurve, look.PostBlueCurve,
+                () =>
+                {
+                    look.VolumeWriteFingerprint = look.ComputeParamsFingerprint();
+                    EditorUtility.SetDirty(look);
+                });
+        }
 
+        /// <summary>
+        /// Generates the VolumeProfile asset for a merged style asset's fitted post
+        /// block and returns the loaded, NamerGenerated-stamped asset (05.3 STYL-15;
+        /// 05.2 D-06 carry-over — the merged ASSET is the source of truth, this
+        /// writer derives the Volume from it). Same refusal set as
+        /// <see cref="Write(NamerPostLook, NamerProcessorSettings)"/> (null or
+        /// unfitted asset, missing destination folder, escaping path, non-generated
+        /// target, failed persistence — verified BEFORE the fingerprint stamp),
+        /// the same full-strength parameter law (05.2 R7), and the same
+        /// name-keyed path formula keyed on the MERGED asset's name (see
+        /// <see cref="ComposeVolumePath(NamerStyleAsset, NamerProcessorSettings)"/>
+        /// — the source look's old look-keyed Volume orphans in place, 05.2 R8).
+        /// After the stamp, the write records
+        /// <see cref="NamerStyleAsset.VolumeWriteFingerprint"/> from the asset's
+        /// <see cref="NamerStyleAsset.ComputeParamsFingerprint"/> so the volume
+        /// staleness seam starts honest.
+        /// </summary>
+        public static VolumeProfile Write(NamerStyleAsset asset, NamerProcessorSettings settings)
+        {
+            if (asset == null || !asset.HasFit)
+            {
+                throw new InvalidOperationException(
+                    "Refusing to generate the post Volume: style asset '"
+                    + (asset != null ? asset.name : "null")
+                    + "' carries no fitted post look. Run Decompose Style first.");
+            }
+
+            // Threat T-05.3-02-01: hand-edited serialized values are sanitized
+            // before any parameter is read.
+            asset.ClampToCaps();
+
+            PreflightWriteGate(asset, settings);
+
+            return WriteVolumeAtPath(
+                ComposeVolumePath(asset, settings),
+                asset.PostTemperature, asset.PostTint, asset.PostExposureEv,
+                asset.PostContrast, asset.PostSaturation,
+                asset.PostBloomThreshold, asset.PostBloomIntensity,
+                asset.PostMasterCurve, asset.PostRedCurve, asset.PostGreenCurve, asset.PostBlueCurve,
+                () =>
+                {
+                    asset.VolumeWriteFingerprint = asset.ComputeParamsFingerprint();
+                    EditorUtility.SetDirty(asset);
+                });
+        }
+
+        /// <summary>
+        /// The shared verified-write body (05.3-02 extraction — the ONE home of the
+        /// Volume component wiring; both public Write overloads delegate here):
+        /// a FRESH VolumeProfile per write, the Tonemapping(ACES)/White
+        /// Balance/Color Adjustments/Bloom/Color Curves overrides from the Post*
+        /// values, sub-asset parenting, SaveAssetIfDirty (never SaveAssets),
+        /// persistence verification, the NamerGenerated stamp, and finally the
+        /// caller's Volume-write fingerprint stamp — every failure-throwing step
+        /// runs BEFORE the fingerprint stamp (CR-01 discipline), so staleness never
+        /// reports a phantom write.
+        /// </summary>
+        private static VolumeProfile WriteVolumeAtPath(
+            string path,
+            float temperature,
+            float tint,
+            float exposureEv,
+            float contrast,
+            float saturation,
+            float bloomThreshold,
+            float bloomIntensity,
+            AnimationCurve masterCurve,
+            AnimationCurve redCurve,
+            AnimationCurve greenCurve,
+            AnimationCurve blueCurve,
+            Action stampWriteFingerprint)
+        {
             // Pitfall 10 (carried over): a FRESH profile instance every write — never
             // Add into a loaded stale profile (that both orphans old TextureCurve
             // sub-assets and throws "component already exists" on re-fit).
@@ -127,35 +259,35 @@ namespace GraffitiEntertainment.Namer.Editor
 
             WhiteBalance whiteBalance = volume.Add<WhiteBalance>();
             whiteBalance.temperature.overrideState = true;
-            whiteBalance.temperature.value = look.PostTemperature;
+            whiteBalance.temperature.value = temperature;
             whiteBalance.tint.overrideState = true;
-            whiteBalance.tint.value = look.PostTint;
+            whiteBalance.tint.value = tint;
 
             ColorAdjustments colorAdjustments = volume.Add<ColorAdjustments>();
             colorAdjustments.postExposure.overrideState = true;
-            colorAdjustments.postExposure.value = look.PostExposureEv;
+            colorAdjustments.postExposure.value = exposureEv;
             colorAdjustments.contrast.overrideState = true;
-            colorAdjustments.contrast.value = look.PostContrast;
+            colorAdjustments.contrast.value = contrast;
             colorAdjustments.saturation.overrideState = true;
-            colorAdjustments.saturation.value = look.PostSaturation;
+            colorAdjustments.saturation.value = saturation;
             // colorFilter stays at its neutral-white default with overrideState false —
             // visibly neutral, not a fitted knob (UI-SPEC assembly table).
 
             Bloom bloom = volume.Add<Bloom>();
             bloom.threshold.overrideState = true;
-            bloom.threshold.value = look.PostBloomThreshold;
+            bloom.threshold.value = bloomThreshold;
             bloom.intensity.overrideState = true;
-            bloom.intensity.value = look.PostBloomIntensity;
+            bloom.intensity.value = bloomIntensity;
 
             ColorCurves curves = volume.Add<ColorCurves>();
             curves.master.overrideState = true;
-            curves.master.value = BuildTextureCurve(look.PostMasterCurve);
+            curves.master.value = BuildTextureCurve(masterCurve);
             curves.red.overrideState = true;
-            curves.red.value = BuildTextureCurve(look.PostRedCurve);
+            curves.red.value = BuildTextureCurve(redCurve);
             curves.green.overrideState = true;
-            curves.green.value = BuildTextureCurve(look.PostGreenCurve);
+            curves.green.value = BuildTextureCurve(greenCurve);
             curves.blue.overrideState = true;
-            curves.blue.value = BuildTextureCurve(look.PostBlueCurve);
+            curves.blue.value = BuildTextureCurve(blueCurve);
 
             AssetDatabase.CreateAsset(volume, path);
             // Pitfall 1 (carried over): every component must be parented to the asset
@@ -166,8 +298,9 @@ namespace GraffitiEntertainment.Namer.Editor
             AssetDatabase.AddObjectToAsset(bloom, volume);
             AssetDatabase.AddObjectToAsset(curves, volume);
             // WR-04 (carried over): persist ONLY this Volume — SaveAssets() flushes
-            // every dirty asset in the project. SetDirty(look) below marks the asset
-            // for the fingerprint write but never force-saves unrelated user work.
+            // every dirty asset in the project. The caller's fingerprint stamp marks
+            // the source asset for its own write but never force-saves unrelated
+            // user work.
             EditorUtility.SetDirty(volume);
             AssetDatabase.SaveAssetIfDirty(volume);
 
@@ -185,12 +318,7 @@ namespace GraffitiEntertainment.Namer.Editor
             }
             AssetGenerator.Stamp(loaded);
 
-            // A13 seam: record the params fingerprint at write time so IsVolumeStale
-            // reads false immediately after a write and flips once any parameter or
-            // curve key drifts. The look asset may be an in-memory instance (tests)
-            // or a loaded project asset (Fit Look / Regenerate Volume).
-            look.VolumeWriteFingerprint = look.ComputeParamsFingerprint();
-            EditorUtility.SetDirty(look);
+            stampWriteFingerprint();
             return loaded;
         }
 

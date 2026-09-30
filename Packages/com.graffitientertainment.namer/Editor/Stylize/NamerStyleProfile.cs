@@ -239,17 +239,5 @@ namespace GraffitiEntertainment.Namer.Editor
                 ReferenceWeights[i] = Mathf.Clamp(weight, 0f, 1f);
             }
         }
-
-        /// <summary>
-        /// Creates a new style profile asset in the Project window (STYL-01; house menu
-        /// root "NAMER" under Assets/Create, UI-SPEC section B).
-        /// </summary>
-        [MenuItem("Assets/Create/NAMER/Style Profile")]
-        private static void CreateStyleProfileAsset()
-        {
-            ProjectWindowUtil.CreateAsset(
-                ScriptableObject.CreateInstance<NamerStyleProfile>(),
-                "New Namer Style Profile.asset");
-        }
     }
 }

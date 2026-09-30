@@ -384,17 +384,5 @@ namespace GraffitiEntertainment.Namer.Editor
                 builder.Append(keys[i].value.ToString("R", CultureInfo.InvariantCulture));
             }
         }
-
-        /// <summary>
-        /// Creates a new post-look asset in the Project window (05.2 D-03; house menu
-        /// root "NAMER" under Assets/Create, UI-SPEC Copywriting table).
-        /// </summary>
-        [MenuItem("Assets/Create/NAMER/Post Look")]
-        private static void CreatePostLookAsset()
-        {
-            ProjectWindowUtil.CreateAsset(
-                ScriptableObject.CreateInstance<NamerPostLook>(),
-                NamerEditorConstants.PostLookDefaultAssetName + ".asset");
-        }
     }
 }

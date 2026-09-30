@@ -136,5 +136,27 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>Title of the Processor window's create-and-select post-look dialog (05.2 UI-SPEC Copywriting).</summary>
         public const string PostLookCreateDialogTitle = "Create NAMER Post Look";
+
+        /// <summary>Default asset name for a newly created merged Style Asset (05.3 UI-SPEC C-series Copywriting; menu path Assets/Create/NAMER/Style is the ONLY creation path, D-06/M1).</summary>
+        public const string StyleAssetDefaultAssetName = "New Namer Style";
+
+        /// <summary>Palette-source popup index: derive the palette from the DE-GRADED base colors (05.3 S12/STYL-14; the default source).</summary>
+        public const int kPaletteSourceDeGraded = 0;
+
+        /// <summary>Palette-source popup index: derive the palette from the RAW base colors, no de-grade applied (05.3 S12).</summary>
+        public const int kPaletteSourceRaw = 1;
+
+        /// <summary>Default palette source for a fresh Style Asset (05.3 S12 popup default: de-graded).</summary>
+        public const int DefaultPaletteSource = kPaletteSourceDeGraded;
+
+        /// <summary>
+        /// Normalized knob-distance threshold above which the STYL-17 forward-validation
+        /// mismatch surfaces (05.3 RESEARCH Open Question 5: honesty over precision —
+        /// the mismatch is evidence, never an automatic change). Consumed by plan 03's
+        /// NamerStyleDecomposer.ComputeValidationMeasure and rendered by plan 06's
+        /// validation row; landed here by plan 02 so the wave-2 plans never edit this
+        /// shared constants file.
+        /// </summary>
+        public const float kValidationMismatchThreshold = 0.10f;
     }
 }

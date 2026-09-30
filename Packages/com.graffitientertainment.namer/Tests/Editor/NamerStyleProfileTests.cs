@@ -10,11 +10,14 @@ namespace GraffitiEntertainment.Namer.Tests
     /// Phase 05 plan 01 profile-model tests: creation defaults from the nine 05-UI-SPEC
     /// section C constants, fingerprint determinism + weight sensitivity + null-slot
     /// skipping (OQ-4), ClampToCaps serialization-abuse sanitization (T-05-03), the
-    /// Assets/Create/NAMER/Style Profile menu registration, and the inspector couplings
-    /// (staleness flip after a weight/reference change post-extract; the fresh-asset
-    /// not-extracted state that drives the Statistics em-dash placeholder rows).
-    /// 05.2-06 (R4): the fitted-post fixtures retired with the profile's post fields —
-    /// the post look lives on <see cref="NamerPostLook"/> (see NamerPostLookTests).
+    /// retired Assets/Create/NAMER/Style Profile menu registration, and the inspector
+    /// couplings (staleness flip after a weight/reference change post-extract; the
+    /// fresh-asset not-extracted state that drives the Statistics em-dash placeholder
+    /// rows). 05.2-06 (R4): the fitted-post fixtures retired with the profile's post
+    /// fields — the post look lives on <see cref="NamerPostLook"/> (see
+    /// NamerPostLookTests). 05.3-02 (M2/R4): the Create menu item is retired —
+    /// creation is menu-only on the merged <see cref="NamerStyleAsset"/> — so the
+    /// registration pin inverted into a retirement pin.
     /// </summary>
     public class NamerStyleProfileTests
     {
@@ -127,17 +130,25 @@ namespace GraffitiEntertainment.Namer.Tests
 
 
         [Test]
-        public void Profile_MenuItem_IsRegistered()
+        public void Profile_MenuItem_IsRetired()
         {
-            MethodInfo method = typeof(NamerStyleProfile).GetMethod(
-                "CreateStyleProfileAsset", BindingFlags.NonPublic | BindingFlags.Static);
-            Assert.IsNotNull(method, "the profile must expose the creation entry point");
-            // Unity's attribute class is named MenuItem (no Attribute suffix), so the
-            // generic lookup must name the attribute type exactly as declared.
-            MenuItem attribute = method.GetCustomAttribute<MenuItem>();
-            Assert.IsNotNull(attribute, "the creation entry point must carry a MenuItem attribute");
-            Assert.AreEqual("Assets/Create/NAMER/Style Profile", attribute.menuItem,
-                "the creation menu must live under the house NAMER root (STYL-01)");
+            // 05.3-02 M2/R4: the profile Create menu item is retired — creation is
+            // menu-only on the merged NamerStyleAsset (Assets/Create/NAMER/Style).
+            // The profile class stays as a loadable migration source; only its
+            // creation surface is gone.
+            MethodInfo[] methods = typeof(NamerStyleProfile).GetMethods(
+                BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance);
+            foreach (MethodInfo method in methods)
+            {
+                // Unity's attribute class is named MenuItem (no Attribute suffix), so
+                // the generic lookup must name the attribute type exactly as declared.
+                MenuItem attribute = method.GetCustomAttribute<MenuItem>();
+                if (attribute != null)
+                {
+                    Assert.Fail("NamerStyleProfile must carry no MenuItem — found '" + attribute.menuItem
+                        + "'. Creation is menu-only on the merged NamerStyleAsset (05.3 M2/R4).");
+                }
+            }
         }
 
         [Test]

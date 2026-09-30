@@ -270,6 +270,58 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
+        /// Decomposition seam (05.3 D-07): accumulate reference statistics with a
+        /// PER-PIXEL confidence weight — the effective texel weight is
+        /// pixelWeights[i] * referenceWeight, feeding the exact same
+        /// <see cref="AccumulateLinear"/> path as the scalar overload so every
+        /// histogram/sum sees the product (the classifier's zero/low weights for
+        /// bloom, specular, emissive, deep-shadow, clipping, and fog texels reach
+        /// every estimator input uniformly). The estimator family is otherwise
+        /// FROZEN (D-02: no second estimator family) — this overload adds no fit
+        /// math and <see cref="Fit"/> is untouched.
+        /// Preconditions: srgbPixels and pixelWeights non-null and of equal length
+        /// (one confidence weight per texel); a violation throws
+        /// <see cref="ArgumentNullException"/>. The <see cref="IsFinitePixel"/>
+        /// skip discipline applies unchanged, and the iteration is a fixed serial
+        /// order (the determinism contract).
+        /// </summary>
+        internal static void AccumulateReference(NamerStylePostStats stats, Color[] srgbPixels, float[] pixelWeights, float referenceWeight)
+        {
+            if (srgbPixels == null)
+            {
+                throw new ArgumentNullException(nameof(srgbPixels));
+            }
+
+            if (pixelWeights == null)
+            {
+                throw new ArgumentNullException(nameof(pixelWeights));
+            }
+
+            if (pixelWeights.Length != srgbPixels.Length)
+            {
+                throw new ArgumentNullException(nameof(pixelWeights),
+                    "pixelWeights must be the same length as srgbPixels (one confidence weight per texel).");
+            }
+
+            for (int i = 0; i < srgbPixels.Length; i++)
+            {
+                Color pixel = srgbPixels[i];
+                if (!IsFinitePixel(pixel))
+                {
+                    continue;
+                }
+
+                float3 decoded = new float3(
+                    NamerStyleExtractor.SrgbToLinear(pixel.r),
+                    NamerStyleExtractor.SrgbToLinear(pixel.g),
+                    NamerStyleExtractor.SrgbToLinear(pixel.b));
+                float effectiveWeight = pixelWeights[i] * referenceWeight;
+                AccumulateLinear(stats, decoded, effectiveWeight);
+                stats.Max3SrgbHistogram[BinIndexOf(cmax(new float3(pixel.r, pixel.g, pixel.b)))] += effectiveWeight;
+            }
+        }
+
+        /// <summary>
         /// Fit the full post-processing parameter set from a source distribution onto a
         /// reference distribution. Knob order: (1) von Kries white balance via a
         /// deterministic dual-start (0-seed + grid-seed) alternating-axis

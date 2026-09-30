@@ -408,13 +408,13 @@ Plans:
 
 - [ ] 05.3-02-PLAN.md — Merged style asset foundation: NamerStyleAsset SO (three-flag state model, clamp/fingerprints) + menu-only creation M1 + legacy menu retirement M2/R4 + Volume writer merged overload + StyleAssetGuid pref/ResolveStyleAsset + sandbox mirroring + asset tests (STYL-15)
 
-**Wave 2** *(blocked on Wave 1; 03/04 disjoint files — both touch NamerEditorConstants.cs via Wave-1 plan 02, and plan 04 adds merge strings, keeping 04 before 05 on that file)*
+**Wave 2** *(blocked on Wave 1; 03/04 disjoint files — the validation threshold landed in plan 02's wave-1 constants block, so plan 03 never edits NamerEditorConstants.cs; only plan 04 adds merge strings there)*
 
 - [ ] 05.3-03-PLAN.md — Decomposer: per-pixel-confidence AccumulateReference seam + NamerStyleDecomposer two-pass (classification mask, Fit-over-neutral grade, de-graded/raw palette, confidence stats) + validation metric pure static + determinism/self-consistency tests (STYL-13/14/17)
 
 - [ ] 05.3-04-PLAN.md — Merge dialog: Tools > NAMER/Merge Style Assets… + pure carry core (union first-wins, cap honesty before creation, sources untouched, never-silent) + no-silent-loss tests (STYL-15)
 
-**Wave 3** *(blocked on Wave 2 — shares NamerEditorConstants.cs with plan 04)*
+**Wave 3** *(blocked on Wave 2 — depends_on 05.3-02 + 05.3-04; shares NamerEditorConstants.cs with plan 04, so the ordering is structural in the plan frontmatter)*
 
 - [ ] 05.3-05-PLAN.md — Window rewire + STYL-16 data retarget: NamerStyleStylization.Create(NamerStyleAsset) pre-fit composition, W15-W18 Style Asset object field, R1-R8 retirements, RunStylePostFit retarget seam, zero-dispatch identity gate (STYL-15/16)
 

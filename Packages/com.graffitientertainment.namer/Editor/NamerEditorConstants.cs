@@ -158,5 +158,58 @@ namespace GraffitiEntertainment.Namer.Editor
         /// shared constants file.
         /// </summary>
         public const float kValidationMismatchThreshold = 0.10f;
+
+        // -- Merge dialog (05.3 UI-SPEC M-series; every merge-dialog string lives
+        // here — constants law; consumed by Editor/UI/NamerStyleAssetMerger.cs) ----
+
+        /// <summary>Title of the merge EditorWindow's boldLabel row and of its save dialog (05.3 M3 locked copy).</summary>
+        public const string MergeWindowTitle = "Merge NAMER Style Assets";
+
+        /// <summary>Row label of the REQUIRED Style Profile ObjectField (05.3 M3).</summary>
+        public const string MergeProfileFieldLabel = "Style Profile";
+
+        /// <summary>Row label of the OPTIONAL Post Look ObjectField (05.3 M3; null = palette-only merge).</summary>
+        public const string MergeLookFieldLabel = "Post Look";
+
+        /// <summary>
+        /// Merge-preview miniLabel line, with-look variant (05.3 M3 locked copy;
+        /// {0} = profile name, {1} = profile assigned references, {2} = look name,
+        /// {3} = look assigned references).
+        /// </summary>
+        public const string MergePreviewLineWithLookFormat =
+            "Merges {0}: {1} references + palette + controls + {2}: fitted post look + {3} references into a new Style Asset.";
+
+        /// <summary>
+        /// Merge-preview miniLabel line, look-less variant (05.3 M3 locked copy;
+        /// {0} = profile name, {1} = profile assigned references).
+        /// </summary>
+        public const string MergePreviewLineLookLessFormat =
+            "Merges {0}: {1} references + palette + controls into a new Style Asset.";
+
+        /// <summary>Merge button label (05.3 M3 locked copy; disabled while the profile is null or the cap Error shows).</summary>
+        public const string MergeButtonLabel = "Merge into New Asset…";
+
+        /// <summary>Suffix appended to the profile name for the save dialog's default asset name — "{profileName} Style" (05.3 M3 locked copy).</summary>
+        public const string MergeSaveDefaultNameSuffix = " Style";
+
+        /// <summary>File-extension argument of the merge save dialog (05.3 M3; the created asset is a ScriptableObject).</summary>
+        public const string MergeSaveDialogExtension = "asset";
+
+        /// <summary>Message line of the merge save dialog (05.3 M3; save-dialog chrome, not in-panel copy).</summary>
+        public const string MergeSaveDialogMessage = "Create the merged NAMER Style Asset.";
+
+        /// <summary>
+        /// Cap-honesty Error copy (05.3 M3 locked; {0} = combined union count,
+        /// {1} = <see cref="MaxReferences"/>). Rendered with the button disabled
+        /// BEFORE any asset is created — the merge never drops references silently.
+        /// </summary>
+        public const string MergeCapErrorFormat =
+            "Combined references ({0}) exceed the {1}-slot cap — remove references from the sources and try again; the merge never drops references silently.";
+
+        /// <summary>Never-silent announcement console line, with-look variant (05.3 M4 locked copy; {0} = profile name, {1} = look name, {2} = created asset path).</summary>
+        public const string MergeAnnouncementWithLookFormat = "NAMER: merged {0} + {1} into {2}.";
+
+        /// <summary>Never-silent announcement console line, look-less variant (05.3 M4 locked copy; {0} = profile name, {1} = created asset path).</summary>
+        public const string MergeAnnouncementLookLessFormat = "NAMER: merged {0} into {1}.";
     }
 }

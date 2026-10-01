@@ -100,6 +100,255 @@ A Unity-native editor plugin (UPM package, C# + HLSL) that converts ordinary Uni
 Conventions not yet established. Will populate as patterns emerge during development.
 <!-- GSD:conventions-end -->
 
+## C# Engineering Constraints
+
+These are design constraints, not a checklist.
+
+This section is the C# counterpart to the GNUS C++ Coding Standards and is **authoritative** for C# syntax, naming, layout, language use, class design, error handling, file layout, dependency management, platform/GPU abstraction, and tooling in this repository. Do not override it with a general design principle or a local preference.
+
+When two design principles conflict, choose the option that creates the lowest future cost **in this repository** while preserving correctness, clarity, and the existing architecture.
+
+### Core rule: refactor first, then change behavior
+
+When existing structure prevents a clean change:
+
+1. Make the smallest behavior-preserving refactor needed.
+2. Run the relevant tests and verification.
+3. Only then change behavior.
+
+Do not mix a structural rewrite and a behavioral change into one diff when they can be separated.
+
+A refactor must preserve observable behavior, including error results, ordering, rounding, limits, ownership, lifetime, serialization, shader output, and determinism.
+
+---
+
+### Design principles
+
+1. **Separation of concerns**
+   Give each module one kind of work. Keep domain rules (packing/encoding math, fitting, palette operators), asset persistence, GPU pipeline plumbing, editor UI, serialization, and infrastructure separate where practical.
+
+2. **Encapsulation and information hiding**
+   Expose the smallest complete public interface. Hide storage, caches, internal containers, implementation types, synchronization, pooled resources, and other details behind that interface.
+
+3. **High cohesion, loose coupling**
+   Code that changes for the same reason belongs together. Independent parts communicate through narrow, explicit contracts (asmdefs enforce this at the assembly level).
+
+4. **DRY means one source of truth**
+   Keep one authoritative representation of each rule, formula, threshold, constant, bit layout, encoding rule, or other piece of knowledge.
+   Do not abstract code merely because two blocks look similar.
+
+5. **KISS**
+   Prefer the simplest design that fully solves the current problem. Avoid extra layers, indirection, factories, wrappers, generics, or abstractions unless they remove real duplication or isolate a real dependency.
+
+6. **Single responsibility**
+   A class, module, or function should have one clear reason to change. If its purpose requires unrelated responsibilities joined by "and", split it.
+
+7. **Depend on contracts, not implementation details**
+   Higher-level policy must not reach through another component's internals. Use the existing public interface or introduce the smallest suitable interface when a real boundary exists.
+
+8. **YAGNI**
+   Do not add speculative features, extension points, configuration flags, abstractions, or "future use" APIs without a current requirement.
+
+9. **Composition over implementation inheritance**
+   Prefer composition when combining behavior. Use inheritance where the relationship is genuinely "is-a" or where an abstract interface defines the required contract.
+
+10. **Open/Closed, with evidence**
+    Do not create extension frameworks in anticipation of change. Introduce an extension boundary when repeated real changes show that a stable boundary exists.
+
+11. **Law of Demeter**
+    Do not reach through chains of objects to manipulate distant internals. Use named intermediate values and the owning object's public contract.
+
+12. **Fail early and explicitly**
+    Validate input and invariants at boundaries (pre-flight gates before mutation). Return errors through the project's established error mechanism. Never silently swallow failures.
+
+13. **Make invalid states hard to represent**
+    Use types, enums, constructors/factories, validation, and sanitizers (e.g. `ClampToCaps`-style) to prevent invalid combinations where doing so keeps the code simpler and clearer.
+
+14. **Optimize for deletion**
+    Prefer code that can later be removed without affecting unrelated components. Avoid hidden dependencies and unnecessary framework code.
+
+---
+
+## Hard invariants
+
+### 1. One owning module per domain rule
+
+Every domain rule must have one clear owner.
+
+Examples include:
+
+- packed-surface encoding/decoding (the `NamerFormat` ⇄ `NamerSurface.hlsl` contract)
+- vertex-color decomposition and residual fitting
+- palette extraction and the palette-transfer operator
+- post-look fit math (`NamerStylePostFit`)
+- Volume generation (`NamerStyleVolumeWriter`)
+- asset-path composition and overwrite policy (`AssetGenerator`)
+- EditorPrefs persistence keys and settings plumbing
+
+Before adding a rule, find its existing owner.
+
+If the rule already exists elsewhere, extend that owner rather than adding another implementation beside it.
+
+If related logic is scattered, consolidate it before extending it where doing so can be done safely and independently.
+
+Creating a new module requires a clear reason why the existing owner cannot own the rule.
+
+A local helper, callback, static field, or dependency inversion used only to avoid an architectural cycle usually means the responsibility is in the wrong place. Fix the ownership rather than hiding the cycle.
+
+### 2. Never duplicate domain knowledge
+
+Before writing new business or pipeline logic, search the repository for:
+
+- the formula
+- constant or threshold
+- enum or classification
+- validation rule
+- serialization rule
+- format string
+- state transition
+- EditorPrefs key or fingerprint recipe
+- error mapping
+- shader uniform/kernel constant
+- equivalent helper
+
+On the second real use of the same knowledge:
+
+1. move the existing implementation to its proper owner;
+2. switch existing callers to it;
+3. verify behavior is unchanged;
+4. then add the new caller.
+
+Do not create a shared helper while leaving old copies behind.
+
+When consolidating logic, preserve all existing behavior: guards, integer semantics, precision, rounding, overflow handling, ordering, limits, error values, and side effects.
+
+A behavior change belongs in a separate change.
+
+### 3. No domain logic in adapters or presentation layers
+
+Editor windows, custom inspectors/property drawers, menu items, context-menu handlers, asset import hooks, serializers, and other boundary code should translate data and delegate work.
+
+They must not independently implement domain rules such as encoding, validation, classification, fitting decisions, or asset-path policy.
+
+Compute domain results in the owning module and pass the result outward.
+
+### 4. Ownership and lifetime must be explicit
+
+Make resource ownership explicit. Unity native resources (`RenderTexture`, `ComputeBuffer`, `NativeArray`, `PreviewRenderUtility`, GPU readback requests) must be released by their owner — scope them with `using`/`try-finally` or route them through the pool that owns them.
+
+Use `ScriptableObject.CreateInstance` for ScriptableObjects and the appropriate Unity creation API for engine objects; never leave a created native object untracked or leaked.
+
+A field, parameter, or return value should make ownership and mutability clear from the interface.
+
+Do not expose handles to private mutable internals.
+
+### 5. Prefer the smallest C# abstraction that fits
+
+For stateless operations that do not require instance state, prefer `static` methods on a `static` class.
+
+Use a class when state, invariants, ownership, or encapsulation require one.
+
+Use an interface when callers need to depend on a contract rather than an implementation.
+
+Do not create a class merely to hold unrelated helper functions.
+
+Do not create an interface for a single implementation unless it represents a real architectural boundary (Runtime↔Editor asmdef split), test seam, platform/GPU boundary, or dependency that callers must not own directly.
+
+### 6. Keep public contracts small and stable
+
+Public types in `Runtime/` are shipped contracts; public Editor types are contracts across asmdefs.
+
+Do not expose internal collections, synchronization primitives, pooled resources, implementation-only types, or third-party details without need.
+
+Minimize asmdef references and public surface.
+
+A caller should not need to understand implementation details to use a component correctly.
+
+Changes to public types (especially `Runtime/`) deserve more scrutiny than equivalent internal changes because they increase coupling and break downstream users.
+
+### 7. Errors are part of the contract
+
+Use the project's established error mechanism for fallible operations: `InvalidOperationException` for editor-time gate refusals (pre-flight validation), and the established error-value pattern (nullable returns, `bool` + message, `fitError`-style surfaced messages) where the surrounding code uses one.
+
+Do not introduce a second informal error channel beside the established one.
+
+Do not convert errors into success, defaults, logs, or ignored return values unless the contract explicitly requires that behavior.
+
+Use `Debug.Assert` for programmer errors and invariants, not for expected runtime failures.
+
+Finalizers and `Dispose` paths must never throw.
+
+### 8. Preserve portability
+
+Keep platform/GPU-specific behavior behind capability checks and Unity APIs (`SystemInfo.IsFormatSupported`, `GraphicsFormatUtility`), not scattered `#if` platform branches or per-graphics-API assumptions.
+
+The same C# and HLSL must hold across Metal/Vulkan/DX11/DX12; branch on capability, not platform, and isolate any true platform branch behind one seam.
+
+Do not add compiler-specific or editor-version-specific behavior unless it is isolated behind the same kind of boundary.
+
+---
+
+## C# implementation rules
+
+For every new or modified C# file:
+
+- Target **C# 9 / .NET Standard 2.1 only** (Unity 6 profile). Do not introduce C# 10+ or newer .NET features.
+- Follow the repository's existing formatting: match the surrounding file's style and apply the IDE formatter — do not hand-reformat a file against its existing style.
+- Run IDE/analyser inspections on changed files and clear errors and warnings.
+- Follow the existing codebase naming conventions for new code.
+- Use Allman braces and always brace control statements, even single statements.
+- Initialize fields and variables at declaration.
+- Use `null` for absent references and validate at boundaries.
+- Use explicit casts where conversion is required; do not rely on hidden conversions.
+- Preserve immutability where practical: `const`, `static readonly`, `readonly` fields, and read-only collections.
+- Prefer strongly-typed enums over bool flags, magic strings, or magic numbers.
+- Do not use `goto`.
+- Do not compare floating-point values directly for equality; use a tolerance (`Mathf.Approximately`, epsilon).
+- Prefer named constants over magic numbers, following the file's existing constant naming style.
+- Keep one primary type per file, with the file name matching the type.
+- Give every C# file a Doxygen-compatible file header.
+- Keep public functions and interfaces documented with Doxygen-style comments.
+- Prefer standard library/collection APIs and `foreach` when they make the code clearer; avoid LINQ, closures, and boxing in hot paths and Burst-compiled jobs.
+- Keep functions focused; roughly 100 lines is the upper guideline, not a target.
+- Include only the `using` directives a file directly needs; remove unused ones.
+- Keep class member ordering consistent with the file's existing layout (constants, fields, properties, constructors, Unity messages, methods).
+
+Do not invent a competing local C# style.
+
+---
+
+## Change discipline
+
+Before implementing a non-trivial change:
+
+1. Find the domain owner.
+2. Search for existing implementations of the same rule or knowledge.
+3. Identify the public contract that should own the behavior.
+4. Refactor existing code first if the new behavior would otherwise create duplication or cross-domain coupling.
+5. Keep that refactor behavior-preserving.
+6. Implement the behavioral change.
+7. Add or update tests at the owning module's boundary.
+
+Do not use local convenience types, static mutable state, singletons, events/callbacks, over-broad public exposure, inheritance, generics, or new abstraction layers merely to route around a bad dependency. Fix the dependency when practical.
+
+---
+
+## Verification is a gate, not a promise
+
+A rule that matters should be enforced by tests, the compiler, analyser inspections, asmdef boundaries, CI, or another automated check whenever practical.
+
+Before declaring C# work complete:
+
+1. apply the IDE formatter to changed files;
+2. run analyser inspections on changed files and clear errors/warnings;
+3. compile in Unity without errors or warnings;
+4. run the relevant EditMode/PlayMode tests;
+5. confirm that a refactor-only change did not alter behavior.
+
+Never claim a check passed unless it was actually run.
+
+If a required check cannot be run, state exactly which check was not run and why.
+
 <!-- GSD:architecture-start source:ARCHITECTURE.md -->
 ## Architecture
 

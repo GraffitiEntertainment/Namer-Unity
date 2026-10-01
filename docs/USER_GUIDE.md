@@ -135,28 +135,33 @@ All four sliders respond live without re-Process: each change recomputes the pre
 
 ## Stylization
 
-Stylization is driven by a `NamerStyleProfile` asset: you assign reference images, press **Extract Style Stats**, and the extracted palette drives the stylized After View and the Process output. The profile inspector — embedded in the Processor window or the Project window — is where the palette is reviewed and tuned. The reference-fitted post-processing look lives on its own asset (below).
+Stylization is driven end to end by one asset: the **`NamerStyleAsset`**, created via `Assets/Create/NAMER/Style` (there is no Create button in the Processor window — the asset is picked, not spawned). Attach it in the Processor window's single **Style Asset** field; the same asset drives the stylized After View, the Process output, the fitted post look, and the generated scene Volume. The asset inspector is the whole workflow (below).
 
-### Post Look
+### Style Asset
 
-The post look — the references' global post-processing grade: white balance, post-exposure, contrast, saturation, master + R/G/B color curves, and a bloom threshold, plus a bloom intensity knob — lives on a **`NamerPostLook`** asset, created via `Assets/Create/NAMER/Post Look`. The asset inspector is the whole workflow:
+One shared weighted reference list feeds everything:
 
-1. Assign graded reference screenshots to the asset's reference rows (up to 10; at least one must have a weight above 0 — weights live under its **Advanced** foldout).
-2. Load the object to use as the fit exemplar into the Processor window (`Tools > NAMER > Processor`) and attach a Style Profile there — Fit Look stays disabled with a reason until both exist.
-3. Press **Fit Look**. The fitted parameters fill the asset's editable rows (Tonemapping is fixed ACES; Bloom Intensity is defaulted — tweak it on the asset), and the generated URP Volume asset is pinged.
-4. Tweak the fitted parameters and curves directly on the asset, then press **Regenerate Volume** to update the scene look (parameter edits mark the Volume stale with a warning until regenerated).
+1. Assign 3–10 graded reference screenshots to the asset's reference rows (per-reference weights live under its **Advanced** foldout, next to Hue Mode; weight 0 excludes a reference).
+2. Press **Decompose Style** — enabled once at least 3 references carry weight above 0. The decomposition estimates the reference grade (exposure, white balance, tone curve, contrast, saturation, bloom), classifies reference pixels by confidence, and from that fills the palette, the confidence stats, and the fitted post look — then regenerates the asset's URP Volume and pings it. If a Processor window with a loaded Source is open, the grade is refined against that render (the status line names it — never silently).
+3. Tune afterwards: the palette-application sliders (Style Strength, Smoothing, Cavity Floor, Normal Detail, Roughness Simplify, Hue Mode) recompute the attached preview debounced; the fitted post parameters (white balance, post-exposure, contrast, saturation, curves, bloom; Tonemapping is fixed ACES and Bloom Intensity is the never-fitted artist knob) write the asset — press **Regenerate Volume** to push them into the scene look (edits mark the Volume stale with a warning until regenerated).
 
-Fit Look is an explicit action — it never runs on the slider debounce and never automatically on Process. The asset is the source of truth: one fit per asset, and refitting with another object replaces the look; hand-tweaks made on the generated Volume are lost on re-fit or regeneration. When the reference images change after a fit, the inspector warns `References changed since the fit — Fit Look again to refresh the post look.` For a per-scene look, duplicate the asset and tweak the copy — each asset owns its own Volume. Select the asset in the Processor window's **Post Look** row to drive its `Stylized + Post` preview (below).
+Decompose Style is an explicit action — it never runs automatically and never on a debounce. One decomposition per asset: re-decomposing replaces the palette and the post look, overwrites hand-tweaked post parameters, and regenerates the Volume (hand-tweaks to the generated Volume are lost). When the references change afterwards, the inspector warns `References changed since the decomposition — Decompose Style again to refresh the palette and the post look.` For a per-scene look, duplicate the asset and tweak the copy — each asset owns its own Volume.
+
+The **Palette Source** popup chooses what the next decomposition extracts from: `De-graded Base Colors` (default — the estimated grade is removed before palette extraction, so vertex colors carry what the artist put in the material) or `Raw Pixels` (the grade stays baked into the palette). The grade is applied exactly once — de-graded at extract or at the Volume render, never doubled; switching source requires Decompose Style again (the inspector warns until you do).
+
+**Validate Look** — forward validation: it renders the NAMER decomposition of the object loaded in the Processor window and compares it against the reference style. It needs a decomposition first and a loaded Source in the Processor window. The verdict is evidence only — nothing changes on the asset — and a visible residual mismatch is recorded as the unlock condition for a future 3D-LUT fallback.
+
+Older `NamerStyleProfile` and `NamerPostLook` assets remain inspectable as migration sources. To fold them into one merged asset, use **Merge Style Assets** (`Tools/NAMER > Merge Style Assets…`) — it carries the profile's palette and sliders and the post look's fitted parameters onto a new `NamerStyleAsset`.
 
 ### After View
 
 The **After View** popup (top of Preview/Debug) is a preview-only lens over the After pane; it never gates what Process bakes. Three entries:
 
-- `NAMER` — the un-stylized packed result, byte-identical to the no-profile baseline.
-- `Stylized NAMER` — applies the attached Style Profile (palette transfer, smoothing, and the profile's bake-side controls). The albedo preview below shows its own caption and the `View Stylized` flipper disappears.
-- `Stylized + Post` — the stylized base plus the selected Post Look asset's fitted post look (white balance, exposure, contrast, saturation, curves, bloom) applied in-shader to the After pane, matching the asset's generated scene Volume so the look can be approved without play mode. The albedo preview caption reads `Stylized albedo — the fitted post look renders in the 3D After pane only` because the grade belongs to the lit 3D view, not the flat albedo strip.
+- `NAMER` — the un-stylized packed result, byte-identical to the no-asset baseline.
+- `Stylized NAMER` — applies the attached Style Asset's palette transfer, smoothing, and bake-side controls. The albedo preview below shows its own caption and the `View Stylized` flipper disappears.
+- `Stylized + Post` — the stylized base plus the attached Style Asset's fitted post look (white balance, exposure, contrast, saturation, curves, bloom) applied in-shader to the After pane, matching the asset's generated scene Volume so the look can be approved without play mode. The albedo preview caption reads `Stylized albedo — the fitted post look renders in the 3D After pane only` because the grade belongs to the lit 3D view, not the flat albedo strip.
 
-Without a selected, fitted Post Look asset, `Stylized + Post` falls back to plain `Stylized NAMER` and an info box explains which: `No Post Look asset selected — showing Stylized NAMER. Assign or create a NamerPostLook below.` or `No fit on {AssetName} — showing Stylized NAMER. Press Fit Look in the asset's inspector.` Switching entries recomputes the preview in memory 0.3 s after the change; nothing is written to disk.
+An attached Style Asset that has not been decomposed yet has neither a palette nor a fitted post look, so both stylized views fall back to the NAMER preview with the info `Not decomposed on {AssetName} — the stylized views fall back to the NAMER preview. Press Decompose Style in the asset's inspector.` Switching entries recomputes the preview in memory 0.3 s after the change; nothing is written to disk.
 
 ## Decomposition
 

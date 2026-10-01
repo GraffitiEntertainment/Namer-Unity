@@ -34,6 +34,8 @@ namespace GraffitiEntertainment.Namer.Editor
         private bool isDecomposing;
         private string decomposeError;
         private string volumeError;
+        private bool isValidating;
+        private string validationError;
 
         /// <summary>Reference-slot thumbnail size in pixels (material-inspector row style; A2 donor).</summary>
         private const int kThumbnailSize = 64;
@@ -85,6 +87,8 @@ namespace GraffitiEntertainment.Namer.Editor
             DrawPostBlock();
 
             DrawVolumeBlock();
+
+            DrawValidationBlock();
         }
 
         /// <summary>
@@ -855,6 +859,174 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 volumeError = string.Format(
                     NamerEditorConstants.StyleAssetVolumeRegenerationFailedFormat, exception.Message);
+            }
+        }
+
+        /// <summary>
+        /// S17: Forward Validation (STYL-17/D-03) — the explicit Validate Look
+        /// action plus the persisted-result surface. The stored result renders
+        /// CONTENT-KEYED by severity: lines starting with the mismatch prefix
+        /// render as a Warning HelpBox (the STYL-17 LUT-unlock evidence),
+        /// everything else as a plain miniLabel. A stale result (the fingerprint
+        /// the last validation ran against no longer matches the asset) renders
+        /// the stale line prompting a re-run. Evidence only — no RaiseChanged,
+        /// no Volume or palette writes; nothing changes on the asset until the
+        /// 5.1 parametric-knobs decision is revisited.
+        /// </summary>
+        private void DrawValidationBlock()
+        {
+            EditorGUILayout.LabelField(
+                NamerEditorConstants.StyleAssetValidationHeader, EditorStyles.boldLabel);
+
+            // Resolve the exemplar ONCE — the button state and the click share
+            // the same window (race-safe).
+            NamerEditorWindow exemplarWindow = NamerPostLookEditor.ResolveExemplarWindow();
+            StyleAssetButtonState validate = ValidateButtonState(asset, exemplarWindow);
+            using (new EditorGUI.DisabledScope(validate.Disabled || isValidating))
+            {
+                string buttonLabel = isValidating
+                    ? NamerEditorConstants.StyleAssetValidateBusyLabel
+                    : NamerEditorConstants.StyleAssetValidateButtonLabel;
+                if (GUILayout.Button(new GUIContent(buttonLabel,
+                        NamerEditorConstants.StyleAssetValidateTooltip)))
+                {
+                    RunValidate(exemplarWindow);
+                }
+            }
+
+            if (validate.Disabled)
+            {
+                EditorGUILayout.LabelField(validate.ReasonMiniLabel, EditorStyles.miniLabel);
+            }
+
+            if (!string.IsNullOrEmpty(validationError))
+            {
+                EditorGUILayout.HelpBox(validationError, MessageType.Error);
+            }
+
+            // The persisted result of the last run.
+            if (!string.IsNullOrEmpty(asset.ValidationResult))
+            {
+                if (asset.ValidationResult.StartsWith(
+                        NamerEditorConstants.StyleAssetValidationMismatchPrefix))
+                {
+                    EditorGUILayout.HelpBox(asset.ValidationResult, MessageType.Warning);
+                }
+                else
+                {
+                    EditorGUILayout.LabelField(asset.ValidationResult, EditorStyles.miniLabel);
+                }
+            }
+
+            // Stale result — the last validation ran against different state.
+            if (asset.IsDecomposed
+                && !string.IsNullOrEmpty(asset.ValidationFingerprint)
+                && asset.ValidationFingerprint != asset.ComputeFingerprint())
+            {
+                EditorGUILayout.LabelField(
+                    NamerEditorConstants.StyleAssetValidationStale, EditorStyles.miniLabel);
+            }
+
+            EditorGUILayout.Space();
+        }
+
+        /// <summary>
+        /// The Validate Look prereq seam (headless-testable). LOCKED two-reason
+        /// order: (1) null asset or not decomposed — validation needs the
+        /// decomposition to compare against; (2) null exemplar window or no
+        /// loadable source — validation renders the Processor window's stylized
+        /// output as the subject. Both satisfied → enabled.
+        /// </summary>
+        /// <param name="asset">Asset to inspect.</param>
+        /// <param name="exemplarWindow">The resolved Processor window (may be null).</param>
+        internal static StyleAssetButtonState ValidateButtonState(
+            NamerStyleAsset asset, NamerEditorWindow exemplarWindow)
+        {
+            if (asset == null || !asset.IsDecomposed)
+            {
+                return new StyleAssetButtonState(
+                    true, NamerEditorConstants.StyleAssetValidateNeedsDecompositionReason);
+            }
+
+            if (exemplarWindow == null || !exemplarWindow.HasLoadableSource)
+            {
+                return new StyleAssetButtonState(
+                    true, NamerEditorConstants.StyleAssetValidateNoExemplarReason);
+            }
+
+            return new StyleAssetButtonState(false, null);
+        }
+
+        /// <summary>
+        /// S17 click: render the exemplar window's stylized decomposition of its
+        /// loaded source, re-fit the reference grade against it, and store the
+        /// verdict. Within tolerance → the miniLabel result line; visible
+        /// residual → the mismatch Warning (the STYL-17 LUT-unlock evidence).
+        /// The run's fingerprint stamps the state the verdict was earned
+        /// against. Failure buckets: cancelled → silent; unreadable reference
+        /// or no stylized output → the failed wrapper with the bucket detail;
+        /// anything else → the wrapper with the exception message. NO
+        /// <see cref="NamerStyleAsset.RaiseChanged"/> — evidence only, the
+        /// preview never recomputes for a validation.
+        /// </summary>
+        private void RunValidate(NamerEditorWindow exemplarWindow)
+        {
+            validationError = null;
+            isValidating = true;
+            try
+            {
+                // The window closed between the state read and the click —
+                // nothing to validate against; the next repaint re-runs the gate.
+                if (exemplarWindow == null)
+                {
+                    return;
+                }
+
+                NamerStylePostFitRunResult result = exemplarWindow.RunStylePostFit(asset);
+                if (result.Cancelled)
+                {
+                    return;
+                }
+
+                if (!string.IsNullOrEmpty(result.ErrorTextureName))
+                {
+                    validationError = string.Format(
+                        NamerEditorConstants.StyleAssetValidationFailedFormat,
+                        string.Format(
+                            NamerEditorConstants.StyleAssetValidationUnreadableMessageFormat,
+                            result.ErrorTextureName));
+                    return;
+                }
+
+                if (result.NotExtracted)
+                {
+                    validationError = string.Format(
+                        NamerEditorConstants.StyleAssetValidationFailedFormat,
+                        NamerEditorConstants.StyleAssetValidationNoStylizedOutputMessage);
+                    return;
+                }
+
+                NamerStyleValidationMeasure measure =
+                    NamerStyleDecomposer.ComputeValidationMeasure(result.Params);
+                string measureString =
+                    NamerStyleDecomposer.BuildValidationMeasureString(result.Params);
+                Undo.RecordObject(asset, "Validate Look");
+                asset.ValidationResult = NamerStyleDecomposer.IsWithinValidationTolerance(measure)
+                    ? string.Format(
+                        NamerEditorConstants.StyleAssetValidationWithinToleranceFormat, measureString)
+                    : string.Format(
+                        NamerEditorConstants.StyleAssetValidationMismatchWarningFormat, measureString);
+                asset.ValidationFingerprint = asset.ComputeFingerprint();
+                EditorUtility.SetDirty(asset);
+            }
+            catch (Exception exception)
+            {
+                validationError = string.Format(
+                    NamerEditorConstants.StyleAssetValidationFailedFormat, exception.Message);
+            }
+            finally
+            {
+                isValidating = false;
             }
         }
 

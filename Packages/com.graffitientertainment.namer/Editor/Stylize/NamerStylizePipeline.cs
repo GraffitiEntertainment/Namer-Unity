@@ -7,8 +7,9 @@ namespace GraffitiEntertainment.Namer.Editor
 {
     /// <summary>
     /// Per-Process stylization context (D-01/D-03): the frozen snapshot of one
-    /// <see cref="NamerStyleProfile"/> plus the mesh-derived island ids the stylize
-    /// kernels need. Built via <see cref="Create"/> (which sanitizes the profile with
+    /// <see cref="NamerStyleProfile"/> or merged <see cref="NamerStyleAsset"/> plus
+    /// the mesh-derived island ids the stylize kernels need. Built via
+    /// <see cref="Create"/> (which sanitizes the source with
     /// ClampToCaps and rejects zero-weight/NaN anchors before upload, T-05-06) or
     /// hand-assembled by tests. <see cref="Active"/> is the caller's zero-dispatch
     /// identity gate: false means <c>NamerComputePipeline.Process</c> must take the
@@ -108,6 +109,82 @@ namespace GraffitiEntertainment.Namer.Editor
                 // anchor must never reach the StructuredBuffer.
                 var anchors = new List<NamerStyleAnchor>(profile.PaletteAnchors.Count);
                 foreach (NamerStyleAnchor anchor in profile.PaletteAnchors)
+                {
+                    if (anchor.Weight > 0f && !IsNaN(anchor))
+                    {
+                        anchors.Add(anchor);
+                    }
+                }
+
+                stylization.Anchors = anchors.ToArray();
+                stylization.AnchorCount = anchors.Count;
+                stylization.PaletteAvailable = anchors.Count > 0;
+            }
+
+            if (split != null)
+            {
+                stylization.Uvs = split.Uvs;
+                stylization.FlattenedTriangles = NamerUvIslands.FlattenTriangles(split.SubMeshTriangles);
+                NamerUvIslandResult islands = NamerUvIslands.BuildIslandIds(split);
+                stylization.TriIsland = islands.TriIsland;
+                stylization.IslandCount = islands.IslandCount;
+                stylization.IslandClampedToFloat16Max = islands.ClampedToFloat16Max;
+            }
+
+            if (stylization.Smoothing > 0f && stylization.TriIsland == null)
+            {
+                stylization.SmoothingSkippedNoMesh = true;
+            }
+
+            stylization.Active = (stylization.Smoothing > 0f && stylization.TriIsland != null)
+                || (stylization.PaletteAvailable && stylization.StyleStrength > 0f);
+            return stylization;
+        }
+
+        /// <summary>
+        /// Builds the stylization context from the attached MERGED
+        /// <see cref="NamerStyleAsset"/> (05.3 STYL-16 processor rewire) — a
+        /// field-for-field mirror of the profile overload above: ClampToCaps
+        /// sanitizes, anchors copy through the same weight &gt; 0 / non-NaN filter
+        /// (T-05-06), the split/mesh block is byte-identical, and the
+        /// <see cref="Active"/> zero-dispatch identity gate is copied VERBATIM (a
+        /// neutral asset still composes the honest null path). Palette presence on
+        /// the merged asset is <c>PaletteAnchors.Count &gt; 0</c> — the third
+        /// independent flag; there is no IsExtracted gate to consult. Null asset
+        /// returns the same result the profile overload returns for null.
+        ///
+        /// Stage-order law (D-01/W3): the palette stage stays PRE-FIT on the
+        /// albedo ("stylize the source, then fit"); the ingest doc's post-fit
+        /// OKLab VC remap is a rejected alternative, re-openable only on 05.3
+        /// residual-coverage evidence.
+        ///
+        /// Closest-match law (STYL-16): closest match is the SHIPPED
+        /// CSPaletteTransfer nearest-anchor matching (hue-circular chromatic /
+        /// luma achromatic) — re-open only with visual evidence (Q3 resolved).
+        /// Zero new uniforms; Compute/NAMERStylize.compute is NOT modified.
+        /// </summary>
+        public static NamerStyleStylization Create(NamerStyleAsset asset, NamerSplitResult split)
+        {
+            if (asset == null)
+            {
+                throw new ArgumentNullException(nameof(asset));
+            }
+
+            asset.ClampToCaps();
+
+            NamerStyleStylization stylization = new NamerStyleStylization
+            {
+                StyleStrength = Mathf.Clamp01(asset.StyleStrength),
+                Smoothing = Mathf.Clamp01(asset.Smoothing),
+                HueReplaceMode = asset.HueMode,
+            };
+
+            if (asset.PaletteAnchors != null && asset.PaletteAnchors.Count > 0)
+            {
+                // T-05-06: reject zero-weight and NaN anchors before upload — a NaN
+                // anchor must never reach the StructuredBuffer.
+                var anchors = new List<NamerStyleAnchor>(asset.PaletteAnchors.Count);
+                foreach (NamerStyleAnchor anchor in asset.PaletteAnchors)
                 {
                     if (anchor.Weight > 0f && !IsNaN(anchor))
                     {

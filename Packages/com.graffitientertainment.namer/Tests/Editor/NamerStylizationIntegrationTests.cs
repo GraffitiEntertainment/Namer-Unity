@@ -1056,8 +1056,8 @@ namespace GraffitiEntertainment.Namer.Tests
         [Test]
         public void StylizationNeedsMesh_OnlyWhenProfileRequestsSmoothing()
         {
-            Assert.IsFalse(NamerProcessor.StylizationNeedsMesh(null),
-                "no profile must never prime a mesh (byte-identity guard)");
+            Assert.IsFalse(NamerProcessor.StylizationNeedsMesh((NamerStyleAsset)null),
+                "no style asset must never prime a mesh (byte-identity guard — the 05.3-05 bake-path overload)");
 
             NamerStyleProfile paletteOnly = ScriptableObject.CreateInstance<NamerStyleProfile>();
             paletteOnly.Smoothing = 0f;
@@ -1068,19 +1068,30 @@ namespace GraffitiEntertainment.Namer.Tests
             smoothing.Smoothing = 0.5f;
             Assert.IsTrue(NamerProcessor.StylizationNeedsMesh(smoothing),
                 "Smoothing > 0 must prime the source mesh for island ids");
-            Destroy(paletteOnly, smoothing);
+
+            NamerStyleAsset assetPaletteOnly = ScriptableObject.CreateInstance<NamerStyleAsset>();
+            assetPaletteOnly.Smoothing = 0f;
+            Assert.IsFalse(NamerProcessor.StylizationNeedsMesh(assetPaletteOnly),
+                "merged asset: Smoothing 0 (palette-only) must not prime a mesh");
+
+            NamerStyleAsset assetSmoothing = ScriptableObject.CreateInstance<NamerStyleAsset>();
+            assetSmoothing.Smoothing = 0.5f;
+            Assert.IsTrue(NamerProcessor.StylizationNeedsMesh(assetSmoothing),
+                "merged asset: Smoothing > 0 must prime the source mesh for island ids");
+            Destroy(paletteOnly, smoothing, assetPaletteOnly, assetSmoothing);
         }
 
         // --------------------------------------------------------------------
-        // 05-03 Task 2 E2E: an attached profile restyles the BAKED assets through
-        // the full NamerProcessor (STYL-05/STYL-06 wire-out). Three same-hue
-        // magenta references (a monochrome family — single hue, varying luma)
-        // extract to chromatic anchors whose hue is exactly 5/6; Replace at
-        // strength 1 must snap the baked base's hue to that anchor hue.
+        // 05-03 Task 2 E2E (retargeted 05.3-05 STYL-16): an attached MERGED style
+        // asset restyles the BAKED assets through the full NamerProcessor
+        // (STYL-05/STYL-06 wire-out). Three same-hue magenta references (a
+        // monochrome family — single hue, varying luma) extract to chromatic
+        // anchors whose hue is exactly 5/6; Replace at strength 1 must snap the
+        // baked base's hue to that anchor hue.
         // --------------------------------------------------------------------
 
         [UnityTest]
-        public IEnumerator Process_E2E_AttachedProfile_StylingFlowsIntoBakedAssets()
+        public IEnumerator Process_E2E_AttachedStyleAsset_StylingFlowsIntoBakedAssets()
         {
             if (!ComputeAvailable)
             {
@@ -1098,13 +1109,13 @@ namespace GraffitiEntertainment.Namer.Tests
                 Material source = CreateE2ESourceMaterial(StyleE2ETempFolder, "SourceMat", baseMap);
                 gameObject = CreateE2ESceneObject(mesh, source);
 
-                NamerStyleProfile profile = CreateExtractedProfileAsset(StyleE2ETempFolder + "/StyleProfile.asset");
+                NamerStyleAsset styleAsset = CreateExtractedStyleAsset(StyleE2ETempFolder + "/StyleAsset.asset");
                 var settings = NewPinnedE2ESettings(StyleE2ETempFolder + "/Out");
-                settings.StyleProfileGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(profile));
+                settings.StyleAssetGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(styleAsset));
 
                 // Resolution contract (the same composition NamerProcessor uses).
-                NamerStyleProfile resolved = NamerProcessor.ResolveStyleProfile(settings);
-                Assert.AreSame(profile, resolved, "a live GUID must resolve back to the profile asset");
+                NamerStyleAsset resolved = NamerProcessor.ResolveStyleAsset(settings);
+                Assert.AreSame(styleAsset, resolved, "a live GUID must resolve back to the style asset");
                 Assert.IsNotNull(resolved.PaletteAnchors, "extraction must have produced anchors");
                 Assert.Greater(resolved.Stats.ReferenceCount, 0, "extraction must have counted the references");
 
@@ -1152,13 +1163,15 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         // --------------------------------------------------------------------
-        // 05-03 Task 2 identity E2E: empty GUID, dead (deleted-asset) GUID, and an
-        // attached all-identity profile all bake the SAME bytes — the 04.3
-        // baseline (zero stylize dispatches, silent detach, no exception).
+        // 05-03 Task 2 identity E2E (retargeted 05.3-05 STYL-16): empty GUID, dead
+        // (deleted-asset) GUID, and an attached all-identity MERGED style asset
+        // all bake the SAME bytes — the 04.3 baseline (zero stylize dispatches,
+        // silent detach, no exception). Also pins A9 on the bake side: the stale
+        // legacy StyleProfileGuid must not style the bake.
         // --------------------------------------------------------------------
 
         [UnityTest]
-        public IEnumerator Process_NullOrDeadGuid_ByteIdenticalToIdentityProfile()
+        public IEnumerator Process_NullOrDeadGuid_ByteIdenticalToIdentityAsset()
         {
             if (!ComputeAvailable)
             {
@@ -1176,44 +1189,60 @@ namespace GraffitiEntertainment.Namer.Tests
                 Material source = CreateE2ESourceMaterial(StyleE2ETempFolder, "SourceMat", baseMap);
                 gameObject = CreateE2ESceneObject(mesh, source);
 
-                // All-identity attached profile: unextracted (no anchors), strength 0,
+                // All-identity attached merged asset: empty palette (no anchors),
                 // smoothing 0 — every new branch is walked but each is identity.
-                NamerStyleProfile identity = ScriptableObject.CreateInstance<NamerStyleProfile>();
-                identity.name = "IdentityProfile";
-                AssetDatabase.CreateAsset(identity, StyleE2ETempFolder + "/IdentityProfile.asset");
+                NamerStyleAsset identity = ScriptableObject.CreateInstance<NamerStyleAsset>();
+                identity.name = "IdentityStyleAsset";
+                AssetDatabase.CreateAsset(identity, StyleE2ETempFolder + "/IdentityStyleAsset.asset");
 
                 var settings = NewPinnedE2ESettings(StyleE2ETempFolder + "/Out");
                 settings.OverwriteGenerated = true;
 
-                settings.StyleProfileGuid = string.Empty;
+                settings.StyleAssetGuid = string.Empty;
                 NamerProcessResult nullGuid = NamerProcessor.Process(gameObject, settings);
                 Assert.IsNull(nullGuid.Error, "null-GUID Process should succeed: " + nullGuid.Error);
                 Color32[] nullGuidBase = DecodePng(nullGuid.GeneratedAssets[0].BaseTexturePath, out int _, out int _);
                 Color32[] nullGuidSurface = DecodePng(nullGuid.GeneratedAssets[0].SurfaceTexturePath, out int _, out int _);
 
-                settings.StyleProfileGuid = kDeadAssetGuid;
+                settings.StyleAssetGuid = kDeadAssetGuid;
                 NamerProcessResult deadGuid = NamerProcessor.Process(gameObject, settings);
                 Assert.IsNull(deadGuid.Error,
                     "a deleted-asset GUID must silently detach (T-05-11), never error: " + deadGuid.Error);
-                Assert.IsNull(NamerProcessor.ResolveStyleProfile(settings),
-                    "a dead GUID must resolve to a null profile");
+                Assert.IsNull(NamerProcessor.ResolveStyleAsset(settings),
+                    "a dead GUID must resolve to a null style asset");
                 Color32[] deadGuidBase = DecodePng(deadGuid.GeneratedAssets[0].BaseTexturePath, out int _, out int _);
                 Color32[] deadGuidSurface = DecodePng(deadGuid.GeneratedAssets[0].SurfaceTexturePath, out int _, out int _);
 
-                settings.StyleProfileGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(identity));
-                NamerProcessResult identityProfile = NamerProcessor.Process(gameObject, settings);
-                Assert.IsNull(identityProfile.Error, "identity-profile Process should succeed: " + identityProfile.Error);
-                Color32[] identityBase = DecodePng(identityProfile.GeneratedAssets[0].BaseTexturePath, out int _, out int _);
-                Color32[] identitySurface = DecodePng(identityProfile.GeneratedAssets[0].SurfaceTexturePath, out int _, out int _);
+                settings.StyleAssetGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(identity));
+                NamerProcessResult identityAsset = NamerProcessor.Process(gameObject, settings);
+                Assert.IsNull(identityAsset.Error, "identity-asset Process should succeed: " + identityAsset.Error);
+                Color32[] identityBase = DecodePng(identityAsset.GeneratedAssets[0].BaseTexturePath, out int _, out int _);
+                Color32[] identitySurface = DecodePng(identityAsset.GeneratedAssets[0].SurfaceTexturePath, out int _, out int _);
+
+                // A9 bake-side pin (T-05.3-05-01): a STALE legacy StyleProfileGuid
+                // pointing at a live, fully-extracted Replace-strength-1 profile must
+                // NOT style the bake — Process composes only from ResolveStyleAsset,
+                // so the legacy pref is never read on the new path.
+                NamerStyleProfile staleProfile = CreateExtractedProfileAsset(StyleE2ETempFolder + "/StaleLegacyProfile.asset");
+                settings.StyleProfileGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(staleProfile));
+                settings.StyleAssetGuid = string.Empty;
+                NamerProcessResult staleLegacy = NamerProcessor.Process(gameObject, settings);
+                Assert.IsNull(staleLegacy.Error, "stale-legacy-GUID Process should succeed: " + staleLegacy.Error);
+                Color32[] staleLegacyBase = DecodePng(staleLegacy.GeneratedAssets[0].BaseTexturePath, out int _, out int _);
+                Color32[] staleLegacySurface = DecodePng(staleLegacy.GeneratedAssets[0].SurfaceTexturePath, out int _, out int _);
 
                 Assert.AreEqual(0, CountByteDifferences(nullGuidBase, deadGuidBase),
                     "null GUID and dead GUID must bake byte-identical bases");
                 Assert.AreEqual(0, CountByteDifferences(nullGuidSurface, deadGuidSurface),
                     "null GUID and dead GUID must bake byte-identical surfaces");
                 Assert.AreEqual(0, CountByteDifferences(nullGuidBase, identityBase),
-                    "an all-identity attached profile must bake the 04.3 baseline base byte for byte");
+                    "an all-identity attached style asset must bake the 04.3 baseline base byte for byte");
                 Assert.AreEqual(0, CountByteDifferences(nullGuidSurface, identitySurface),
-                    "an all-identity attached profile must bake the 04.3 baseline surface byte for byte");
+                    "an all-identity attached style asset must bake the 04.3 baseline surface byte for byte");
+                Assert.AreEqual(0, CountByteDifferences(nullGuidBase, staleLegacyBase),
+                    "a stale legacy StyleProfileGuid must not style the bake (A9 — the pref is never read on the new path)");
+                Assert.AreEqual(0, CountByteDifferences(nullGuidSurface, staleLegacySurface),
+                    "a stale legacy StyleProfileGuid must not style the bake surface (A9)");
             }
             finally
             {
@@ -1226,14 +1255,14 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         // --------------------------------------------------------------------
-        // 05-03 Task 2 priming E2E: Smoothing > 0 with decomposition OFF primes
-        // the source mesh — the island-gated bilateral runs and measurably
-        // flattens the grain base in the BAKED asset (no priming = skip = the
-        // grain survives untouched).
+        // 05-03 Task 2 priming E2E (retargeted 05.3-05 STYL-16): Smoothing > 0 on
+        // the attached merged asset with decomposition OFF primes the source mesh
+        // — the island-gated bilateral runs and measurably flattens the grain base
+        // in the BAKED asset (no priming = skip = the grain survives untouched).
         // --------------------------------------------------------------------
 
         [UnityTest]
-        public IEnumerator Process_ProfileSmoothing_PrimesMeshWithoutDecomposition()
+        public IEnumerator Process_AssetSmoothing_PrimesMeshWithoutDecomposition()
         {
             if (!ComputeAvailable)
             {
@@ -1251,32 +1280,32 @@ namespace GraffitiEntertainment.Namer.Tests
                 Material source = CreateE2ESourceMaterial(StyleE2ETempFolder, "SourceMat", baseMap);
                 gameObject = CreateE2ESceneObject(mesh, source);
 
-                // Smoothing-only profile: unextracted (no palette) so the ONLY effect is
-                // the island-gated bilateral — its variance drop proves the mesh was
+                // Smoothing-only style asset: empty palette so the ONLY effect is the
+                // island-gated bilateral — its variance drop proves the mesh was
                 // primed, split, and rasterized (skip would leave the grain untouched).
-                NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
-                profile.name = "SmoothingProfile";
-                profile.Smoothing = 0.5f;
-                AssetDatabase.CreateAsset(profile, StyleE2ETempFolder + "/SmoothingProfile.asset");
+                NamerStyleAsset styleAsset = ScriptableObject.CreateInstance<NamerStyleAsset>();
+                styleAsset.name = "SmoothingStyleAsset";
+                styleAsset.Smoothing = 0.5f;
+                AssetDatabase.CreateAsset(styleAsset, StyleE2ETempFolder + "/SmoothingStyleAsset.asset");
 
                 var settings = NewPinnedE2ESettings(StyleE2ETempFolder + "/Out");
                 settings.OverwriteGenerated = true;
-                string profileGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(profile));
-                settings.StyleProfileGuid = profileGuid;
+                string assetGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(styleAsset));
+                settings.StyleAssetGuid = assetGuid;
 
-                // The unsmoothed CONTROL must run with NO profile attached (the empty
-                // GUID is 05-03 Task 2's identity path): with the smoothing profile
-                // attached, the bilateral flattens the "plain" bake too and the
-                // variance oracle loses its baseline (round 2 — both runs came out
-                // byte-identical smoothed output).
-                settings.StyleProfileGuid = string.Empty;
+                // The unsmoothed CONTROL must run with NO asset attached (the empty
+                // GUID is the identity path): with the smoothing asset attached, the
+                // bilateral flattens the "plain" bake too and the variance oracle
+                // loses its baseline (round 2 — both runs came out byte-identical
+                // smoothed output).
+                settings.StyleAssetGuid = string.Empty;
                 settings.OverwriteGenerated = false;
                 NamerProcessResult unsmoothed = NamerProcessor.Process(gameObject, settings);
                 Assert.IsNull(unsmoothed.Error, "unsmoothed Process should succeed: " + unsmoothed.Error);
                 Color32[] plain = DecodePng(unsmoothed.GeneratedAssets[0].BaseTexturePath, out int _, out int _);
 
                 settings.OverwriteGenerated = true;
-                settings.StyleProfileGuid = profileGuid;
+                settings.StyleAssetGuid = assetGuid;
                 NamerProcessResult smoothed = NamerProcessor.Process(gameObject, settings);
                 Assert.IsNull(smoothed.Error, "smoothed Process should succeed: " + smoothed.Error);
                 Color32[] island = DecodePng(smoothed.GeneratedAssets[0].BaseTexturePath, out int _, out int _);
@@ -1298,9 +1327,10 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         // --------------------------------------------------------------------
-        // 05-03 Task 2 no-mesh fallback: a bare-material selection (no mesh) with
-        // Smoothing > 0 degrades to palette-only — the skip flag is set on the
-        // composed context, palette transfer still styles the bake, no exception.
+        // 05-03 Task 2 no-mesh fallback (retargeted 05.3-05 STYL-16): a
+        // bare-material selection (no mesh) with Smoothing > 0 on the merged
+        // asset degrades to palette-only — the skip flag is set on the composed
+        // context, palette transfer still styles the bake, no exception.
         // --------------------------------------------------------------------
 
         [UnityTest]
@@ -1319,18 +1349,18 @@ namespace GraffitiEntertainment.Namer.Tests
                 Texture2D baseMap = CreateGrainBaseMapAsset(StyleE2ETempFolder + "/SourceBase.png");
                 Material source = CreateE2ESourceMaterial(StyleE2ETempFolder, "SourceMat", baseMap);
 
-                NamerStyleProfile profile = CreateExtractedProfileAsset(StyleE2ETempFolder + "/StyleProfile.asset");
-                profile.Smoothing = 0.5f;
+                NamerStyleAsset styleAsset = CreateExtractedStyleAsset(StyleE2ETempFolder + "/StyleAsset.asset");
+                styleAsset.Smoothing = 0.5f;
 
                 // The composed context for a mesh-less selection: palette available +
                 // strength 1 => Active, but the islands are missing => skip flag set.
-                NamerStyleStylization context = NamerStyleStylization.Create(profile, null);
+                NamerStyleStylization context = NamerStyleStylization.Create(styleAsset, null);
                 Assert.IsTrue(context.Active, "palette at strength 1 must keep the context active without a mesh");
                 Assert.IsTrue(context.SmoothingSkippedNoMesh,
                     "Smoothing > 0 without island data must set SmoothingSkippedNoMesh (OQ-3)");
 
                 var settings = NewPinnedE2ESettings(StyleE2ETempFolder + "/Out");
-                settings.StyleProfileGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(profile));
+                settings.StyleAssetGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(styleAsset));
 
                 NamerProcessResult result = NamerProcessor.Process(source, settings);
                 Assert.IsNull(result.Error, "bare-material Process should succeed (palette-only degrade): " + result.Error);
@@ -1338,7 +1368,7 @@ namespace GraffitiEntertainment.Namer.Tests
 
                 Color32[] baked = DecodePng(result.GeneratedAssets[0].BaseTexturePath, out int _, out int _);
                 float medianHue = MedianOf(baked, kSampleInset, c => HueOf(c));
-                Assert.AreEqual(DominantAnchorHue(profile), medianHue, kE2EHueTolerance,
+                Assert.AreEqual(DominantAnchorHue(styleAsset), medianHue, kE2EHueTolerance,
                     "palette transfer must still restyle the bare-material bake to the anchor hue");
             }
             finally
@@ -1781,6 +1811,55 @@ namespace GraffitiEntertainment.Namer.Tests
             }
         }
 
+        /// <summary>Extracted MERGED-asset fixture via the REAL extractor (05.3-05
+        /// STYL-16 retarget): the same three same-hue magenta refs and the same
+        /// apply sequence as <see cref="CreateExtractedProfileAsset"/>, carried onto
+        /// a <see cref="NamerStyleAsset"/> (anchors share the NamerStyleAnchor shape
+        /// — zero mapping code), strength 1 + Replace mode, saved to
+        /// <paramref name="path"/> so its GUID resolves through the dedicated
+        /// StyleAssetGuid pref.</summary>
+        private static NamerStyleAsset CreateExtractedStyleAsset(string path)
+        {
+            Texture2D bright = CreateSolidRef("RefMagentaBright", new Color(1f, 0f, 1f, 1f));
+            Texture2D mid = CreateSolidRef("RefMagentaMid", new Color(0.8f, 0f, 0.8f, 1f));
+            Texture2D dark = CreateSolidRef("RefMagentaDark", new Color(0.6f, 0f, 0.6f, 1f));
+            NamerStyleProfile source = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            NamerStyleAsset asset = ScriptableObject.CreateInstance<NamerStyleAsset>();
+            try
+            {
+                source.References.Add(bright);
+                source.References.Add(mid);
+                source.References.Add(dark);
+
+                NamerStyleExtractResult result = NamerStyleExtractor.Extract(source, shouldCancel: NeverCancel);
+                Assert.IsFalse(result.Cancelled, "headless extraction must not cancel");
+                Assert.IsFalse(result.TooFewReferences, "three refs must satisfy the minimum");
+                Assert.IsTrue(string.IsNullOrEmpty(result.ErrorTextureName), "readable in-memory refs must not error");
+                Assert.IsNotNull(result.Anchors, "three readable refs must extract anchors");
+
+                // The same apply sequence, carried onto the merged asset.
+                asset.PaletteAnchors.Clear();
+                for (int i = 0; i < result.Anchors.Length; i++)
+                {
+                    asset.PaletteAnchors.Add(result.Anchors[i]);
+                }
+
+                asset.Stats = result.Stats;
+                asset.ReferenceFingerprint = result.Fingerprint;
+                asset.StyleStrength = 1f;
+                asset.Smoothing = 0f;
+                asset.HueMode = kHueModeReplace;
+
+                AssetDatabase.CreateAsset(asset, path);
+                return asset;
+            }
+            finally
+            {
+                Destroy(bright, mid, dark);
+                Destroy(source);
+            }
+        }
+
         private static Texture2D CreateSolidRef(string name, Color color)
         {
             var texture = new Texture2D(16, 16, TextureFormat.RGBA32, false, true)
@@ -1811,6 +1890,26 @@ namespace GraffitiEntertainment.Namer.Tests
             bool found = false;
             NamerStyleAnchor dominant = default;
             foreach (NamerStyleAnchor anchor in profile.PaletteAnchors)
+            {
+                if (anchor.Saturation >= 0.15f && (!found || anchor.Weight > dominant.Weight))
+                {
+                    found = true;
+                    dominant = anchor;
+                }
+            }
+
+            Assert.IsTrue(found, "the magenta-family refs must extract at least one chromatic anchor");
+            return dominant.Hue;
+        }
+
+        /// <summary>Merged-asset mirror of the profile overload — the dominant
+        /// chromatic anchor's hue from the attached
+        /// <see cref="NamerStyleAsset"/>'s palette.</summary>
+        private static float DominantAnchorHue(NamerStyleAsset asset)
+        {
+            bool found = false;
+            NamerStyleAnchor dominant = default;
+            foreach (NamerStyleAnchor anchor in asset.PaletteAnchors)
             {
                 if (anchor.Saturation >= 0.15f && (!found || anchor.Weight > dominant.Weight))
                 {

@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -32,9 +33,26 @@ namespace GraffitiEntertainment.Namer.Editor
         private bool advancedFoldout;
         private bool isDecomposing;
         private string decomposeError;
+        private string volumeError;
 
         /// <summary>Reference-slot thumbnail size in pixels (material-inspector row style; A2 donor).</summary>
         private const int kThumbnailSize = 64;
+
+        /// <summary>Cavity Floor slider maximum (UI-SPEC P9 range 0-0.5).</summary>
+        private const float kCavityFloorMax = 0.5f;
+
+        /// <summary>Hue Mode popup options (UI-SPEC P13; index into the asset's HueMode).</summary>
+        private static readonly string[] HueModeOptions = { "Preserve", "Replace" };
+
+        /// <summary>
+        /// The S14 debounce sentence appended to every palette-application control
+        /// tooltip — these recompute the attached Processor-window preview
+        /// (debounce law; the profile editor's DebounceSuffix donor, verbatim).
+        /// </summary>
+        private static string DebounceSuffix
+        {
+            get { return "Recomputes the preview in memory " + NamerEditorConstants.DebounceSeconds + " s after the slider stops — nothing is written to disk."; }
+        }
 
         private void OnEnable()
         {
@@ -61,6 +79,12 @@ namespace GraffitiEntertainment.Namer.Editor
             DrawStalenessWarnings();
 
             DrawPaletteBlock();
+
+            DrawSlidersBlock();
+
+            DrawPostBlock();
+
+            DrawVolumeBlock();
         }
 
         /// <summary>
@@ -197,6 +221,22 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             EditorGUI.indentLevel++;
+
+            // S5: Hue Mode — the palette-application control living in the foldout
+            // (P13 donor placement; debounce-suffixed, it recomputes the preview).
+            EditorGUI.BeginChangeCheck();
+            int hueMode = EditorGUILayout.Popup(
+                new GUIContent("Hue Mode",
+                    NamerEditorConstants.StyleAssetHueModeTooltipPrefix + DebounceSuffix),
+                asset.HueMode, HueModeOptions);
+            if (EditorGUI.EndChangeCheck())
+            {
+                Undo.RecordObject(asset, "Set Hue Mode");
+                asset.HueMode = hueMode;
+                EditorUtility.SetDirty(asset);
+                NamerStyleAsset.RaiseChanged(asset);
+            }
+
             for (int i = 0; i < asset.References.Count; i++)
             {
                 Texture2D reference = asset.References[i];
@@ -571,6 +611,251 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             EditorGUILayout.Space();
+        }
+
+        /// <summary>
+        /// S14: the five palette-application sliders re-homed from the profile
+        /// editor with the 05 locked copy, ranges, and DEBOUNCE suffixes verbatim
+        /// (these recompute the attached Processor-window preview — debounce law,
+        /// NOT the write-suffix). Application controls, not extraction inputs:
+        /// edits never touch DecompositionFingerprint or VolumeWriteFingerprint
+        /// directly (staleness flips only through the params fingerprint the
+        /// base contract already recomputes).
+        /// </summary>
+        private void DrawSlidersBlock()
+        {
+            DrawSlider(
+                new GUIContent("Style Strength",
+                    NamerEditorConstants.StyleAssetStyleStrengthTooltipPrefix + DebounceSuffix),
+                asset.StyleStrength, 0f, 1f, "Set Style Strength",
+                (edited, value) => edited.StyleStrength = value);
+            DrawSlider(
+                new GUIContent("Smoothing",
+                    NamerEditorConstants.StyleAssetSmoothingTooltipPrefix + DebounceSuffix),
+                asset.Smoothing, 0f, 1f, "Set Smoothing",
+                (edited, value) => edited.Smoothing = value);
+            DrawSlider(
+                new GUIContent("Cavity Floor",
+                    NamerEditorConstants.StyleAssetCavityFloorTooltipPrefix + DebounceSuffix),
+                asset.CavityFloor, 0f, kCavityFloorMax, "Set Cavity Floor",
+                (edited, value) => edited.CavityFloor = value);
+            DrawSlider(
+                new GUIContent("Normal Detail",
+                    NamerEditorConstants.StyleAssetNormalDetailTooltipPrefix + DebounceSuffix),
+                asset.NormalDetailReduction, 0f, 1f, "Set Normal Detail",
+                (edited, value) => edited.NormalDetailReduction = value);
+            DrawSlider(
+                new GUIContent("Roughness Simplify",
+                    NamerEditorConstants.StyleAssetRoughnessSimplifyTooltipPrefix + DebounceSuffix),
+                asset.RoughnessSimplify, 0f, 1f, "Set Roughness Simplify",
+                (edited, value) => edited.RoughnessSimplify = value);
+
+            EditorGUILayout.Space();
+        }
+
+        /// <summary>
+        /// S15: the EDITABLE fitted post parameters (the A9 donor re-homed onto
+        /// the merged asset). Gated on <c>!(HasFit || IsDecomposed)</c> — NOT
+        /// literal !IsDecomposed — so a migrated asset's carried post block stays
+        /// tweakable (STYL-15 no-silent-loss); the not-decomposed reason shows
+        /// only when NEITHER holds. Every editable tooltip = the 5.1
+        /// fit-statistic string + <see cref="NamerEditorConstants.PostLookParameterTooltipSuffix"/>
+        /// (the write-suffix — NOT the debounce sentence; these write the asset).
+        /// Tonemapping stays a read-only constant row.
+        /// </summary>
+        private void DrawPostBlock()
+        {
+            EditorGUILayout.LabelField(
+                NamerEditorConstants.StyleAssetPostBlockHeader, EditorStyles.boldLabel);
+
+            if (!(asset.HasFit || asset.IsDecomposed))
+            {
+                EditorGUILayout.LabelField(
+                    NamerEditorConstants.StyleAssetNotDecomposedStatus, EditorStyles.miniLabel);
+            }
+
+            using (new EditorGUI.DisabledScope(!(asset.HasFit || asset.IsDecomposed)))
+            {
+                // Constant row — never a placeholder (URP's ACES curve is parameter-free).
+                EditorGUILayout.LabelField(
+                    new GUIContent(
+                        NamerEditorConstants.StyleAssetTonemappingLabel,
+                        NamerEditorConstants.StyleAssetTonemappingTooltip),
+                    new GUIContent(NamerEditorConstants.StyleAssetTonemappingValue));
+
+                string whiteBalanceTooltip =
+                    NamerEditorConstants.StyleAssetWhiteBalanceTooltipPrefix
+                        + NamerEditorConstants.PostLookParameterTooltipSuffix;
+                DrawSlider(
+                    new GUIContent("White Balance Temperature", whiteBalanceTooltip),
+                    asset.PostTemperature, -100f, 100f, "Set White Balance Temperature",
+                    (edited, value) => edited.PostTemperature = value);
+                DrawSlider(
+                    new GUIContent("White Balance Tint", whiteBalanceTooltip),
+                    asset.PostTint, -100f, 100f, "Set White Balance Tint",
+                    (edited, value) => edited.PostTint = value);
+                DrawSlider(
+                    new GUIContent("Post Exposure",
+                        NamerEditorConstants.StyleAssetPostExposureTooltipPrefix
+                            + NamerEditorConstants.PostLookParameterTooltipSuffix),
+                    asset.PostExposureEv,
+                    -NamerEditorConstants.MaxFittedPostExposureEv,
+                    NamerEditorConstants.MaxFittedPostExposureEv,
+                    "Set Post Exposure",
+                    (edited, value) => edited.PostExposureEv = value);
+                DrawSlider(
+                    new GUIContent("Contrast",
+                        NamerEditorConstants.StyleAssetContrastTooltipPrefix
+                            + NamerEditorConstants.PostLookParameterTooltipSuffix),
+                    asset.PostContrast, -100f, 100f, "Set Contrast",
+                    (edited, value) => edited.PostContrast = value);
+                DrawSlider(
+                    new GUIContent("Saturation",
+                        NamerEditorConstants.StyleAssetSaturationTooltipPrefix
+                            + NamerEditorConstants.PostLookParameterTooltipSuffix),
+                    asset.PostSaturation, -100f, 100f, "Set Saturation",
+                    (edited, value) => edited.PostSaturation = value);
+                DrawSlider(
+                    new GUIContent("Bloom Threshold",
+                        NamerEditorConstants.StyleAssetBloomThresholdTooltipPrefix
+                            + NamerEditorConstants.PostLookParameterTooltipSuffix),
+                    asset.PostBloomThreshold, 0f, NamerEditorConstants.MaxBloomThreshold,
+                    "Set Bloom Threshold",
+                    (edited, value) => edited.PostBloomThreshold = value);
+                DrawSlider(
+                    new GUIContent("Bloom Intensity",
+                        NamerEditorConstants.StyleAssetBloomIntensityTooltipPrefix
+                            + NamerEditorConstants.PostLookParameterTooltipSuffix),
+                    asset.PostBloomIntensity, 0f, NamerEditorConstants.MaxBloomIntensity,
+                    "Set Bloom Intensity",
+                    (edited, value) => edited.PostBloomIntensity = value);
+
+                string curvesTooltip =
+                    NamerEditorConstants.StyleAssetCurvesTooltipPrefix
+                        + NamerEditorConstants.PostLookParameterTooltipSuffix;
+                DrawCurveField(
+                    new GUIContent("Master Curve", curvesTooltip), asset.PostMasterCurve, Color.white,
+                    "Set Master Curve", (edited, value) => edited.PostMasterCurve = value);
+                DrawCurveField(
+                    new GUIContent("Red Curve", curvesTooltip), asset.PostRedCurve, Color.red,
+                    "Set Red Curve", (edited, value) => edited.PostRedCurve = value);
+                DrawCurveField(
+                    new GUIContent("Green Curve", curvesTooltip), asset.PostGreenCurve, Color.green,
+                    "Set Green Curve", (edited, value) => edited.PostGreenCurve = value);
+                DrawCurveField(
+                    new GUIContent("Blue Curve", curvesTooltip), asset.PostBlueCurve, Color.blue,
+                    "Set Blue Curve", (edited, value) => edited.PostBlueCurve = value);
+            }
+
+            EditorGUILayout.Space();
+        }
+
+        /// <summary>
+        /// Curve row with the value-edit contract of <see cref="DrawSlider"/> plus
+        /// the curve-specific sanitize: after the write,
+        /// <see cref="NamerStyleAsset.ClampToCaps"/> clamps every key to [0,1]
+        /// and drops degenerates (the DrawCurveField donor shape, retargeted to
+        /// the merged asset).
+        /// </summary>
+        private void DrawCurveField(GUIContent label, AnimationCurve value, Color color, string undoName, Action<NamerStyleAsset, AnimationCurve> write)
+        {
+            EditorGUI.BeginChangeCheck();
+            AnimationCurve updated = EditorGUILayout.CurveField(label, value, color, new Rect(0f, 0f, 1f, 1f));
+            if (EditorGUI.EndChangeCheck())
+            {
+                Undo.RecordObject(asset, undoName);
+                write(asset, updated);
+                asset.ClampToCaps();
+                EditorUtility.SetDirty(asset);
+                NamerStyleAsset.RaiseChanged(asset);
+            }
+        }
+
+        /// <summary>
+        /// S16: the Volume block — status line (name-keyed companion Volume
+        /// derived from this asset, D-06), the explicit Regenerate Volume button
+        /// (gated on HasFit — the params exist to rebuild from; the
+        /// not-decomposed reason shows only when NEITHER fit nor decomposition
+        /// holds), the Volume-staleness warning (rides the VolumeWriteFingerprint
+        /// stamp), and the per-scene duplicate-and-tweak hint.
+        /// </summary>
+        private void DrawVolumeBlock()
+        {
+            EditorGUILayout.LabelField(
+                NamerEditorConstants.StyleAssetVolumeBlockHeader, EditorStyles.boldLabel);
+
+            // The Volume the writer will (re)generate for this asset.
+            if (asset.HasFit)
+            {
+                NamerProcessorSettings settings = new NamerProcessorSettings();
+                string volumeFileName = Path.GetFileName(
+                    NamerStyleVolumeWriter.ComposeVolumePath(asset, settings));
+                EditorGUILayout.LabelField(
+                    string.Format(NamerEditorConstants.StyleAssetVolumeStatusFormat, volumeFileName),
+                    EditorStyles.miniLabel);
+            }
+            else
+            {
+                EditorGUILayout.LabelField(
+                    NamerEditorConstants.StyleAssetNoVolumeStatus, EditorStyles.miniLabel);
+            }
+
+            // Explicit regeneration — never debounced, no confirmation (the
+            // overwrite is pre-documented in the button tooltip).
+            using (new EditorGUI.DisabledScope(!asset.HasFit))
+            {
+                if (GUILayout.Button(new GUIContent(
+                        NamerEditorConstants.StyleAssetRegenerateVolumeLabel,
+                        NamerEditorConstants.StyleAssetRegenerateVolumeTooltip)))
+                {
+                    RunRegenerateVolume();
+                }
+            }
+
+            if (!(asset.HasFit || asset.IsDecomposed))
+            {
+                EditorGUILayout.LabelField(
+                    NamerEditorConstants.StyleAssetNotDecomposedStatus, EditorStyles.miniLabel);
+            }
+
+            if (!string.IsNullOrEmpty(volumeError))
+            {
+                EditorGUILayout.HelpBox(volumeError, MessageType.Error);
+            }
+
+            // Parameters changed since the last Volume write.
+            if (asset.IsVolumeStale)
+            {
+                EditorGUILayout.HelpBox(
+                    NamerEditorConstants.StyleAssetVolumeStaleWarning, MessageType.Warning);
+            }
+
+            EditorGUILayout.LabelField(
+                NamerEditorConstants.StyleAssetPerSceneHint, EditorStyles.miniLabel);
+            EditorGUILayout.Space();
+        }
+
+        /// <summary>
+        /// S16 Regenerate click: preflight the write gates, rebuild the companion
+        /// Volume from the asset's current parameters, ping it. Any refusal or
+        /// failure surfaces as the locked "Volume regeneration failed: …"
+        /// HelpBox (the RunRegenerateVolume donor shape).
+        /// </summary>
+        private void RunRegenerateVolume()
+        {
+            volumeError = null;
+            try
+            {
+                NamerProcessorSettings settings = new NamerProcessorSettings();
+                NamerStyleVolumeWriter.PreflightWriteGate(asset, settings);
+                VolumeProfile volume = NamerStyleVolumeWriter.Write(asset, settings);
+                EditorGUIUtility.PingObject(volume);
+            }
+            catch (Exception exception)
+            {
+                volumeError = string.Format(
+                    NamerEditorConstants.StyleAssetVolumeRegenerationFailedFormat, exception.Message);
+            }
         }
 
         /// <summary>

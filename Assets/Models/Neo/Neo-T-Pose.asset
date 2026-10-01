@@ -12,73 +12,67 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6e1b6f0e2e5bc44b596e90e8abc90c7a, type: 3}
   m_Name: Neo-T-Pose
   m_EditorClassIdentifier: 
-  References:
-  - {fileID: 2800000, guid: 2890b769fe8624d8cac1eb784fae5aec, type: 3}
-  - {fileID: 2800000, guid: 358099fcc976544d6980aedefec77fb0, type: 3}
-  - {fileID: 2800000, guid: 5a9755a0a1768487fb027fc315a9d46a, type: 3}
-  ReferenceWeights:
-  - 1
-  - 1
-  - 1
-  StyleStrength: 0.3268
+  References: []
+  ReferenceWeights: []
+  StyleStrength: 0
   Smoothing: 0
   CavityFloor: 0
   NormalDetailReduction: 1
   RoughnessSimplify: 0.3026
   HueMode: 1
   PaletteAnchors:
-  - LinearColor: {r: 0.09375, g: 0.039931506, b: 0.04300514, a: 1}
-    Hue: 0.9904815
-    Saturation: 0.57406396
-    Luma: 0.051595233
-    Weight: 7300
-  - LinearColor: {r: 0.20632005, g: 0.06252367, b: 0.053246174, a: 1}
-    Hue: 0.010101328
-    Saturation: 0.7419244
-    Luma: 0.092424944
-    Weight: 13204
-  - LinearColor: {r: 0.4479745, g: 0.11671031, b: 0.07656329, a: 1}
-    Hue: 0.018015532
-    Saturation: 0.82909006
-    Luma: 0.18423846
-    Weight: 7924
-  - LinearColor: {r: 0.090184994, g: 0.08286228, b: 0.22820851, a: 1}
-    Hue: 0.67506355
-    Saturation: 0.63690096
-    Luma: 0.09491309
-    Weight: 3892
-  - LinearColor: {r: 0.27711907, g: 0.26403254, b: 0.19680247, a: 1}
-    Hue: 0.13951054
-    Saturation: 0.28982705
-    Luma: 0.26196072
-    Weight: 1982
-  - LinearColor: {r: 0.81774807, g: 0.32673842, b: 0.12622257, a: 1}
-    Hue: 0.048326932
-    Saturation: 0.84564614
-    Luma: 0.41664982
-    Weight: 4192
-  - LinearColor: {r: 0.03125, g: 0.03625582, b: 0.04364748, a: 1}
-    Hue: 0.5993704
-    Saturation: 0.28403655
-    Luma: 0.035725262
-    Weight: 9876
-  - LinearColor: {r: 0.14713874, g: 0.28660485, b: 0.7380914, a: 1}
-    Hue: 0.627333
-    Saturation: 0.80064964
-    Luma: 0.28955168
-    Weight: 782
+  - LinearColor: {r: 0.12247136, g: 0.11901457, b: 0.12620035, a: 1}
+    Hue: 0.7468434
+    Saturation: 0.05693946
+    Luma: 0.12026829
+    Weight: 11481
+  - LinearColor: {r: 0.09709982, g: 0.2991157, b: 0.058218017, a: 1}
+    Hue: 0.3064327
+    Saturation: 0.8053662
+    Luma: 0.2387743
+    Weight: 6269
+  - LinearColor: {r: 0.38191634, g: 0.44877067, b: 0.49159923, a: 1}
+    Hue: 0.5650794
+    Saturation: 0.22311445
+    Luma: 0.43764967
+    Weight: 5684
+  - LinearColor: {r: 0.6019431, g: 0.4044574, b: 0.25302097, a: 1}
+    Hue: 0.07233535
+    Saturation: 0.57965964
+    Luma: 0.43550915
+    Weight: 10634
+  - LinearColor: {r: 0.061725587, g: 0.3013263, b: 0.44858602, a: 1}
+    Hue: 0.56344223
+    Saturation: 0.86239964
+    Luma: 0.26101935
+    Weight: 14971
+  - LinearColor: {r: 0.69114643, g: 0.5809934, b: 0.50839156, a: 1}
+    Hue: 0.0662106
+    Saturation: 0.2644228
+    Luma: 0.5991701
+    Weight: 10524
+  - LinearColor: {r: 0.03900945, g: 0.05934692, b: 0.052496314, a: 1}
+    Hue: 0.4438589
+    Saturation: 0.34268793
+    Luma: 0.05452856
+    Weight: 14579
+  - LinearColor: {r: 0.3145089, g: 0.3247943, b: 0.15637857, a: 1}
+    Hue: 0.17684525
+    Saturation: 0.5185304
+    Luma: 0.310448
+    Weight: 7778
   Stats:
     AnchorCount: 8
     HueFamilyCount: 5
-    MeanSaturation: 0.63895375
-    ShadowFraction: 0.9255168
-    MidtoneFraction: 0.06870524
-    HighlightFraction: 0.0057779946
-    ShadowColor: {r: 0.19691189, g: 0.07431209, b: 0.08209934, a: 1}
-    MidtoneColor: {r: 0.7377017, g: 0.37060446, b: 0.18330804, a: 1}
-    HighlightColor: {r: 0.9203345, g: 0.7306338, b: 0.30105633, a: 1}
-    WarmCoolBias: 0.7808304
-    Contrast: 9.2624
-    PaletteDensity: 0.28198242
-    ReferenceCount: 3
-  ReferenceFingerprint: 2890b769fe8624d8cac1eb784fae5aec:1|358099fcc976544d6980aedefec77fb0:1|5a9755a0a1768487fb027fc315a9d46a:1
+    MeanSaturation: 0.5342716
+    ShadowFraction: 0.60858154
+    MidtoneFraction: 0.36800537
+    HighlightFraction: 0.023413086
+    ShadowColor: {r: 0.102904044, g: 0.17511721, b: 0.17675321, a: 1}
+    MidtoneColor: {r: 0.501813, g: 0.46479023, b: 0.37703067, a: 1}
+    HighlightColor: {r: 0.8034085, g: 0.7131778, b: 0.60903287, a: 1}
+    WarmCoolBias: 0.30286908
+    Contrast: 11.188583
+    PaletteDensity: 0.25512695
+    ReferenceCount: 5
+  ReferenceFingerprint: cb7711058ace241a481492c25747b865:1|0492cd9c8c2a0405b925cfcca9a3f0bd:1|898962e0d17cd4dcdb337b4dde5960e2:1|b051c1947e65c416aa3d3bcb39bda6c7:1|3db77557480954bf398ad14b794fa7f4:1

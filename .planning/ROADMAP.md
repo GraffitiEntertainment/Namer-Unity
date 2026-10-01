@@ -416,7 +416,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 — depends_on 05.3-02 + 05.3-04; shares NamerEditorConstants.cs with plan 04, so the ordering is structural in the plan frontmatter)*
 
-- [ ] 05.3-05-PLAN.md — Window rewire + STYL-16 data retarget: NamerStyleStylization.Create(NamerStyleAsset) pre-fit composition, W15-W18 Style Asset object field, R1-R8 retirements, RunStylePostFit retarget seam, zero-dispatch identity gate (STYL-15/16)
+- [x] 05.3-05-PLAN.md — Window rewire + STYL-16 data retarget: NamerStyleStylization.Create(NamerStyleAsset) pre-fit composition, W15-W18 Style Asset object field, R1-R8 retirements, RunStylePostFit retarget seam, zero-dispatch identity gate (STYL-15/16)
 
 **Wave 4** *(blocked on Waves 2-3 — needs the decomposer + the window validation seam)*
 
@@ -440,4 +440,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 5. Stylization | 3/3 | Complete   | 2026-09-24 |
 | 5.1. Reference-fitted URP Post-processing Look (INSERTED) | 4/4 | Complete   | 2026-09-25 |
 | 05.2. Standalone post-look asset (INSERTED) | 6/6 | Complete | 2026-09-28 |
-| 05.3. Reference decomposition + merged style asset (INSERTED) | 4/6 | In Progress|  |
+| 05.3. Reference decomposition + merged style asset (INSERTED) | 5/6 | In Progress|  |

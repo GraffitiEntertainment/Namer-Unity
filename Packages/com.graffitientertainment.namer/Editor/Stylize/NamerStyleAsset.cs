@@ -176,17 +176,14 @@ namespace GraffitiEntertainment.Namer.Editor
         public string ValidationFingerprint = "";
 
         /// <summary>
-        /// Raised by the asset editor after every value edit (plan 06; mirrors
+        /// Raised by the asset editor after every value edit (mirrors
         /// <see cref="NamerPostLook.Changed"/>). The Processor window subscribes
         /// while this asset is attached and routes the event through its debounced
         /// preview recompute; this event NEVER triggers a decomposition or a fit
-        /// (explicit-action law).
+        /// (explicit-action law). Invoked only through the editor-side
+        /// <see cref="RaiseChanged"/> partial (declaring-type-only law).
         /// </summary>
-        // Transient CS0067 silence: the RaiseChanged partial (declaring-type-only
-        // law) lands beside the asset editor in plan 06 — remove this pragma with it.
-#pragma warning disable CS0067
         public static event Action<NamerStyleAsset> Changed;
-#pragma warning restore CS0067
 
         /// <summary>Number of non-null reference slots (null slots are skipped everywhere).</summary>
         public int AssignedReferenceCount

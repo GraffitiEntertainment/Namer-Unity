@@ -747,9 +747,12 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>
         /// Number of assigned reference slots carrying a positive weight (the S4
-        /// min-3 gate's honest count — weight-0 slots are not "there").
+        /// min-3 gate's honest count — weight-0 slots are not "there"). Internal:
+        /// the merged-asset editor's DecomposeButtonState seam + S6 status line
+        /// share this single counter (05.3-06 seam widening,
+        /// EvaluateRefitMaxError precedent).
         /// </summary>
-        private static int CountPositiveWeightReferences(NamerStyleAsset asset)
+        internal static int CountPositiveWeightReferences(NamerStyleAsset asset)
         {
             int count = 0;
             for (int i = 0; i < asset.References.Count; i++)

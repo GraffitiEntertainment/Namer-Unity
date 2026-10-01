@@ -420,7 +420,7 @@ Plans:
 
 **Wave 4** *(blocked on Waves 2-3 — needs the decomposer + the window validation seam)*
 
-- [ ] 05.3-06-PLAN.md — Merged asset editor S1-S17: shared list + Decompose Style transaction (neutral primary, exemplar-refined named complement) + Palette Source switch + carried post/Volume blocks + Validate Look (STYL-17 LUT-unlock evidence) + prereq-seam tests + USER_GUIDE collapse (STYL-14/15/17)
+- [x] 05.3-06-PLAN.md — Merged asset editor S1-S17: shared list + Decompose Style transaction (neutral primary, exemplar-refined named complement) + Palette Source switch + carried post/Volume blocks + Validate Look (STYL-17 LUT-unlock evidence) + prereq-seam tests + USER_GUIDE collapse (STYL-14/15/17)
 
 ## Progress
 
@@ -440,4 +440,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 5. Stylization | 3/3 | Complete   | 2026-09-24 |
 | 5.1. Reference-fitted URP Post-processing Look (INSERTED) | 4/4 | Complete   | 2026-09-25 |
 | 05.2. Standalone post-look asset (INSERTED) | 6/6 | Complete | 2026-09-28 |
-| 05.3. Reference decomposition + merged style asset (INSERTED) | 5/6 | In Progress|  |
+| 05.3. Reference decomposition + merged style asset (INSERTED) | 6/6 | Ready for Verification|  |

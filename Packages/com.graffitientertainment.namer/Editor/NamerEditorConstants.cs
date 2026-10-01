@@ -211,5 +211,36 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>Never-silent announcement console line, look-less variant (05.3 M4 locked copy; {0} = profile name, {1} = created asset path).</summary>
         public const string MergeAnnouncementLookLessFormat = "NAMER: merged {0} into {1}.";
+
+        // -- Processor window W15-W18 (05.3 UI-SPEC Copywriting; the window's new
+        // Style Asset copy lives here — constants law; consumed by
+        // Editor/UI/NamerEditorWindow.cs) ------------------------------------------
+
+        /// <summary>
+        /// W15 Style Asset ObjectField tooltip (05.3 locked copy; {0} =
+        /// <see cref="DebounceSeconds"/>). NO Create affordance anywhere in the
+        /// panel (D-06) — creation is menu-only.
+        /// </summary>
+        public const string StyleAssetFieldTooltipFormat =
+            "Attaches the NAMER Style Asset: its palette (closest-match albedo remap before the vertex-color build), "
+                + "island-gated smoothing, and bake-side controls apply to the stylized previews and to every Process run; "
+                + "its fitted post look drives the Stylized + Post view. Create it via Assets/Create/NAMER/Style — "
+                + "decomposing, fitting, and tweaking live in the asset's own inspector. Recomputes the preview in memory {0} s "
+                + "after the change — nothing is written to disk.";
+
+        /// <summary>W18 popup-disabled hint, no asset attached (05.3 locked copy; menu-pointing, D-06).</summary>
+        public const string StyleAssetAttachHint =
+            "Attach a Style Asset to enable the stylized views — create one via Assets/Create/NAMER/Style.";
+
+        /// <summary>W16 single stylized-lens fallback, attached but not decomposed (05.3 locked copy; {0} = asset name).</summary>
+        public const string StyleAssetNotDecomposedFallbackFormat =
+            "Not decomposed on {0} — the stylized views fall back to the NAMER preview. Press Decompose Style in the asset's inspector.";
+
+        /// <summary>W18 attach-state honesty line, decomposed (05.3 locked copy; {0} = asset name, {1} = palette color count, {2} = positive-weight reference count).</summary>
+        public const string StyleAssetStateDecomposedFormat =
+            "{0} — decomposed ({1} palette colors, {2} weighted references)";
+
+        /// <summary>W18 attach-state honesty line, not decomposed (05.3 locked copy; {0} = asset name).</summary>
+        public const string StyleAssetStateNotDecomposedFormat = "{0} — not decomposed";
     }
 }

@@ -7,59 +7,34 @@ using UnityEngine.Rendering;
 namespace GraffitiEntertainment.Namer.Editor
 {
     /// <summary>
-    /// Custom inspector for <see cref="NamerPostLook"/> implementing the 05.2 UI-SPEC
-    /// section A component inventory exactly (STYL-10/STYL-12, D-03): the reference-list
-    /// header + slot rows + +/– footer + count-honesty line (A1-A4, D-05 — slot rows
-    /// render material-inspector style — label left, square thumbnail ObjectField
-    /// right — per the 2026-09-28 user amendment, superseding the 2026-09-27
-    /// no-thumbnail call), the Advanced foldout with per-reference fit weights (A5),
-    /// the fit-source status line + explicit Fit Look button + error boxes (A6-A8,
-    /// D-04: one render pipeline, never debounced, never automatic), the EDITABLE
-    /// fitted parameters (A9-A10 — the 5.1 read-only rows re-homed as the artist
-    /// tweak surface; the asset is the source of truth, D-06), and the Volume block
-    /// (A11-A14: status / Regenerate / staleness / per-scene hint). Donors re-homed
-    /// from the retired 5.1 profile-editor surface (05.2 plan 04 R3). Every value
-    /// edit routes through Undo.RecordObject + EditorUtility.SetDirty +
+    /// Custom inspector for <see cref="NamerPostLook"/> — since 05.3 (R6) the LEGACY
+    /// migration-source surface: the 05.2 UI-SPEC section A inventory minus the Fit
+    /// Look block (deleted with the merged <see cref="NamerStyleAsset"/> taking over
+    /// fitting — A6-A8 live on the merged asset's own inspector). Remaining: the
+    /// reference-list header + slot rows + +/– footer + count-honesty line (A1-A4,
+    /// D-05 — slot rows render material-inspector style — label left, square
+    /// thumbnail ObjectField right — per the 2026-09-28 user amendment, superseding
+    /// the 2026-09-27 no-thumbnail call), the Advanced foldout with per-reference
+    /// fit weights (A5), the EDITABLE fitted parameters (A9-A10 — the 5.1
+    /// read-only rows re-homed as the artist tweak surface; the asset is the source
+    /// of truth, D-06), and the Volume block (A11-A14: status / Regenerate /
+    /// staleness / per-scene hint). Every value edit routes through
+    /// Undo.RecordObject + EditorUtility.SetDirty +
     /// <see cref="NamerPostLook.Changed"/>; list-shape edits (+/–) never raise
-    /// Changed and never recompute — Fit Look is the only reader of the references.
-    /// Zero custom colors or fonts; EditorStyles roles and MessageType semantics
-    /// only, per the UI-SPEC Typography and Color tables.
+    /// Changed and never recompute — no remaining editor path reads the references
+    /// (Q4: legacy assets stay inspectable migration sources). Zero custom colors
+    /// or fonts; EditorStyles roles and MessageType semantics only, per the UI-SPEC
+    /// Typography and Color tables.
     /// </summary>
     [CustomEditor(typeof(NamerPostLook))]
     public class NamerPostLookEditor : UnityEditor.Editor
     {
         private NamerPostLook look;
         private bool advancedFoldout;
-        private bool isFitting;
-        private string fitError;
         private string volumeError;
 
         /// <summary>Reference-slot thumbnail size in pixels (material-inspector row style; 2026-09-28 user amendment).</summary>
         private const int kThumbnailSize = 64;
-
-        /// <summary>
-        /// Pure prerequisite state of the A7 Fit Look button (05.2 plan 05; the
-        /// FitButtonState successor of the retired 5.1 profile-editor seam):
-        /// <see cref="Disabled"/> plus the locked prereq reason rendered as a
-        /// miniLabel under the disabled button (null when enabled). Busy state is
-        /// deliberately NOT part of this seam — the "Fitting…" label swap covers it;
-        /// the seam is about prerequisites only.
-        /// </summary>
-        internal readonly struct FitLookButtonState
-        {
-            /// <summary>Creates the button state from the prereq evaluation.</summary>
-            public FitLookButtonState(bool disabled, string reasonMiniLabel)
-            {
-                Disabled = disabled;
-                ReasonMiniLabel = reasonMiniLabel;
-            }
-
-            /// <summary>True when the Fit Look button must render disabled.</summary>
-            public bool Disabled { get; }
-
-            /// <summary>Locked prereq reason shown under the disabled button; null when enabled.</summary>
-            public string ReasonMiniLabel { get; }
-        }
 
         private void OnEnable()
         {
@@ -68,9 +43,9 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Draws the full A1-A14 inspector in data-flow order: references, Fit,
-        /// parameters, Volume. All copy is verbatim-locked against the 05.2 UI-SPEC
-        /// Copywriting table.
+        /// Draws the surviving A1-A14 inventory (A6-A8 deleted, 05.3 R6) in
+        /// data-flow order: references, parameters, Volume. All copy is
+        /// verbatim-locked against the 05.2 UI-SPEC Copywriting table.
         /// </summary>
         public override void OnInspectorGUI()
         {
@@ -78,8 +53,6 @@ namespace GraffitiEntertainment.Namer.Editor
 
             DrawReferenceSection();
             EditorGUILayout.Space();
-
-            DrawFitLookBlock();
 
             DrawParametersBlock();
             EditorGUILayout.Space();
@@ -186,15 +159,15 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// A4: count honesty line — the honest gate is at least one assigned
-        /// reference with weight above 0 (the frozen fit's zero-mass guard), NOT the
-        /// palette extractor's min-3 (deliberately not imported).
+        /// A4: count honesty line — the plain assigned count. 05.3 R8 dropped the
+        /// Fit Look clause with the button; the min-3 gate copy lives on the merged
+        /// asset's editor (S4).
         /// </summary>
         private void DrawCountLine()
         {
             EditorGUILayout.LabelField(
                 look.AssignedReferenceCount + " / " + NamerEditorConstants.MaxReferences
-                + " references assigned — Fit Look needs at least one with weight above 0.",
+                + " references assigned",
                 EditorStyles.miniLabel);
             EditorGUILayout.Space();
         }
@@ -241,122 +214,16 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// A6-A8: the Fit Look block — the fit-source status line (A6, one-fit-per-
-        /// asset honesty), the explicit Fit Look button with the verbatim CTA tooltip
-        /// and the three-reason prereq chain (A7, D-04: never on the debounce, never
-        /// automatic; the fit runs through the window's single render pipeline), and
-        /// the fit-failure HelpBoxes (A8).
-        /// </summary>
-        private void DrawFitLookBlock()
-        {
-            // A6: fit-source status line.
-            EditorGUILayout.LabelField(
-                look.HasFit
-                    ? "Fitted from: " + look.PostFitExemplarName + " — one fit per asset; refitting with another object replaces the look."
-                    : "Not fitted — load a source in the Processor window, then press Fit Look.",
-                EditorStyles.miniLabel);
-
-            // A7: the button. Exemplar resolution — the first open Processor window
-            // with a loadable source (the 5.1 ResolveExemplarWindow donor minus the
-            // embedded-host branch; this editor is never embedded in the window).
-            FitLookButtonState buttonState = FitButtonState(look, ResolveExemplarWindow(), new NamerProcessorSettings());
-            bool disabled = isFitting || buttonState.Disabled;
-            using (new EditorGUI.DisabledScope(disabled))
-            {
-                if (GUILayout.Button(new GUIContent(
-                        isFitting ? "Fitting…" : "Fit Look",
-                        "Fits the reference look's global grade (white balance, post-exposure, contrast, saturation, master/RGB curves, bloom threshold) from the Processor window's stylized render onto this asset, then regenerates its URP Volume. Explicit action — never runs automatically. Re-fitting replaces the fit and overwrites the generated Volume; hand-tweaks to the generated Volume are lost (this asset is the truth).")))
-                {
-                    RunFitLook();
-                }
-            }
-
-            if (!isFitting && buttonState.ReasonMiniLabel != null)
-            {
-                EditorGUILayout.LabelField(buttonState.ReasonMiniLabel, EditorStyles.miniLabel);
-            }
-
-            // A8: fit failures (locked "Fit failed: …" copies).
-            if (!string.IsNullOrEmpty(fitError))
-            {
-                EditorGUILayout.HelpBox(fitError, MessageType.Error);
-            }
-
-            EditorGUILayout.Space();
-        }
-
-        /// <summary>
-        /// A7 pure seam (05.2 plan 05, headless-testable; the FitButtonState successor
-        /// re-homed from the retired 5.1 profile-editor surface). Reason evaluation
-        /// order is LOCKED (D-04): (1) no positive-weight reference (the WR-01 mirror
-        /// of the frozen fit's zero-mass guard), (2) no exemplar window with a loadable
-        /// source, (3) no stylized output — a window whose attached Style Profile does
-        /// not resolve (the D-04-locked hint). The optional injected window may be
-        /// null (tests pass null to pin reason 2); the stylized-output predicate is
-        /// the plan-04 static seam over settings. Busy state is not part of the seam.
-        /// </summary>
-        internal static FitLookButtonState FitButtonState(
-            NamerPostLook look,
-            NamerEditorWindow exemplarWindow,
-            NamerProcessorSettings settings)
-        {
-            if (look == null || !HasPositiveReferenceWeight(look))
-            {
-                return new FitLookButtonState(
-                    true, "Fit Look needs at least one reference with weight above 0 — all slots empty or every weight 0 leaves nothing to fit.");
-            }
-
-            if (exemplarWindow == null || !exemplarWindow.HasLoadableSource)
-            {
-                return new FitLookButtonState(
-                    true, "Fit Look uses the object loaded in the Processor window (Tools > NAMER/Processor) — load a Source there first.");
-            }
-
-            if (!NamerEditorWindow.HasStylizedOutput(settings))
-            {
-                return new FitLookButtonState(
-                    true, "Fit Look fits the Processor window's stylized render — attach a Style Profile in the Processor window first.");
-            }
-
-            return new FitLookButtonState(false, null);
-        }
-
-        /// <summary>
-        /// WR-01 mirror re-homed: true when any assigned reference slot carries a
-        /// weight above 0 — the editor-side mirror of the TotalWeight guard in
-        /// <see cref="NamerStylePostFit.Fit"/>. Null slots are skipped everywhere; a
-        /// missing weight entry falls back to the default weight (the shared read
-        /// discipline of RunStylePostFit / ClampToCaps / ComputeFingerprint).
-        /// </summary>
-        private static bool HasPositiveReferenceWeight(NamerPostLook look)
-        {
-            for (int i = 0; i < look.References.Count; i++)
-            {
-                if (look.References[i] == null)
-                {
-                    continue;
-                }
-
-                float weight = i < look.ReferenceWeights.Count
-                    ? look.ReferenceWeights[i]
-                    : NamerEditorConstants.DefaultReferenceWeight;
-                if (weight > 0f)
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        /// <summary>
-        /// A7 exemplar resolution (the 5.1 donor minus the embedded-host branch —
+        /// Exemplar resolution (the 5.1 donor minus the embedded-host branch —
         /// this asset editor is never embedded in the Processor window): the first
         /// open <see cref="NamerEditorWindow"/> with a loadable source — the "one
         /// visible, honest source of exemplar truth" contract. Null when no candidate
-        /// resolves.
+        /// resolves. 05.3 (R6): the Fit Look button that consumed this is deleted
+        /// with the merged asset taking over fitting; the seam survives as the
+        /// INTERNAL Validate Look donor for the merged asset's editor (S17, plan
+        /// 06 — the EvaluateRefitMaxError widening precedent).
         /// </summary>
-        private static NamerEditorWindow ResolveExemplarWindow()
+        internal static NamerEditorWindow ResolveExemplarWindow()
         {
             NamerEditorWindow[] windows = Resources.FindObjectsOfTypeAll<NamerEditorWindow>();
             for (int i = 0; i < windows.Length; i++)
@@ -368,110 +235,6 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             return null;
-        }
-
-        /// <summary>
-        /// Runs one explicit Fit Look (D-04: synchronous, cancellable via the window
-        /// seam's progress bar, never on the debounce): resolves the exemplar window,
-        /// runs the window's <see cref="NamerEditorWindow.RunStylePostFit(NamerPostLook)"/>
-        /// seam — the ONE render pipeline, math frozen — and on success writes the fit
-        /// onto the asset via Undo/SetDirty +
-        /// <see cref="NamerStylePostFit.ApplyToPostLook"/>, regenerates the Volume
-        /// asset (pinging it), and finally raises
-        /// <see cref="NamerPostLook.RaiseChanged"/> so a selected window preview
-        /// refreshes. The Volume write gates are pre-flighted
-        /// (<see cref="NamerStyleVolumeWriter.PreflightWriteGate(NamerPostLook, NamerProcessorSettings)"/>,
-        /// CR-01) BEFORE the asset is mutated, so a refusal never desyncs asset and
-        /// Volume and a cancelled bar leaves the asset untouched. Failure paths
-        /// surface the locked "Fit failed: …" HelpBox copies (A8). Settings resolution
-        /// copies the 5.1 donor — the default settings instance (the CTA tooltip's
-        /// promise); no new settings plumbing.
-        /// </summary>
-        private void RunFitLook()
-        {
-            fitError = null;
-            isFitting = true;
-            try
-            {
-                NamerEditorWindow exemplarWindow = ResolveExemplarWindow();
-                if (exemplarWindow == null)
-                {
-                    return;
-                }
-
-                NamerStylePostFitRunResult result;
-                try
-                {
-                    result = exemplarWindow.RunStylePostFit(look);
-                }
-                catch (Exception exception)
-                {
-                    fitError = "Fit failed: " + exception.Message;
-                    return;
-                }
-
-                if (result.Cancelled)
-                {
-                    return;
-                }
-
-                if (result.NotExtracted)
-                {
-                    // Prereq reason path: the next repaint re-evaluates FitButtonState
-                    // and renders the active locked reason under the disabled button.
-                    return;
-                }
-
-                if (!string.IsNullOrEmpty(result.ErrorTextureName))
-                {
-                    fitError = "Fit failed: " + result.ErrorTextureName
-                        + " could not be read. Check the texture's Read/Write import setting.";
-                    return;
-                }
-
-                // CR-01 (carried over): pre-flight the Volume write gates BEFORE the
-                // asset is mutated, so a refusal (foreign asset at the path,
-                // destination escape) leaves the asset untouched — asset and
-                // generated Volume can never desync, and "Fit failed" never reports
-                // after the fit itself was committed. The gate exempts the asset's
-                // own companion Volume from the overwrite opt-in, so re-fits succeed
-                // on default settings as the CTA tooltip promises.
-                NamerProcessorSettings settings = new NamerProcessorSettings();
-                // WR-01 (05.2): the gate still runs BEFORE Undo.RecordObject so a
-                // refusal leaves the asset untouched, but inside its own catch so
-                // it surfaces as the locked "Fit failed: …" HelpBox (A8) instead
-                // of an uncaught GUI exception.
-                try
-                {
-                    NamerStyleVolumeWriter.PreflightWriteGate(look, settings);
-                }
-                catch (Exception exception)
-                {
-                    fitError = "Fit failed: " + exception.Message;
-                    return;
-                }
-
-                Undo.RecordObject(look, "Fit Look");
-                NamerStylePostFit.ApplyToPostLook(look, result.Params, result.ExemplarName);
-                EditorUtility.SetDirty(look);
-
-                // D-06: regenerate the Volume from asset truth. Any write-gate
-                // refusal surfaces here as the locked "Fit failed: {message}" copy.
-                try
-                {
-                    VolumeProfile volume = NamerStyleVolumeWriter.Write(look, settings);
-                    EditorGUIUtility.PingObject(volume);
-                }
-                catch (Exception exception)
-                {
-                    fitError = "Fit failed: " + exception.Message;
-                }
-            }
-            finally
-            {
-                isFitting = false;
-                NamerPostLook.RaiseChanged(look);
-            }
         }
 
         /// <summary>

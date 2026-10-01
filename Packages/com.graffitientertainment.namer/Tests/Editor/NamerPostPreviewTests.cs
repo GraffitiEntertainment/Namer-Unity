@@ -8,7 +8,9 @@ namespace GraffitiEntertainment.Namer.Tests
 {
     /// <summary>
     /// 05.1 D-04 (STYL-09) / 05.2 plan 04 (W10) Stylized + Post lens tests, pinned
-    /// against the SELECTED <see cref="NamerPostLook"/> asset: the popup option
+    /// against the ATTACHED merged <see cref="NamerStyleAsset"/>'s fitted post
+    /// look (05.3-05 retarget; the legacy <see cref="NamerPostLook"/> resolver
+    /// test below stays as the migration-source pin): the popup option
     /// table, the caption seam, the ApplyPostLook material-uniform contract
     /// (full-strength direct asset reads), the bloom-threshold conversion, the
     /// GUID round-trip of the selection row (W9), and the pane-bloom renderer
@@ -109,18 +111,18 @@ namespace GraffitiEntertainment.Namer.Tests
             Shader shader = Shader.Find("GraffitiEntertainment.Namer/NAMER");
             Assert.IsNotNull(shader, "NAMER shader must load");
 
-            NamerPostLook look = ScriptableObject.CreateInstance<NamerPostLook>();
+            NamerStyleAsset asset = ScriptableObject.CreateInstance<NamerStyleAsset>();
             Material material = new Material(shader);
             try
             {
-                look.PostFitFingerprint = "synthetic-fit-fingerprint";
-                look.PostTemperature = 20f;
-                look.PostTint = -10f;
-                look.PostExposureEv = 1.5f;
-                look.PostContrast = 25f;
-                look.PostSaturation = -40f;
+                asset.PostFitFingerprint = "synthetic-fit-fingerprint";
+                asset.PostTemperature = 20f;
+                asset.PostTint = -10f;
+                asset.PostExposureEv = 1.5f;
+                asset.PostContrast = 25f;
+                asset.PostSaturation = -40f;
 
-                NamerEditorWindow.ApplyPostLook(material, look, true);
+                NamerEditorWindow.ApplyPostLook(material, asset, true);
 
                 Assert.AreEqual(1f, material.GetFloat("_PostEnable"),
                     "fitted look at the post lens must enable the in-shader grade");
@@ -146,7 +148,7 @@ namespace GraffitiEntertainment.Namer.Tests
             finally
             {
                 Object.DestroyImmediate(material);
-                Object.DestroyImmediate(look);
+                Object.DestroyImmediate(asset);
             }
         }
 
@@ -162,8 +164,8 @@ namespace GraffitiEntertainment.Namer.Tests
             Shader shader = Shader.Find("GraffitiEntertainment.Namer/NAMER");
             Assert.IsNotNull(shader, "NAMER shader must load");
 
-            NamerPostLook fitted = ScriptableObject.CreateInstance<NamerPostLook>();
-            NamerPostLook unfitted = ScriptableObject.CreateInstance<NamerPostLook>();
+            NamerStyleAsset fitted = ScriptableObject.CreateInstance<NamerStyleAsset>();
+            NamerStyleAsset unfitted = ScriptableObject.CreateInstance<NamerStyleAsset>();
             Material material = new Material(shader);
             try
             {
@@ -215,8 +217,8 @@ namespace GraffitiEntertainment.Namer.Tests
             Assert.AreEqual(0f, NamerEditorWindow.BloomThresholdLinear(null),
                 "no selected look must disable the pane bloom chain (0 sentinel)");
 
-            NamerPostLook unfitted = ScriptableObject.CreateInstance<NamerPostLook>();
-            NamerPostLook fitted = ScriptableObject.CreateInstance<NamerPostLook>();
+            NamerStyleAsset unfitted = ScriptableObject.CreateInstance<NamerStyleAsset>();
+            NamerStyleAsset fitted = ScriptableObject.CreateInstance<NamerStyleAsset>();
             try
             {
                 Assert.AreEqual(0f, NamerEditorWindow.BloomThresholdLinear(unfitted),

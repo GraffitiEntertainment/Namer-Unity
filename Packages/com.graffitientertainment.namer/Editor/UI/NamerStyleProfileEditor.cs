@@ -6,17 +6,19 @@ namespace GraffitiEntertainment.Namer.Editor
 {
     /// <summary>
     /// Custom inspector for <see cref="NamerStyleProfile"/> implementing the 05 UI-SPEC
-    /// section B component inventory exactly: the reference-list header (P1), slot rows
-    /// with 64x64 thumbnails (P2), the +/– footer (P3), the count-honesty line (P4), the
-    /// explicit Extract Style Stats button (P5, STYL-02), the Statistics block with the
-    /// em-dash placeholder and staleness warning (P6), the five debounced parameter
-    /// sliders (P7-P11) — 05.2-03 (STYL-11/R1) retired the palette luma knob: the
-    /// palette transfer never touches tonality — and the Advanced
-    /// foldout holding Hue Mode and per-reference
-    /// weights (P12-P14). Every value edit routes through Undo.RecordObject +
-    /// EditorUtility.SetDirty + <see cref="NamerStyleProfile.Changed"/> (OQ-2); list-shape
-    /// edits (+/–) never raise Changed and never recompute — extraction is the only path
-    /// that reads references (D-04). Zero custom colors or fonts; EditorStyles roles and
+    /// section B component inventory (the 05.3 R7 shape): the reference-list header
+    /// (P1), slot rows with 64x64 thumbnails (P2), the +/– footer (P3), the
+    /// count-honesty line (P4), the explicit Extract Style Stats button (P5,
+    /// STYL-02), the five debounced parameter sliders (P7-P11) — 05.2-03
+    /// (STYL-11/R1) retired the palette luma knob: the palette transfer never
+    /// touches tonality — and the Advanced foldout holding Hue Mode and
+    /// per-reference weights (P12-P14). The Statistics block (P6) was deleted in
+    /// 05.3 (R7) — the HSL palette list on the merged
+    /// <see cref="NamerStyleAsset"/> is the shipped truth. Every value edit routes
+    /// through Undo.RecordObject + EditorUtility.SetDirty +
+    /// <see cref="NamerStyleProfile.Changed"/> (OQ-2); list-shape edits (+/–)
+    /// never raise Changed and never recompute — extraction is the only path that
+    /// reads references (D-04). Zero custom colors or fonts; EditorStyles roles and
     /// MessageType semantics only, per the UI-SPEC Typography and Color tables.
     /// </summary>
     [CustomEditor(typeof(NamerStyleProfile))]
@@ -27,9 +29,6 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>Cavity Floor slider maximum (UI-SPEC P9 range 0-0.5).</summary>
         private const float kCavityFloorMax = 0.5f;
-
-        /// <summary>Statistics placeholder rendered before the first extract (UI-SPEC P6).</summary>
-        private const string kStatPlaceholder = "—";
 
         /// <summary>Hue Mode popup options (UI-SPEC P13; index into profile.HueMode).</summary>
         private static readonly string[] HueModeOptions = { "Preserve", "Replace" };
@@ -69,7 +68,6 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             DrawExtractButton();
-            DrawStatistics();
         }
 
         /// <summary>P2 slot rows, or the empty-state block when the list has no slots.</summary>
@@ -226,38 +224,11 @@ namespace GraffitiEntertainment.Namer.Editor
             }
         }
 
-        /// <summary>P6: stat rows ("—" before first extract) + staleness warning.</summary>
-        private void DrawStatistics()
-        {
-            EditorGUILayout.LabelField("Statistics", EditorStyles.boldLabel);
-            EditorGUILayout.LabelField(
-                new GUIContent("Palette Anchors", "Dominant palette anchors extracted from the references (STYL-02)."),
-                new GUIContent(profile.IsExtracted ? profile.Stats.AnchorCount.ToString() : kStatPlaceholder));
-            EditorGUILayout.LabelField(
-                new GUIContent("Warm/Cool Bias", "Weighted warm-minus-cool hue energy: > 0 leans warm (330-90 degrees), < 0 leans cool (180-270 degrees)."),
-                new GUIContent(profile.IsExtracted ? profile.Stats.WarmCoolBias.ToString("F2") : kStatPlaceholder));
-            EditorGUILayout.LabelField(
-                new GUIContent("Contrast", "Luma 90th/10th percentile ratio over the merged reference histogram."),
-                new GUIContent(profile.IsExtracted ? profile.Stats.Contrast.ToString("F2") : kStatPlaceholder));
-            EditorGUILayout.LabelField(
-                new GUIContent("Palette Density", "Fraction of occupied histogram bins — how broadly the reference palette spreads."),
-                new GUIContent(profile.IsExtracted ? profile.Stats.PaletteDensity.ToString("F2") : kStatPlaceholder));
-
-            if (profile.IsStale)
-            {
-                EditorGUILayout.HelpBox(
-                    "Reference images changed since extraction — Extract Style Stats again to update the palette.",
-                    MessageType.Warning);
-            }
-
-            EditorGUILayout.Space();
-        }
-
         /// <summary>P7-P11: the five parameter sliders, each with its decision tooltip.</summary>
         private void DrawParameterSliders()
         {
             DrawSlider(
-                new GUIContent("Style Strength", "Palette styling strength: 0 keeps the original look, 1 fully ramps hue toward the reference palette and boosts vibrance. Palette transfer never touches tonality — a Post Look asset owns tone. " + DebounceSuffix),
+                new GUIContent("Style Strength", "Palette styling strength: 0 keeps the original look, 1 fully ramps hue toward the reference palette and boosts vibrance. Palette transfer never touches tonality — the fitted post look owns tone. " + DebounceSuffix),
                 profile.StyleStrength, 0f, 1f, "Set Style Strength",
                 (edited, value) => edited.StyleStrength = value);
             DrawSlider(

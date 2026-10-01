@@ -13,11 +13,14 @@ namespace GraffitiEntertainment.Namer.Tests
     /// neutral-default shaded-view toggles, read via reflection). Also pins the persistent
     /// Source pick (a global editor selection change must not clobber the window's explicit
     /// pick), the albedo preview caption copy (locked, em-dashes verbatim), the neutral-state
-    /// reason differentiation (no-source vs no-result), the embedded
-    /// profile-inspector cache contract (created for the attached profile, reused, null when
-    /// detached), and the stylize preview base selection (the styled SOURCE base wins over
-    /// the projected base). The render-only claims (window fits a small screen with all
-    /// sections collapsed; every control reachable by scrolling) are manual-verification
+    /// reason differentiation (no-source vs no-result), the 05.3 merged-asset window-state
+    /// seams (W15 attach/detach GUID round-trip through
+    /// <see cref="NamerProcessorSettings.StyleAssetGuid"/>, the W18
+    /// <see cref="NamerEditorWindow.DescribeStyleAssetState"/> honesty lines, and the
+    /// <see cref="NamerEditorWindow.HasStylizedOutput"/> prereq predicate), and the
+    /// stylize preview base selection (the styled SOURCE base wins over the projected
+    /// base). The render-only claims (window fits a small screen with all sections
+    /// collapsed; every control reachable by scrolling) are manual-verification
     /// checklist items, not automated tests.
     /// </summary>
     public class NamerEditorWindowSmokeTests
@@ -28,6 +31,9 @@ namespace GraffitiEntertainment.Namer.Tests
         private const string FoldoutAoKey = "NamerProcessor.FoldoutAo";
         private const string FoldoutDecompositionKey = "NamerProcessor.FoldoutDecomposition";
         private const string FoldoutOutputKey = "NamerProcessor.FoldoutOutput";
+
+        /// <summary>Temp folder for the on-disk round-trip fixture (GUID identity needs a real asset).</summary>
+        private const string TempFolder = "Assets/NAMER_WindowSmoke_Tests_Temp";
 
         [Test]
         public void FoldoutDefaults_SourceOpenOthersCollapsed()
@@ -167,38 +173,95 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         /// <summary>
-        /// The Stylization section embeds the attached profile's full inspector: the cached
-        /// UnityEditor.Editor is created for the attached profile, reused on the second call,
-        /// and absent when no profile is attached. Drives EnsureProfileEditor via reflection
-        /// with no OnGUI pass (creating an editor is safe outside OnGUI; only OnInspectorGUI
-        /// is OnGUI-only). The profile is an in-memory ScriptableObject — CreateEditor needs
-        /// no asset on disk.
+        /// 05.3 W15 attach/detach round-trip: the GUID the Style Asset row persists
+        /// resolves back to the SAME asset instance (domain-reload-safe attach
+        /// mechanism), an empty GUID is the silent detach (resolve returns null),
+        /// and <see cref="NamerEditorWindow.HasStylizedOutput"/> — the window's
+        /// read of the same pref — flips with it. The EditorPrefs-backed
+        /// StyleAssetGuid pref is snapshotted and restored in finally so the test
+        /// never leaks the attachment.
         /// </summary>
         [Test]
-        public void ProfileEditor_EmbedsForAttachedProfile()
+        public void StyleAssetAttach_W15_RoundTrip_ResolvesAttachedAssetAndNullOnEmptyGuid()
         {
-            NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
-            NamerEditorWindow window = ScriptableObject.CreateInstance<NamerEditorWindow>();
+            string savedGuid = new NamerProcessorSettings().StyleAssetGuid;
+            EnsureTempFolder();
+            NamerStyleAsset asset = ScriptableObject.CreateInstance<NamerStyleAsset>();
             try
             {
-                MethodInfo ensure = typeof(NamerEditorWindow).GetMethod(
-                    "EnsureProfileEditor", BindingFlags.NonPublic | BindingFlags.Instance);
-                Assert.IsNotNull(ensure, "EnsureProfileEditor method must exist on NamerEditorWindow");
+                AssetDatabase.CreateAsset(asset, TempFolder + "/SmokeStyleAsset.asset");
+                NamerProcessorSettings settings = new NamerProcessorSettings();
+                settings.StyleAssetGuid = string.Empty;
+                Assert.IsNull(NamerProcessor.ResolveStyleAsset(settings),
+                    "an empty GUID is the silent detach — resolve must return null");
+                Assert.IsFalse(NamerEditorWindow.HasStylizedOutput(settings),
+                    "no attached Style Asset means no stylized output to decompose");
 
-                UnityEditor.Editor embedded = ensure.Invoke(window, new object[] { profile }) as UnityEditor.Editor;
-                Assert.IsNotNull(embedded, "EnsureProfileEditor must create an editor for the attached profile");
-                Assert.AreSame(profile, embedded.target, "The embedded editor must target the attached profile");
-
-                UnityEditor.Editor second = ensure.Invoke(window, new object[] { profile }) as UnityEditor.Editor;
-                Assert.AreSame(embedded, second, "EnsureProfileEditor must reuse the cached editor instance");
-
-                Assert.IsNull(ensure.Invoke(window, new object[] { null }),
-                    "EnsureProfileEditor must return null when no profile is attached");
+                string guid = AssetDatabase.AssetPathToGUID(TempFolder + "/SmokeStyleAsset.asset");
+                Assert.IsFalse(string.IsNullOrEmpty(guid), "the temp asset must have a real GUID");
+                settings.StyleAssetGuid = guid;
+                NamerStyleAsset resolved = NamerProcessor.ResolveStyleAsset(settings);
+                Assert.AreSame(asset, resolved,
+                    "the persisted GUID must resolve back to the same asset instance (survives domain reload)");
+                Assert.IsTrue(NamerEditorWindow.HasStylizedOutput(settings),
+                    "an attached Style Asset provides the stylized output");
             }
             finally
             {
-                Object.DestroyImmediate(window);
-                Object.DestroyImmediate(profile);
+                new NamerProcessorSettings().StyleAssetGuid = savedGuid;
+                AssetDatabase.DeleteAsset(TempFolder);
+            }
+        }
+
+        /// <summary>
+        /// 05.3 W18 attach-state honesty lines: "" when nothing attached (the W18
+        /// popup-disabled hint carries the null state), the not-decomposed line for
+        /// a fresh asset, and the decomposed line counting palette colors plus
+        /// POSITIVE-WEIGHT references only — a weight-0 slot and a null slot are
+        /// skipped everywhere (A4). Locked copy, em-dashes verbatim.
+        /// </summary>
+        [Test]
+        public void DescribeStyleAssetState_MatchesUiSpecCopy()
+        {
+            NamerStyleAsset notDecomposed = ScriptableObject.CreateInstance<NamerStyleAsset>();
+            notDecomposed.name = "Ink";
+            NamerStyleAsset decomposed = ScriptableObject.CreateInstance<NamerStyleAsset>();
+            Texture2D weightedRef = new Texture2D(2, 2);
+            Texture2D zeroWeightRef = new Texture2D(2, 2);
+            try
+            {
+                decomposed.name = "Ink";
+                // IsDecomposed reads the fingerprint DecomposeStyle writes, so a
+                // synthetic non-empty one marks the decomposed state; anchors +
+                // refs supply the line's counts.
+                decomposed.DecompositionFingerprint = "synthetic-fingerprint";
+                decomposed.PaletteAnchors.Add(new NamerStyleAnchor());
+                decomposed.PaletteAnchors.Add(new NamerStyleAnchor());
+                decomposed.References.Add(weightedRef);
+                decomposed.ReferenceWeights.Add(1f);
+                decomposed.References.Add(zeroWeightRef);
+                decomposed.ReferenceWeights.Add(0f);
+                decomposed.References.Add(null);
+                Assert.IsTrue(decomposed.IsDecomposed, "fixture setup: a written fingerprint must mark the asset decomposed");
+                Assert.IsFalse(notDecomposed.IsDecomposed, "fixture setup: a fresh asset must not read as decomposed");
+
+                Assert.AreEqual(string.Empty, NamerEditorWindow.DescribeStyleAssetState(null));
+
+                Assert.AreEqual(
+                    "Ink — not decomposed",
+                    NamerEditorWindow.DescribeStyleAssetState(notDecomposed));
+
+                Assert.AreEqual(
+                    "Ink — decomposed (2 palette colors, 1 weighted references)",
+                    NamerEditorWindow.DescribeStyleAssetState(decomposed),
+                    "weight-0 and null reference slots must not count (A4)");
+            }
+            finally
+            {
+                Object.DestroyImmediate(decomposed);
+                Object.DestroyImmediate(notDecomposed);
+                Object.DestroyImmediate(weightedRef);
+                Object.DestroyImmediate(zeroWeightRef);
             }
         }
 
@@ -444,6 +507,14 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         // -- EditorPrefs isolation for the foldout keys -----------------------
+
+        private static void EnsureTempFolder()
+        {
+            if (!AssetDatabase.IsValidFolder(TempFolder))
+            {
+                AssetDatabase.CreateFolder("Assets", TempFolder.Substring("Assets/".Length));
+            }
+        }
 
         private sealed class PrefsSnapshot
         {

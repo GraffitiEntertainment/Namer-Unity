@@ -286,6 +286,146 @@ namespace GraffitiEntertainment.Namer.Tests
             yield return null;
         }
 
+
+        // --------------------------------------------------------------------
+        // 05.3-05 STYL-16 identity gate, merged-asset path: a FRESH neutral
+        // <see cref="NamerStyleAsset"/> (default sliders — smoothing 0 — and an
+        // empty palette) composes the honest null path through
+        // <see cref="NamerStyleStylization.Create(NamerStyleAsset, NamerSplitResult)"/>
+        // with zero extra leases and byte-identical output — the asset mirror of
+        // the profile gate above (the Active gate is copied VERBATIM).
+        // --------------------------------------------------------------------
+
+        [UnityTest]
+        public IEnumerator Stylization_NeutralStyleAsset_ByteIdenticalZeroExtraLeases()
+        {
+            if (!ComputeAvailable)
+            {
+                Assert.Ignore("[NAMER] compute/async-readback unavailable — skipping GPU stylization identity test (D-15).");
+                yield break;
+            }
+
+            Mesh mesh = CreateQuadMesh();
+            Texture2D baseMap = CreateGrainBaseMap();
+            Texture2D occlusion = CreateWhiteOcclusion();
+            NamerStyleAsset asset = ScriptableObject.CreateInstance<NamerStyleAsset>();
+            try
+            {
+                var inspection = BuildInspection(baseMap, mesh, occlusion);
+                NamerSplitResult split = MeshVertexSplitter.Split(mesh);
+                NamerStyleStylization inactive = NamerStyleStylization.Create(asset, split);
+                Assert.IsFalse(inactive.Active,
+                    "default sliders (smoothing 0) + empty palette must be the identity context");
+
+                using (var pipeline = new NamerComputePipeline())
+                {
+                    int baseline = pipeline.LiveRenderTargetCount;
+
+                    NamerComputeResult nullRun = pipeline.Process(inspection, stylization: null);
+                    Color32[] nullBase;
+                    Color32[] nullSurface;
+                    int nullRunLive;
+                    try
+                    {
+                        nullBase = ReadBackColor32(nullRun.NormalizedBaseColor);
+                        nullSurface = ReadBackColor32(nullRun.PackedSurface);
+                        nullRunLive = pipeline.LiveRenderTargetCount;
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(nullRun);
+                    }
+
+                    Assert.AreEqual(baseline, pipeline.LiveRenderTargetCount,
+                        "null run must return the pool to baseline after ReleaseResult");
+
+                    NamerComputeResult identityRun = pipeline.Process(inspection, stylization: inactive);
+                    try
+                    {
+                        Assert.AreEqual(nullRunLive, pipeline.LiveRenderTargetCount,
+                            "neutral Style Asset context must not lease a single extra render target");
+                        Assert.AreEqual(0, CountByteDifferences(nullBase, ReadBackColor32(identityRun.NormalizedBaseColor)),
+                            "neutral Style Asset: NormalizedBaseColor must match the null path byte for byte");
+                        Assert.AreEqual(0, CountByteDifferences(nullSurface, ReadBackColor32(identityRun.PackedSurface)),
+                            "neutral Style Asset: PackedSurface must match the null path byte for byte");
+                    }
+                    finally
+                    {
+                        pipeline.ReleaseResult(identityRun);
+                    }
+
+                    Assert.AreEqual(baseline, pipeline.LiveRenderTargetCount,
+                        "identity run must return the pool to baseline after ReleaseResult");
+                }
+            }
+            finally
+            {
+                Destroy(asset, baseMap, occlusion, mesh);
+            }
+
+            yield return null;
+        }
+
+        // --------------------------------------------------------------------
+        // 05.3-05 STYL-16 composed case: over the SAME split, the merged-asset
+        // overload builds the same context the profile overload does — Run
+        // consumes only these fields, so field equality IS the "same
+        // anchor-buffer dispatch profile" pin.
+        // --------------------------------------------------------------------
+
+        [Test]
+        public void Stylization_StyleAssetCompose_MatchesProfilePathContext()
+        {
+            NamerStyleProfile profile = CreateExtractedProfile(1f, 0f, kHueModeReplace);
+            NamerStyleAsset asset = ScriptableObject.CreateInstance<NamerStyleAsset>();
+            asset.StyleStrength = 1f;
+            asset.Smoothing = 0f;
+            asset.HueMode = kHueModeReplace;
+            asset.PaletteAnchors.Add(new NamerStyleAnchor
+            {
+                LinearColor = AnchorLinearColor,
+                Hue = kAnchorHue,
+                Saturation = kAnchorSaturation,
+                Luma = kAnchorLuma,
+                Weight = 1f,
+            });
+            Mesh mesh = CreateQuadMesh();
+            try
+            {
+                NamerSplitResult split = MeshVertexSplitter.Split(mesh);
+                NamerStyleStylization fromProfile = NamerStyleStylization.Create(profile, split);
+                NamerStyleStylization fromAsset = NamerStyleStylization.Create(asset, split);
+
+                Assert.IsTrue(fromAsset.Active, "fixture setup: palette + strength 1 must compose the active context");
+                Assert.AreEqual(fromProfile.Active, fromAsset.Active, "Active");
+                Assert.AreEqual(fromProfile.PaletteAvailable, fromAsset.PaletteAvailable, "PaletteAvailable");
+                Assert.AreEqual(fromProfile.AnchorCount, fromAsset.AnchorCount, "AnchorCount");
+                Assert.AreEqual(fromProfile.StyleStrength, fromAsset.StyleStrength, "StyleStrength");
+                Assert.AreEqual(fromProfile.Smoothing, fromAsset.Smoothing, "Smoothing");
+                Assert.AreEqual(fromProfile.HueReplaceMode, fromAsset.HueReplaceMode, "HueReplaceMode");
+                Assert.AreEqual(fromProfile.SmoothingSkippedNoMesh, fromAsset.SmoothingSkippedNoMesh, "SmoothingSkippedNoMesh");
+                Assert.AreEqual(fromProfile.Uvs, fromAsset.Uvs, "Uvs (same split instance)");
+                Assert.AreEqual(fromProfile.FlattenedTriangles, fromAsset.FlattenedTriangles, "FlattenedTriangles (same split instance)");
+                Assert.AreEqual(fromProfile.TriIsland, fromAsset.TriIsland, "TriIsland (same split instance)");
+                Assert.AreEqual(fromProfile.IslandCount, fromAsset.IslandCount, "IslandCount");
+                Assert.AreEqual(fromProfile.IslandClampedToFloat16Max, fromAsset.IslandClampedToFloat16Max, "IslandClampedToFloat16Max");
+
+                Assert.AreEqual(fromProfile.Anchors.Length, fromAsset.Anchors.Length, "Anchors.Length");
+                for (int i = 0; i < fromProfile.Anchors.Length; i++)
+                {
+                    Assert.AreEqual(fromProfile.Anchors[i].LinearColor, fromAsset.Anchors[i].LinearColor,
+                        "Anchors[" + i + "].LinearColor — the StructuredBuffer payload must match the profile path");
+                    Assert.AreEqual(fromProfile.Anchors[i].Hue, fromAsset.Anchors[i].Hue, "Anchors[" + i + "].Hue");
+                    Assert.AreEqual(fromProfile.Anchors[i].Saturation, fromAsset.Anchors[i].Saturation, "Anchors[" + i + "].Saturation");
+                    Assert.AreEqual(fromProfile.Anchors[i].Luma, fromAsset.Anchors[i].Luma, "Anchors[" + i + "].Luma");
+                    Assert.AreEqual(fromProfile.Anchors[i].Weight, fromAsset.Anchors[i].Weight, "Anchors[" + i + "].Weight");
+                }
+            }
+            finally
+            {
+                Destroy(profile, asset, mesh);
+            }
+        }
         // --------------------------------------------------------------------
         // D-01 propagation: Replace at strength 1 styles the source BEFORE the fit —
         // the styled hue reaches the result base AND the fitted vertex colors.
@@ -1381,84 +1521,46 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         // --------------------------------------------------------------------
-        // 05-03 Task 3 — the window's W3/W4 seams: the preview lens composition
-        // (ComposePreviewStylization) and the attach-state copy
-        // (DescribeProfileState). Pure statics — no GPU, no prefs.
+        // 05-03 Task 3 / 05.3-05 retarget — the window's preview lens
+        // composition (ComposePreviewStylization) over the MERGED style asset.
+        // The attach-state copy (DescribeStyleAssetState) moved to
+        // NamerEditorWindowSmokeTests with the W18 rewrite. Pure statics — no
+        // GPU, no prefs.
         // --------------------------------------------------------------------
 
         [Test]
         public void ComposePreviewStylization_LensGatesPreviewOnly()
         {
-            NamerStyleProfile profile = ScriptableObject.CreateInstance<NamerStyleProfile>();
+            NamerStyleAsset asset = ScriptableObject.CreateInstance<NamerStyleAsset>();
             try
             {
-                profile.Smoothing = 0.5f;
+                asset.Smoothing = 0.5f;
 
-                // Lens NAMER (0): no stylization even with a profile — the preview
-                // must stay byte-identical to the 04.3 baseline (scalars zeroed).
+                // Lens NAMER (0): no stylization even with an attached asset — the
+                // preview must stay byte-identical to the 04.3 baseline (scalars
+                // zeroed).
                 Assert.IsNull(
-                    NamerEditorWindow.ComposePreviewStylization(profile, NamerEditorWindow.kAfterViewNamer, null),
-                    "After View = NAMER must preview the un-stylized baseline regardless of profile/split");
+                    NamerEditorWindow.ComposePreviewStylization(asset, NamerEditorWindow.kAfterViewNamer, null),
+                    "After View = NAMER must preview the un-stylized baseline regardless of asset/split");
 
-                // No profile: the popup is disabled — composition must be null even at
+                // No asset: the popup is disabled — composition must be null even at
                 // the stylized index (no NullReference, no default-asset styling).
                 Assert.IsNull(
                     NamerEditorWindow.ComposePreviewStylization(null, NamerEditorWindow.kAfterViewStylized, null),
-                    "no attached profile must compose to null even at After View = Stylized NAMER");
+                    "no attached Style Asset must compose to null even at After View = Stylized NAMER");
 
-                // Lens Stylized NAMER (1) with a profile: a composed context. Without
+                // Lens Stylized NAMER (1) with an asset: a composed context. Without
                 // a split the smoothing branch sets the skip flag — the W1 Info note's
                 // trigger (OQ-3).
                 NamerStyleStylization composed = NamerEditorWindow.ComposePreviewStylization(
-                    profile, NamerEditorWindow.kAfterViewStylized, null);
-                Assert.IsNotNull(composed, "profile + Stylized NAMER must compose a preview context");
+                    asset, NamerEditorWindow.kAfterViewStylized, null);
+                Assert.IsNotNull(composed, "asset + Stylized NAMER must compose a preview context");
                 Assert.IsTrue(composed.SmoothingSkippedNoMesh,
                     "no split handed to the composition must set SmoothingSkippedNoMesh (OQ-3)");
             }
             finally
             {
-                UnityEngine.Object.DestroyImmediate(profile);
-            }
-        }
-
-        [Test]
-        public void DescribeProfileState_MatchesUiSpecCopy()
-        {
-            NamerStyleProfile notExtracted = ScriptableObject.CreateInstance<NamerStyleProfile>();
-            notExtracted.name = "Ink";
-            NamerStyleProfile extracted = ScriptableObject.CreateInstance<NamerStyleProfile>();
-            try
-            {
-                // IsExtracted reads the fingerprint Extract writes (T-05-11), so a
-                // synthetic non-empty one marks the extracted state; anchors + stats
-                // supply the copy's counts.
-                extracted.name = "Ink";
-                extracted.ReferenceFingerprint = "synthetic-fingerprint";
-                extracted.PaletteAnchors.Add(new NamerStyleAnchor());
-                extracted.PaletteAnchors.Add(new NamerStyleAnchor());
-                extracted.Stats = new NamerStyleStats { ReferenceCount = 3 };
-                Assert.IsTrue(extracted.IsExtracted, "fixture setup: a written fingerprint must mark the profile extracted");
-                Assert.IsFalse(notExtracted.IsExtracted, "fixture setup: a fresh profile must not read as extracted");
-
-                // W3 + W8 locked copy (05/05.1 UI-SPEC): "" for nothing attached (the
-                // popup's disabled hint carries that state), the honesty line
-                // otherwise. 05.2-06 (W12): the fit clause is gone — the profile is
-                // palette-only since R4 and the post look lives on the NamerPostLook
-                // asset, not here.
-                Assert.AreEqual(string.Empty, NamerEditorWindow.DescribeProfileState(null));
-
-                Assert.AreEqual(
-                    "Ink — not extracted",
-                    NamerEditorWindow.DescribeProfileState(notExtracted));
-
-                Assert.AreEqual(
-                    "Ink — palette extracted (2 anchors, 3 references)",
-                    NamerEditorWindow.DescribeProfileState(extracted));
-            }
-            finally
-            {
-                UnityEngine.Object.DestroyImmediate(notExtracted);
-                UnityEngine.Object.DestroyImmediate(extracted);
+                UnityEngine.Object.DestroyImmediate(asset);
             }
         }
 

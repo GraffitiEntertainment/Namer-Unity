@@ -837,10 +837,10 @@ namespace GraffitiEntertainment.Namer.Tests
             const float threshold = 0.02f;
             const byte kWhiteVert = 250; // user signature: one near-white vertex...
             const byte kMidVert = 128;   // ...and darker ones. 0 (not merely dark-10)
-            const byte kBlackVert = 0;   // exercises the quantized-zero loss zone.
+            const byte kBlackVert = 0;   // exercises the exact-zero despike loss zone.
             const float kReconstructionTolerance = 2f / 255f;
             const float kNeededCorrection = 2f / 255f;
-            const float kQuantZeroLimit = 0.5f / 255f; // below this the 8-bit store rounds to 0
+            const float kZeroZoneVc = NamerConstants.VcFloor; // at/below the kernel's floor the despike collapses the quotient
             const float kInsideEps = 1e-4f;            // mirrors NAMER_DECOMP_INSIDE_EPS
 
             NamerSplitResult split = CreateSplitQuad(0f, 1f);
@@ -869,7 +869,7 @@ namespace GraffitiEntertainment.Namer.Tests
                         Assert.AreEqual(w * h, residual.Length, "residual readback must cover every source texel");
 
                         int covered = 0;
-                        int quantZeroMissing = 0;
+                        int zeroVcMissing = 0;
                         int unexplained = 0;
                         int unexplainedX = -1;
                         int unexplainedY = -1;
@@ -886,11 +886,10 @@ namespace GraffitiEntertainment.Namer.Tests
                                 }
 
                                 covered++;
-                                float vcQuantized = Mathf.Round(vcInterp * 255f) / 255f;
                                 float source = SourceAt(x, y);
-                                float reconstruction = vcQuantized * residual[y * w + x].r;
+                                float reconstruction = vcInterp * residual[y * w + x].r;
 
-                                bool needed = Mathf.Abs(source - vcQuantized) > kNeededCorrection;
+                                bool needed = Mathf.Abs(source - vcInterp) > kNeededCorrection;
                                 bool missing = needed
                                     && Mathf.Abs(reconstruction - source) > kReconstructionTolerance;
                                 if (!missing)
@@ -898,9 +897,9 @@ namespace GraffitiEntertainment.Namer.Tests
                                     continue;
                                 }
 
-                                if (vcInterp < kQuantZeroLimit)
+                                if (vcInterp <= kZeroZoneVc)
                                 {
-                                    quantZeroMissing++;
+                                    zeroVcMissing++;
                                 }
                                 else
                                 {
@@ -915,13 +914,13 @@ namespace GraffitiEntertainment.Namer.Tests
                         }
 
                         TestContext.Out.WriteLine(
-                            "[NAMER] classifier: covered=" + covered + " quantZeroMissing=" + quantZeroMissing
+                            "[NAMER] classifier: covered=" + covered + " zeroVcMissing=" + zeroVcMissing
                             + " unexplained=" + unexplained);
                         Assert.AreEqual(0, unexplained,
-                            "missing residual signal OUTSIDE the quantized-zero zone — first at ("
+                            "missing residual signal OUTSIDE the zero-vc zone — first at ("
                             + unexplainedX + "," + unexplainedY + ") with analytic vcInterp; "
                             + "reproduces residual-missing-triangles in a clean fixture (operator exonerated). "
-                            + "quantZeroMissing=" + quantZeroMissing + " covered=" + covered);
+                            + "zeroVcMissing=" + zeroVcMissing + " covered=" + covered);
                     }
                     finally
                     {
@@ -962,7 +961,7 @@ namespace GraffitiEntertainment.Namer.Tests
             const int h = 64;
             const float threshold = 0.02f;
             const float kFloat16Slack = 1e-3f; // R16 storage round-trip of references near 1.0
-            const float kQuantZeroVc = 0.5f / 255f; // _VcInterp is UNorm: interp below half an 8-bit step stores as exactly 0 — the despike's spike-candidate gate
+            const float kSpikeCandidateVc = NamerConstants.VcFloor; // the despike's spike-candidate gate: at/below the floor on the float _VcInterp
 
             // ~19-texel triangle in texel-center coordinates: white apex opposite a
             // diagonal black-black edge, so scattered texel centers near that edge
@@ -996,7 +995,7 @@ namespace GraffitiEntertainment.Namer.Tests
                         // there); uncovered texels are identity or the dilation padding ring,
                         // whose outer step is legitimate atlas padding and never sampled from
                         // inside the island. And among covered texels, only those whose
-                        // interpolated vc QUANTIZED TO ZERO are spike candidates: the quotient
+                        // interpolated vc sits at or below VcFloor are spike candidates: the quotient
                         // gradient 1/vc near a black vertex is legitimately steeper than any
                         // local factor (the real asset's legit band runs 60-130x), so the
                         // invariant mirrors the kernel's vc gate. Grayscale fixture: one vc
@@ -1021,9 +1020,9 @@ namespace GraffitiEntertainment.Namer.Tests
 
                         void Check(float value, float reference, int x, int y)
                         {
-                            if (vcInterp[y * w + x] > kQuantZeroVc)
+                            if (vcInterp[y * w + x] > kSpikeCandidateVc)
                             {
-                                return; // nonzero quantized vc: protected legit quotient, not a spike candidate
+                                return; // above-floor vc: protected legit quotient, not a spike candidate
                             }
 
                             float limit = NamerConstants.ResidualSpikeFactor * reference + kFloat16Slack;
@@ -1120,7 +1119,7 @@ namespace GraffitiEntertainment.Namer.Tests
             const int h = 64;
             const float threshold = 0.02f;
             const float kFloat16Slack = 1e-3f; // R16 storage round-trip of references near 1.0
-            const float kQuantZeroVc = 0.5f / 255f; // _VcInterp is UNorm: interp below half an 8-bit step stores as exactly 0 — the despike's spike-candidate gate
+            const float kSpikeCandidateVc = NamerConstants.VcFloor; // the despike's spike-candidate gate: at/below the floor on the float _VcInterp
 
             // White apex opposite a VERTICAL black-black edge at x = 20.5 texels: every
             // texel center of column 20 lies exactly on the edge (bary = 0 between two
@@ -1150,9 +1149,9 @@ namespace GraffitiEntertainment.Namer.Tests
                         Color[] residual = ReadBackFloat(output.Residual);
                         Assert.AreEqual(w * h, residual.Length, "residual readback must cover every source texel");
 
-                        // Scope the invariant to COVERED, quantized-zero-vc texels (see the
-                        // isolated-spike test above): the spike run lives there; uncovered
-                        // texels are identity or dilation padding, and nonzero-vc quotients
+                        // Scope the invariant to COVERED, at-or-below-floor vc texels (see
+                        // the isolated-spike test above): the spike run lives there; uncovered
+                        // texels are identity or dilation padding, and above-floor vc quotients
                         // are legitimately steep near the black edge.
                         bool[] covered = new bool[w * h];
                         float[] vcInterp = new float[w * h];
@@ -1174,9 +1173,9 @@ namespace GraffitiEntertainment.Namer.Tests
 
                         void Check(float value, float reference, int x, int y)
                         {
-                            if (vcInterp[y * w + x] > kQuantZeroVc)
+                            if (vcInterp[y * w + x] > kSpikeCandidateVc)
                             {
-                                return; // nonzero quantized vc: protected legit quotient, not a spike candidate
+                                return; // above-floor vc: protected legit quotient, not a spike candidate
                             }
 
                             float limit = NamerConstants.ResidualSpikeFactor * reference + kFloat16Slack;

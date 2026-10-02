@@ -11,7 +11,8 @@
 //   CSResidual               -> residual = max(base, _VcFloor) / max(vcInterp, _VcFloor)
 //                               (uncovered texels take the identity branch, Pitfall 1)
 //   CSDespike                -> collapse quotient spikes AND 1-texel spike runs: a
-//                               channel whose vcInterp quantized to ZERO (<= _VcFloor)
+//                               channel whose vcInterp is at or below _VcFloor (zero
+//                               between black verts)
 //                               and which sits above _SpikeFactor x the second-smallest
 //                               of its 4 clamp-to-edge neighbors is replaced by that
 //                               value (edge texels between black verts divided by
@@ -45,9 +46,10 @@
 // intermediate, which would reintroduce up to ~10% quotient deviation on dark VCs
 // (RESEARCH Pattern 1 constraint 1).
 //
-// All write targets are LINEAR. _VcInterp/_ErrorHeatmap are R8G8B8A8_UNorm linear;
-// _ResidualOut/_ProjectedOut/_ErrorStat are R16G16B16A16_SFloat linear. Compute never
-// writes sRGB.
+// All write targets are LINEAR. _VcInterp/_ResidualOut/_ProjectedOut/_ErrorStat are
+// R16G16B16A16_SFloat linear; _ErrorHeatmap is R8G8B8A8_UNorm. Compute never writes sRGB.
+// _VcInterp must stay float: the runtime shader multiplies by full-precision GPU vertex
+// interpolation, so an 8-bit divisor snaps sub-byte VC channels (the muted-browns bug).
 
 #include "NAMERDecomp.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
@@ -57,6 +59,7 @@
 #pragma kernel CSResidual
 #pragma kernel CSDespike
 #pragma kernel CSDilateResidual
+#pragma kernel CSDownsampleResidual
 #pragma kernel CSErrorHeatmap
 #pragma kernel CSReduce
 
@@ -67,8 +70,8 @@ static const float NAMER_DECOMP_AREA_EPS = 1e-8;
 static const float NAMER_DECOMP_INSIDE_EPS = 1e-4;
 
 // Kernel-written outputs (linear, random-access).
-RWTexture2D<float4> _VcInterp;      // R8G8B8A8_UNorm linear; rgb = interp color, a = coverage
-RWTexture2D<float4> _ResidualOut;   // R16G16B16A16_SFloat linear (quotient residual)
+RWTexture2D<float4> _VcInterp;      // R16G16B16A16_SFloat linear; rgb = interp color, a = coverage
+RWTexture2D<float4> _ResidualOut;   // R16G16B16A16_SFloat linear (quotient residual; also the downsample write target)
 RWTexture2D<float4> _ProjectedOut;  // R16G16B16A16_SFloat linear (projected Gouraud base write-back)
 RWTexture2D<float4> _ErrorHeatmap;  // R8G8B8A8_UNorm viridis ramp
 RWTexture2D<float4> _ErrorStat;     // R16G16B16A16_SFloat: r=err, g=err, b=coverage, a=minAlpha
@@ -80,7 +83,7 @@ RWTexture2D<float4> _DstAvg;        // generic reduce write target (bound to _Av
 // Blit-uploaded / kernel-read inputs.
 Texture2D<float4> _BaseLinear;      // normalized linear base map (already uploaded)
 Texture2D<float4> _SrcAvg;          // generic reduce read target (bound to _ErrorStat/_AvgA/_AvgB/_CoverageStat)
-Texture2D<float4> _ResidualSrc;     // despike read source (bound to the fresh CSResidual output)
+Texture2D<float4> _ResidualSrc;     // despike/downsample read source (despike: the fresh CSResidual output; downsample: the despiked+dilated full-res residual)
 
 // Split-mesh vertex data (plan 04-01): UV-space only; _Verts is carried for the
 // documented interface but the rasterize is position-independent (like the fitter).
@@ -94,6 +97,7 @@ uint2 _Size;              // unsigned: compared against SV_DispatchThreadID (uin
 float _VcFloor;           // divisor floor (mirrors NamerConstants.VcFloor, Pitfall 1)
 float _SpikeFactor;       // despike limit factor (mirrors NamerConstants.ResidualSpikeFactor)
 int _DilateRadius;        // residual dilation radius in texels (mirrors NamerConstants.ResidualDilateRadius)
+int4 _DownSize;           // downsample dims: xy = source, zw = destination (CSDownsampleResidual)
 float _Threshold;         // error threshold for coverage + residual-required gate
 float _MaxObservedErr;    // heatmap normalization bound (>= threshold, ramp scale)
 float _FitOnly;           // 1 = residual is identity (fit-only error), 0 = full residual error
@@ -189,13 +193,14 @@ void CSResidual(uint3 id : SV_DispatchThreadID)
 
 // Despike pass (debug session residual-missing-triangles, edge-line artifact). Texel
 // centers on an edge between near-black vertices interpolate vcInterp to EXACTLY 0
-// (quantized zero — bary = 0 between two black verts) — and since _VcFloor (1e-3) sits
-// below one 8-bit step (1/255), max(vc, F) never bounds the divide, leaving quotient
+// (bary = 0 between two black verts) — and since _VcFloor (1e-3) sits below one
+// vertex-color step (1/255), max(vc, F) never bounds the divide, leaving quotient
 // spikes of base/_VcFloor (~450x on the real asset). The runtime material samples the
 // residual bilinearly, smearing each spike into a bright hue-tinted line along the edge.
-// A channel is a spike candidate ONLY when its interpolated vc quantized to zero
-// (vc <= _VcFloor): the legitimate low-vc band carries vc >= 1/255 and its quotient is
-// meaningful — collapsing it toward the identity would paint a DARK line (vc * 1.0),
+// A channel is a spike candidate ONLY when its interpolated vc is at or below the
+// floor (vc <= _VcFloor): the legitimate low-vc band above the floor reconstructs
+// exactly at runtime and its quotient is meaningful — collapsing it toward the
+// identity would paint a DARK line (vc * 1.0),
 // and the identity uncovered neighbors at a coverage border would otherwise fake a
 // small second-smallest reference. Among candidates, a channel exceeding _SpikeFactor
 // times the SECOND-SMALLEST of its 4 clamp-to-edge neighbors is replaced by that value.
@@ -291,6 +296,83 @@ void CSDilateResidual(uint3 id : SV_DispatchThreadID)
 
     float4 src = _ResidualSrc[id.xy];
     _ResidualOut[id.xy] = (count > 0.0) ? float4(sum / count, src.a) : src;
+}
+
+// Quotient-of-sums downsample (coarse-rung edge-hue bug). The ladder's coarse rungs
+// previously plain-bilinear-blitted the QUOTIENT texture; averaging quotients near a
+// 1/vc pole bakes the pole into the whole block (measured on the real asset: 8-44x
+// channel spikes in the baked 256 residual, rendering as wrong-hue triangle-edge
+// halos at 512 and below). The runtime reconstructs albedo = residual.bilinear(uv) *
+// full-resolution vc, so the correct coarse residual is the quotient of the BLOCK
+// SUMS: sum(q_i * max(vc_i,F)) / sum(max(vc_i,F)). Each term q_i * max(vc_i,F)
+// recovers CSResidual's floored dividend max(base_i,F) (up to the residual's
+// half-float storage rounding), so the pole cancels in the ratio — the product form
+// is exact: block-quotient * block-mean-vc == block-mean-base. Recovering the
+// dividend from the STORED quotient also carries the despike verdict downstream: a
+// despiked texel contributes its clamped value weighted by its floored vc (~1e-3),
+// not its raw bright base. Covered texels (vc.a >= 0.5, the CSResidual gate)
+// accumulate; uncovered texels accumulate a separate plain mean so fully-uncovered
+// blocks keep the CSDilateResidual padding ring.
+[numthreads(8,8,1)]
+void CSDownsampleResidual(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_DownSize.z || id.y >= (uint)_DownSize.w)
+    {
+        return;
+    }
+
+    // Source block [floor(id*scale), ceil((id+1)*scale)) clamped to the source extent —
+    // every source texel lands in exactly one block (no gaps, no double count).
+    float2 scale = float2(_DownSize.xy) / float2(_DownSize.zw);
+    int2 lo = (int2)floor(id.xy * scale);
+    int2 hi = (int2)ceil((id.xy + 1u) * scale);
+    hi = min(hi, _DownSize.xy);
+
+    float3 numSum = float3(0.0, 0.0, 0.0);
+    float3 denSum = float3(0.0, 0.0, 0.0);
+    float3 padSum = float3(0.0, 0.0, 0.0);
+    float covA = 0.0;
+    float padA = 0.0;
+    int covCount = 0;
+    int padCount = 0;
+    for (int y = lo.y; y < hi.y; y++)
+    {
+        for (int x = lo.x; x < hi.x; x++)
+        {
+            int2 p = int2(x, y);
+            float4 src = _ResidualSrc[p];
+            float4 vcTexel = _VcInterp[p];
+            if (vcTexel.a >= 0.5)
+            {
+                float3 vc = max(vcTexel.rgb, _VcFloor.xxx);
+                numSum += src.rgb * vc;
+                denSum += vc;
+                covA += src.a;
+                covCount++;
+            }
+            else
+            {
+                padSum += src.rgb;
+                padA += src.a;
+                padCount++;
+            }
+        }
+    }
+
+    if (covCount > 0)
+    {
+        // denSum >= covCount * _VcFloor per channel by construction — no zero divide.
+        _ResidualOut[id.xy] = float4(numSum / denSum, covA / covCount);
+    }
+    else if (padCount > 0)
+    {
+        _ResidualOut[id.xy] = float4(padSum / padCount, padA / padCount);
+    }
+    else
+    {
+        // Empty block (dst > src upsample guard): pass the nearest source texel through.
+        _ResidualOut[id.xy] = _ResidualSrc[lo];
+    }
 }
 
 // Projection write-back (04.2 by-construction collapse). Writes the rasterized Gouraud

@@ -137,6 +137,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private readonly int _kernelResidual;
         private readonly int _kernelDespike;
         private readonly int _kernelDilate;
+        private readonly int _kernelDownsample;
         private readonly int _kernelErrorHeatmap;
         private readonly int _kernelReduce;
 
@@ -153,6 +154,7 @@ namespace GraffitiEntertainment.Namer.Editor
             _kernelResidual = _compute.FindKernel("CSResidual");
             _kernelDespike = _compute.FindKernel("CSDespike");
             _kernelDilate = _compute.FindKernel("CSDilateResidual");
+            _kernelDownsample = _compute.FindKernel("CSDownsampleResidual");
             _kernelErrorHeatmap = _compute.FindKernel("CSErrorHeatmap");
             _kernelReduce = _compute.FindKernel("CSReduce");
         }
@@ -287,7 +289,9 @@ namespace GraffitiEntertainment.Namer.Editor
                 int avgH = (h + ReduceDownsampleFactor - 1) / ReduceDownsampleFactor;
                 RenderTextureDescriptor avgDesc = NewDescriptor(avgW, avgH, GraphicsFormat.R16G16B16A16_SFloat);
 
-                vcInterp = _pool.Lease(unorm8);
+                // Float divisor (not unorm8): the runtime multiplies by full-precision GPU
+                // vertex interpolation — an 8-bit divisor snapped sub-byte VC channels ±30-50%.
+                vcInterp = _pool.Lease(floatDesc);
                 fullResidual = _pool.Lease(floatDesc);
                 heatmap = _pool.Lease(unorm8);
                 errorStat = _pool.Lease(floatDesc);
@@ -425,7 +429,9 @@ namespace GraffitiEntertainment.Namer.Editor
                 else
                 {
                     ResolveAspectSize(chosenResolution, w, h, out int cw, out int ch);
-                    returnedResidual = Resample(fullResidual, cw, ch);
+                    // Quotient-of-sums downsample, NOT a blit of the quotient (a plain
+                    // average bakes 1/vc poles into coarse texels — the edge-hue bug).
+                    returnedResidual = ResampleDown(fullResidual, vcInterp, cw, ch);
                     Release(fullResidual);
                     fullResidual = null;
                 }
@@ -562,7 +568,9 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture avgB)
         {
             ResolveAspectSize(resolution, w, h, out int cw, out int ch);
-            RenderTexture down = Resample(fullResidual, cw, ch);
+            // Rung candidate via the same quotient-of-sums operator the final production
+            // downsample uses, so the gate evaluates what actually ships at that rung.
+            RenderTexture down = ResampleDown(fullResidual, vcInterp, cw, ch);
             RenderTexture up = Resample(down, w, h);
             Release(down);
 
@@ -749,6 +757,27 @@ namespace GraffitiEntertainment.Namer.Editor
             Material rawCopy = NamerComputePipeline.RawCopyMaterial();
             rawCopy.DisableKeyword(NamerComputePipeline.ReencodeSrgbKeyword);
             Graphics.Blit(source, dst, rawCopy);
+            return dst;
+        }
+
+        /// <summary>
+        /// Downsamples the full-resolution residual to a coarser rung as a quotient of
+        /// block sums over covered texels, not a blit of the quotient texture — averaging
+        /// quotients near a 1/vc pole bakes the pole into the whole block (the coarse-rung
+        /// edge-hue bug). Each source texel's dividend is recovered from its stored
+        /// (despiked) quotient times its floored vc, so both the despike verdict and the
+        /// projection collapse (quotient 1) survive the downsample; fully-uncovered blocks
+        /// keep the dilate padding ring via a plain mean. The upsample direction stays
+        /// <see cref="Resample"/> (bilinear), mirroring runtime sampling.
+        /// </summary>
+        private RenderTexture ResampleDown(RenderTexture source, RenderTexture vcInterp, int dstW, int dstH)
+        {
+            RenderTexture dst = _pool.Lease(NewDescriptor(dstW, dstH, GraphicsFormat.R16G16B16A16_SFloat));
+            _compute.SetInts("_DownSize", new[] { source.width, source.height, dstW, dstH });
+            _compute.SetTexture(_kernelDownsample, "_ResidualSrc", source);
+            _compute.SetTexture(_kernelDownsample, "_ResidualOut", dst);
+            _compute.SetTexture(_kernelDownsample, "_VcInterp", vcInterp);
+            Dispatch(_kernelDownsample, dstW, dstH);
             return dst;
         }
 

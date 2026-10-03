@@ -30,6 +30,23 @@ namespace GraffitiEntertainment.Namer.Tests
 
         private const float kFixtureGammaPairExponent = 2.2f; // reference = pow(tonemapped, 2.2)
         private const float kHistogramBinWidth = 1f / 256f;   // one histogram bin over [0,1]
+        private const float kP10Fraction = 0.1f;              // WeightedPercentile fraction for p10
+        private const float kP90Fraction = 0.9f;              // WeightedPercentile fraction for p90
+        // Sequential-composition oracles (05.3 volume-washout fix): the modeled chain
+        // re-bins at bin centers (exposure, contrast), and the baked master curve —
+        // BuildKeys' zero-tangent Keyframes sampled through AnimationCurve —
+        // smoothsteps between keys, deviating up to ~9.6% of each adjacent-key delta
+        // from the piecewise-linear spec map the fit derived (MasterInverse inverts
+        // it linearly). The composed MEAN therefore lands within one bin width
+        // (quantization and interpolation average out) and the percentiles within
+        // seven bins — measured worst 5.6 bins on the identical ramp (p90; the
+        // tonemap-shoulder-conjugated lift has the largest key-delta curvature),
+        // 4.1 on the gamma fixture. The retired independent-solve composition misses
+        // by an EV-sized margin (a large fraction of a stop of double correction),
+        // far outside this bound, so the bar still discriminates decisively.
+        private const double kComposedMeanTolerance = kHistogramBinWidth;
+        private const double kComposedPercentileTolerance = 7.0 * kHistogramBinWidth;
+        private const double kIdentityRampContrastBound = 6.0; // the identical ramp's EV Jensen residual (~-0.13 through the tonemap shoulder) re-measured as a spread correction — small residual, not an independent full correction
         private const float kNeutralKnobTolerance = 1e-3f;    // EV/contrast/saturation residual on identical pairs
         // WB neutrality floor: the fixed 24-probe golden-section resolves each axis to
         // ~200 * 0.618^24 = 1.2e-3 (float64 measured 2.3e-4), but float32 noise in the
@@ -38,8 +55,17 @@ namespace GraffitiEntertainment.Namer.Tests
         // plan's stated 1e-4 is below any deterministic numerical-solve floor.
         private const double kNeutralWhiteBalanceTolerance = 0.05;
         private const float kWhiteBalanceRecoveryTolerance = 0.5f; // plan-specified recovery bar
+        // |WhiteBalanceLumaScale - 1| on the rail fixture must exceed this: below it
+        // the WB luma effect is second-order noise and the rail composition test
+        // would pass vacuously against the uncorrected EV solve. Measured 0.0143
+        // (coeffs(-50, 0) over TonemapLdr((0.8, 0.55, 0.35))); margin at half the
+        // measurement. The corresponding EV correction log2(1.0143) ~ 0.02 EV is
+        // ~1.8 histogram bins of composed-mean error — above the 1-bin composed
+        // bar, so the composition assertions still catch an uncorrected solve.
+        private const double kFirstOrderLumaMargin = 0.007;
         private const double kEstimatorTolerance = 1e-3;      // hand-formula agreement on constructed populations
         private const double kBloomExactTolerance = 1e-5;     // bin-center arithmetic is exact to float rounding
+        private const double kKeyRiseTolerance = 1e-4;        // clip-guard rise bar: capped keys are prev + exactly the cap, so only float32 add rounding remains
 
         /// <summary>
         /// Fixture sRGB encode of one linear channel (inverse of NamerStyleExtractor.SrgbToLinear).
@@ -113,16 +139,21 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         /// <summary>
-        /// Source == reference distribution is the neutral fixed point: WB, contrast,
-        /// saturation all ~0 and the master curve is the identity on keys inside the
-        /// fixture's tonemapped support (keys above the support ceiling pin to the
-        /// ceiling — correct estimator behavior, so the assertion is restricted to keys
-        /// with time &lt;= 0.5, which the dense fixture populates). EV is NOT ~0 here:
-        /// the full-range 256-level ramp is maximally wide, so tonemap-of-mean vs
+        /// Source == reference distribution is the neutral fixed point: WB and
+        /// saturation ~0, and — since the sequential-composition fix (05.3
+        /// volume-washout) — the COMPOSED chain reproduces the reference
+        /// distribution (mean and p10/p90), which is where identity now lives:
+        /// contrast and the master curve deliberately carry the residual the
+        /// previous knobs leave (here the EV solve's Jensen gap), and the runtime
+        /// composes them back to neutral. EV is NOT ~0 on this fixture: the
+        /// full-range 256-level ramp is maximally wide, so tonemap-of-mean vs
         /// mean-of-tonemap curvature is FIRST-order (with the twin's constants,
         /// tonemap-of-mean(0.5) = 0.3673 vs mean-of-tonemap = 0.3364, identity EV
         /// ~ -0.13) — asserted against the twin-mirrored bisection instead of a
-        /// constant. WB tolerance derivation at kNeutralWhiteBalanceTolerance.
+        /// constant. Contrast is bounded, not pinned to 0: it neutralizes the
+        /// spread that the ~-0.13 EV shifts through the tonemap shoulder, measured
+        /// at kIdentityRampContrastBound. WB tolerance derivation at
+        /// kNeutralWhiteBalanceTolerance.
         /// </summary>
         [Test]
         public void Fit_IdenticalPair_IsNeutral()
@@ -147,17 +178,11 @@ namespace GraffitiEntertainment.Namer.Tests
             double expectedRampEv = SolveExposureMirrorForTest(sourceStats, referenceStats);
             Assert.AreEqual(expectedRampEv, (double)fitted.PostExposureEv, kEstimatorTolerance,
                 "ramp identity EV must equal the twin-mirrored bisection (first-order curvature, ~ -0.13)");
-            Assert.AreEqual(0.0, (double)fitted.Contrast, kNeutralKnobTolerance);
+            Assert.Less((double)Mathf.Abs(fitted.Contrast), kIdentityRampContrastBound,
+                "identity-pair contrast is the EV's Jensen-gap spread residual, not an independent full correction");
             Assert.AreEqual(0.0, (double)fitted.Saturation, kNeutralKnobTolerance);
-            for (int i = 0; i < fitted.MasterKeys.Length; i++)
-            {
-                Keyframe key = fitted.MasterKeys[i];
-                if (key.time <= 0.5f)
-                {
-                    Assert.AreEqual((double)key.time, (double)key.value, (double)kHistogramBinWidth,
-                        $"master key {i} left the diagonal on an identical pair");
-                }
-            }
+            AssertComposedChainMatchesReference(sourceStats, referenceStats, fitted,
+                kComposedMeanTolerance, kComposedPercentileTolerance);
         }
 
         /// <summary>
@@ -310,8 +335,13 @@ namespace GraffitiEntertainment.Namer.Tests
         /// Contrast on 50/50 two-value populations is hand-computable: with two
         /// occupied bins of equal mass, p10 = center(bin A) exactly and
         /// p90 = center A + (2*0.9 - 1) * (center B - center A) (within-bin fraction
-        /// 0.8 at the p90 crossing). Expected contrast is the LogC spread ratio of
-        /// those hand values; the estimator must match (measured exact in float64).
+        /// 0.8 at the p90 crossing). Since the sequential-composition fix (05.3
+        /// volume-washout), the SOURCE percentiles are taken on the histogram
+        /// transformed through the fitted EV — production's own internal transform,
+        /// so the pin is wiring (SolveExposureMirrorForTest precedent); the reference
+        /// percentiles stay hand-derived bin-center arithmetic. Expected contrast is
+        /// the LogC spread ratio of those values; the estimator must match (measured
+        /// exact in float64).
         /// </summary>
         [Test]
         public void Fit_Contrast_SolvesLogCSpread()
@@ -329,18 +359,20 @@ namespace GraffitiEntertainment.Namer.Tests
                 reference[i + kHalfPopulation] = EncodePixel(new float3(refHigh, refHigh, refHigh));
             }
 
+            NamerStylePostStats sourceStats = NamerStylePostFit.AccumulateSource(source);
             NamerStylePostFitParams fitted = NamerStylePostFit.Fit(
-                NamerStylePostFit.AccumulateSource(source),
+                sourceStats,
                 AccumulateReferencePixels(reference, 1f),
                 "contrast");
 
-            float srcLow = BinCenter(NamerStylePostMath.TonemapLdr(new float3(0.25f, 0.25f, 0.25f)).x);
-            float srcHigh = BinCenter(NamerStylePostMath.TonemapLdr(new float3(0.75f, 0.75f, 0.75f)).x);
+            float[] evTransformed = NamerStylePostFit.TransformHistogramThroughExposure(
+                sourceStats.LumaHistogram, fitted.PostExposureEv);
+            float srcTotal = (float)sourceStats.TotalWeight;
+            float srcP10 = NamerStylePostFit.WeightedPercentile(evTransformed, srcTotal, kP10Fraction);
+            float srcP90 = NamerStylePostFit.WeightedPercentile(evTransformed, srcTotal, kP90Fraction);
             float refLowCenter = BinCenter(NamerStylePostMath.TonemapLdr(new float3(0.35f, 0.35f, 0.35f)).x);
             float refHighCenter = BinCenter(NamerStylePostMath.TonemapLdr(new float3(0.85f, 0.85f, 0.85f)).x);
             const float kP90WithinFraction = 0.8f; // (2 * p90 - 1) with two equal-mass bins
-            float srcP10 = srcLow;
-            float srcP90 = srcLow + kP90WithinFraction * (srcHigh - srcLow);
             float refP10 = refLowCenter;
             float refP90 = refLowCenter + kP90WithinFraction * (refHighCenter - refLowCenter);
             float srcSpread = NamerStylePostMath.LinearToLogC(srcP90) - NamerStylePostMath.LinearToLogC(srcP10);
@@ -384,14 +416,16 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         /// <summary>
-        /// Extreme cast stays hue-preserving: the solver recovers ~(-100, +100) but the
-        /// fitted knobs clamp to exactly (-50, +50) = ±kFittedWhiteBalanceLimit after
-        /// the widened hue-preservation bound (260927-jkb: 15 -> 50 — strong warm/cool
-        /// while keeping the von Kries hue rotation bounded; the solve still searches
-        /// the full ±100). No tolerance — the clamp yields exactly ±50 as floats.
+        /// Extreme cast recovers the FULL range: the solver finds ~(-100, +100) and the
+        /// fitted knobs carry it untruncated — ±kFittedWhiteBalanceLimit now equals the
+        /// solve bounds at URP's full ±100 slider range (260927-jkb lineage: 15 -> 50
+        /// -> 100; the retired ±50 hue-preservation bound silently railed a genuinely
+        /// warm source). Without the clamp truncating to exact floats, the fitted
+        /// values carry the solver's golden-section convergence error (~7e-4 at the
+        /// bound) — the recovery-bar tolerance covers it.
         /// </summary>
         [Test]
-        public void Fit_WhiteBalance_ExtremeCast_ClampsToFifty()
+        public void Fit_WhiteBalance_ExtremeCast_RecoversFullRange()
         {
             const int kFixturePixelCount = 64;
             Color[] source = new Color[kFixturePixelCount];
@@ -411,8 +445,8 @@ namespace GraffitiEntertainment.Namer.Tests
                 AccumulateReferencePixels(reference, 1f),
                 "wb-clamp");
 
-            Assert.AreEqual(-50.0, (double)fitted.Temperature);
-            Assert.AreEqual(50.0, (double)fitted.Tint);
+            Assert.AreEqual(-100.0, (double)fitted.Temperature, kWhiteBalanceRecoveryTolerance);
+            Assert.AreEqual(100.0, (double)fitted.Tint, kWhiteBalanceRecoveryTolerance);
         }
 
         /// <summary>
@@ -525,13 +559,21 @@ namespace GraffitiEntertainment.Namer.Tests
         }
 
         /// <summary>
-        /// Master curve on reference = pow(tonemapped source, 2.2): the histogram
-        /// specification must return the gamma map, so curve(0.5) ~ 0.5^2.2 within
-        /// one bin width (measured 0.28 bin widths with a 256-level dense fixture;
-        /// sparser fixtures pay histogram-gap error, hence the dense construction).
+        /// Composition regression — the 05.3 volume-washout root cause's
+        /// specification. URP composes the knobs in series (EV -> ACES tonemap ->
+        /// LUT contrast -> ... -> YRGB curves), so the FITTED SET must reproduce the
+        /// reference distribution when chained in that order. The retired
+        /// independent solves each carried the FULL correction of their statistic
+        /// (EV the mean, contrast the spread, the curve the whole CDF), so the
+        /// composed chain over-corrected — the mean/spread landed two to three
+        /// times past the target, which the user saw as muddy, washed-out generated
+        /// volumes; this assertion fails on that behavior. Fixture: reference =
+        /// pow(tonemapped source, 2.2) on a dense 256-level ramp, so every knob
+        /// does real work (the EV takes the mean drop, contrast the spread change,
+        /// the curve the residual gamma shape).
         /// </summary>
         [Test]
-        public void Fit_MasterCurve_MatchesGammaPair()
+        public void Fit_ComposedChain_ReproducesReferenceDistribution()
         {
             const int kFixtureLevels = 256;
             Color[] source = new Color[kFixtureLevels];
@@ -545,13 +587,157 @@ namespace GraffitiEntertainment.Namer.Tests
                 reference[i] = EncodePixel(new float3(gammaMapped, gammaMapped, gammaMapped));
             }
 
+            NamerStylePostStats sourceStats = NamerStylePostFit.AccumulateSource(source);
+            NamerStylePostStats referenceStats = AccumulateReferencePixels(reference, 1f);
+            NamerStylePostFitParams fitted = NamerStylePostFit.Fit(sourceStats, referenceStats, "curve");
+
+            AssertComposedChainMatchesReference(sourceStats, referenceStats, fitted,
+                kComposedMeanTolerance, kComposedPercentileTolerance);
+        }
+
+        /// <summary>
+        /// Master-curve clip-guard regression (05.3 green-washout fix): a
+        /// bright-heavy reference (a fifth of the mass in one near-white cluster)
+        /// lets the histogram specification STEP a populated mid band straight onto
+        /// the saturated top — measured on the live Neo fit, the (0.5, 0.534)/
+        /// (0.625, 1.0) key pair (slope 3.73) blew 32% of green-dominant texels to
+        /// >= 0.999 and destroyed their chroma. Fixture mirrors that shape: source =
+        /// 78% dark mass (uniform over [0, 0.45]) + a populated mid-high band at
+        /// [0.55, 0.75] (the greens stand-in — dark model, bright accent band);
+        /// reference = the same 78/22 mass split bimodal, 78% in a low cluster
+        /// (~0.05 linear) and 22% at the top bin's center (~0.994 linear), so
+        /// CdfInvert jumps from the low cluster to ~0.996 for every quantile past
+        /// 0.78 and one 1/8 key segment carries the whole ~0.96 rise (the band's
+        /// quantiles sit past the jump, so unguarded it lands entirely on the
+        /// saturated cluster). Three assertions: (1) every adjacent master-key rise
+        /// respects the CLAHE-style clip limit (the guard spec), (2) the top key
+        /// still reaches the saturated cluster (the guard limits climb RATE, not
+        /// range), (3) the key at 0.625 — inside the populated band — is not blown
+        /// onto the saturated top (pre-fix it is the ~0.996 cluster; post-fix it
+        /// sits on the capped climb).
+        /// </summary>
+        [Test]
+        public void Fit_MasterCurve_BrightHeavyReference_LimitsRiseIntoSaturatedTop()
+        {
+            const int kFixturePixelCount = 256;
+            const int kBandPixelCount = 56;   // 22% mid-high band, matching the reference's top cluster mass
+            int bandStart = kFixturePixelCount - kBandPixelCount;
+            Color[] source = new Color[kFixturePixelCount];
+            Color[] reference = new Color[kFixturePixelCount];
+            for (int i = 0; i < kFixturePixelCount; i++)
+            {
+                if (i < bandStart)
+                {
+                    source[i] = GrayPixel((i / (float)bandStart) * 0.45f);
+                    // low cluster: two pixels per bin over the bottom of the sRGB ramp
+                    reference[i] = GrayPixel((i * 0.5f + 0.5f) / NamerStylePostFit.kPostHistogramBins);
+                }
+                else
+                {
+                    source[i] = GrayPixel(0.55f + ((i - bandStart) / (float)(kBandPixelCount - 1)) * 0.2f);
+                    // the top bin's center (sRGB ~0.998 -> decoded linear ~0.994, bin 254)
+                    reference[i] = GrayPixel((255f + 0.5f) / NamerStylePostFit.kPostHistogramBins);
+                }
+            }
+
             NamerStylePostFitParams fitted = NamerStylePostFit.Fit(
                 NamerStylePostFit.AccumulateSource(source),
                 AccumulateReferencePixels(reference, 1f),
-                "curve");
+                "master-clip-guard");
 
-            Keyframe midKey = fitted.MasterKeys[4]; // time 4/8 = 0.5 on the 9-key grid
-            Assert.AreEqual((double)pow(0.5f, kFixtureGammaPairExponent), (double)midKey.value, (double)kHistogramBinWidth);
+            Keyframe[] keys = fitted.MasterKeys;
+            for (int i = 1; i < keys.Length; i++)
+            {
+                Assert.LessOrEqual(
+                    (double)(keys[i].value - keys[i - 1].value),
+                    (double)NamerStylePostFit.kMasterClipGuardMaxRise + kKeyRiseTolerance,
+                    string.Format("master key rise {0}->{1} must respect the clip guard (measured {2})",
+                        i - 1, i, keys[i].value - keys[i - 1].value));
+            }
+
+            Assert.GreaterOrEqual((double)keys[keys.Length - 1].value, (double)NamerStylePostFit.kMasterClipGuardEntry,
+                "the guard limits the climb rate into the top, not the curve's reach — the reference's bright cluster still maps to the saturated top");
+
+            Assert.Less((double)keys[5].value, (double)NamerStylePostFit.kMasterClipGuardEntry,
+                string.Format("the populated mid-high band's key at 0.625 must sit on the capped climb, not the saturated top (measured {0})",
+                    keys[5].value));
+        }
+
+        /// <summary>
+        /// White-balance luma scale premise pins (05.3 volume-washout follow-up):
+        /// neutral knobs are the identity (ColorBalanceToLMSCoeffs(0, 0) is exactly
+        /// (1, 1, 1), so the scale is 1 up to the LMS round-trip float error), and
+        /// the rail fixture's scale is first-order — the defect's premise, without
+        /// which the rail composition test below would pass vacuously.
+        /// </summary>
+        [Test]
+        public void WhiteBalanceLumaScale_NeutralIsIdentityAndRailIsFirstOrder()
+        {
+            float3 tonemappedWarm = NamerStylePostMath.TonemapLdr(new float3(0.8f, 0.55f, 0.35f));
+            Assert.AreEqual(1.0, (double)NamerStylePostFit.WhiteBalanceLumaScale(0f, 0f, tonemappedWarm), 1e-5,
+                "neutral knobs apply identity LMS gains, so the luma scale must be 1 up to the round trip");
+            Assert.Greater(
+                Math.Abs((double)NamerStylePostFit.WhiteBalanceLumaScale(-50f, 0f, tonemappedWarm) - 1.0),
+                kFirstOrderLumaMargin,
+                string.Format("the rail cast must shift luma first-order (measured scale {0})",
+                    NamerStylePostFit.WhiteBalanceLumaScale(-50f, 0f, tonemappedWarm)));
+        }
+
+        /// <summary>
+        /// Root-cause regression for the white-balance-at-the-rail defect (05.3
+        /// volume-washout follow-up): the runtime applies the fitted WB between the
+        /// tonemap and the contrast with RAW ColorBalanceToLMSCoeffs gains, so a fit
+        /// whose temperature sits at a strong -50 shifts luma
+        /// first-order — the EV solve must divide that scale out or the composed
+        /// mean overshoots by exactly the shift (the reported "a small EV decrease
+        /// makes it look right"). Fixture: warm source single tone, reference = that
+        /// tone tonemapped then white-balanced by coeffs(-50, 0) — the runtime LUT
+        /// stage verbatim. Three assertions: (1) the fixture drives the fitted
+        /// temperature to a strong cool value (<= -40), (2) the fitted EV equals the
+        /// twin-mirrored TWO-PASS solve (pass 1 on the reference mean, pass 2 on that
+        /// mean divided by the fitted WB's luma scale — the retired single-pass solve
+        /// misses by log2(scale)), (3) the composed chain lands on the reference
+        /// mean/percentiles.
+        /// </summary>
+        [Test]
+        public void Fit_ComposedChain_WhiteBalanceRailLandsOnReferenceMean()
+        {
+            const float kRailTemperature = -50f;
+            const float kRailTint = 0f;
+            const int kFixturePixelCount = 64;
+            float3 warmLinear = new float3(0.8f, 0.55f, 0.35f);
+            Vector3 coeffs = ColorUtils.ColorBalanceToLMSCoeffs(kRailTemperature, kRailTint);
+            float3 cast = new float3(coeffs.x, coeffs.y, coeffs.z);
+            float3 balanced = NamerStylePostMath.LmsToLinear(
+                NamerStylePostMath.LinearToLms(NamerStylePostMath.TonemapLdr(warmLinear)) * cast);
+            Color warm = new Color(warmLinear.x, warmLinear.y, warmLinear.z, 1f);
+            Color[] source = new Color[kFixturePixelCount];
+            Color[] reference = new Color[kFixturePixelCount];
+            for (int i = 0; i < kFixturePixelCount; i++)
+            {
+                source[i] = warm;
+                reference[i] = EncodePixel(balanced);
+            }
+
+            NamerStylePostStats sourceStats = NamerStylePostFit.AccumulateSource(source);
+            NamerStylePostStats referenceStats = AccumulateReferencePixels(reference, 1f);
+            NamerStylePostFitParams fitted = NamerStylePostFit.Fit(sourceStats, referenceStats, "wb-rail");
+
+            Assert.LessOrEqual((double)fitted.Temperature, -40.0,
+                "the fixture's cast must drive the fitted temperature to a strong cool value where WB luma is first-order");
+
+            float firstPassEv = SolveExposureMirrorForTest(sourceStats, referenceStats);
+            float3 tonemappedMean = NamerStylePostMath.TonemapLdr(
+                max(new float3(sourceStats.RawMeanLinear.r, sourceStats.RawMeanLinear.g, sourceStats.RawMeanLinear.b), 1e-6f)
+                * exp2(firstPassEv));
+            float fittedScale = NamerStylePostFit.WhiteBalanceLumaScale(fitted.Temperature, fitted.Tint, tonemappedMean);
+            float expectedEv = SolveExposureMirrorForMean(
+                sourceStats, max((float)referenceStats.MeanLuma / fittedScale, 1e-6f));
+            Assert.AreEqual((double)expectedEv, (double)fitted.PostExposureEv, kEstimatorTolerance,
+                "the fitted EV must be the two-pass solve: pass 1 on the reference mean, pass 2 divided by the fitted WB's luma scale");
+
+            AssertComposedChainMatchesReference(sourceStats, referenceStats, fitted,
+                kComposedMeanTolerance, kComposedPercentileTolerance);
         }
 
         /// <summary>
@@ -638,6 +824,79 @@ namespace GraffitiEntertainment.Namer.Tests
             return stats;
         }
 
+        /// <summary>
+        /// Composition oracle (05.3 volume-washout fix): pushes the SOURCE luma
+        /// histogram through the modeled runtime chain — the fit's exposure
+        /// transform, the white balance's scalar luma scale, its contrast
+        /// transform, then master-curve evaluation per occupied bin center (URP
+        /// applies the YRGB curves last, on the LDR value) — and asserts the
+        /// composed output's mean luma and p10/p90 land on the reference
+        /// distribution's. Uses the fit's own internal transforms (the pin is
+        /// composition semantics, not a re-implementation of the stage math).
+        /// </summary>
+        private static void AssertComposedChainMatchesReference(
+            NamerStylePostStats sourceStats,
+            NamerStylePostStats referenceStats,
+            NamerStylePostFitParams fitted,
+            double meanTolerance,
+            double percentileTolerance)
+        {
+            float[] chained = NamerStylePostFit.TransformHistogramThroughExposure(
+                sourceStats.LumaHistogram, fitted.PostExposureEv);
+            float3 oracleRawMean = max(
+                new float3(sourceStats.RawMeanLinear.r, sourceStats.RawMeanLinear.g, sourceStats.RawMeanLinear.b),
+                1e-6f);
+            float3 oracleTonemappedMean = NamerStylePostMath.TonemapLdr(oracleRawMean * exp2(fitted.PostExposureEv));
+            float oracleWbScale = NamerStylePostFit.WhiteBalanceLumaScale(
+                fitted.Temperature, fitted.Tint, oracleTonemappedMean);
+            chained = NamerStylePostFit.TransformHistogramThroughLumaScale(chained, oracleWbScale);
+            chained = NamerStylePostFit.TransformHistogramThroughContrast(chained, fitted.Contrast);
+            AnimationCurve master = new AnimationCurve(fitted.MasterKeys);
+            float[] output = new float[NamerStylePostFit.kPostHistogramBins];
+            float total = 0f;
+            for (int i = 0; i < chained.Length; i++)
+            {
+                float mass = chained[i];
+                if (mass <= 0f)
+                {
+                    continue;
+                }
+
+                // The runtime applies the curve per-pixel continuously; model that by
+                // splitting each bin's mass fractionally between the two destination
+                // bins the mapped center straddles (CdfEval's within-bin-linear
+                // convention) instead of clumping it into one bin.
+                float center = (i + 0.5f) / NamerStylePostFit.kPostHistogramBins;
+                float pos = clamp(master.Evaluate(center), 0f, 1f) * (NamerStylePostFit.kPostHistogramBins - 1);
+                int lowBin = (int)pos;
+                int highBin = min(lowBin + 1, NamerStylePostFit.kPostHistogramBins - 1);
+                float within = pos - lowBin;
+                output[lowBin] += mass * (1f - within);
+                output[highBin] += mass * within;
+                total += mass;
+            }
+
+            double outputMean = 0.0;
+            for (int i = 0; i < output.Length; i++)
+            {
+                outputMean += ((i + 0.5f) / NamerStylePostFit.kPostHistogramBins) * (double)output[i];
+            }
+
+            outputMean /= (double)total;
+            float outputP10 = NamerStylePostFit.WeightedPercentile(output, total, kP10Fraction);
+            float outputP90 = NamerStylePostFit.WeightedPercentile(output, total, kP90Fraction);
+            float refTotal = (float)referenceStats.TotalWeight;
+            float refP10 = NamerStylePostFit.WeightedPercentile(referenceStats.LumaHistogram, refTotal, kP10Fraction);
+            float refP90 = NamerStylePostFit.WeightedPercentile(referenceStats.LumaHistogram, refTotal, kP90Fraction);
+
+            Assert.AreEqual((double)referenceStats.MeanLuma, outputMean, meanTolerance,
+                "the composed chain (EV -> WB -> contrast -> master curve) must land on the reference mean luma");
+            Assert.AreEqual((double)refP10, (double)outputP10, percentileTolerance,
+                "the composed chain must land on the reference p10");
+            Assert.AreEqual((double)refP90, (double)outputP90, percentileTolerance,
+                "the composed chain must land on the reference p90");
+        }
+
         private static void AssertKeysAreIdentical(Keyframe[] expected, Keyframe[] actual)
         {
             Assert.AreEqual(expected.Length, actual.Length);
@@ -659,20 +918,32 @@ namespace GraffitiEntertainment.Namer.Tests
         /// </summary>
         private static float SolveExposureMirrorForTest(NamerStylePostStats source, NamerStylePostStats reference)
         {
+            return SolveExposureMirrorForMean(source, max(reference.MeanLuma, 1e-6f));
+        }
+
+        /// <summary>
+        /// Target-parametrized exposure-bisection mirror: same bracket, epsilon
+        /// floor, sign rule, fixed iteration count and float ops as production's
+        /// SolveExposureForMeanLuma local function — used by the white-balance-rail
+        /// test to mirror BOTH passes of the two-pass EV solve (pass 1 against the
+        /// reference mean, pass 2 against that mean divided by the fitted WB's
+        /// scalar luma scale).
+        /// </summary>
+        private static float SolveExposureMirrorForMean(NamerStylePostStats source, float targetLumaMean)
+        {
             const int kMirrorBisectionIterations = 48;
             const float kMirrorBracketEv = 10f;
             const float kMirrorStatEpsilon = 1e-6f;
             float3 srcRawMean = max(
                 new float3(source.RawMeanLinear.r, source.RawMeanLinear.g, source.RawMeanLinear.b),
                 kMirrorStatEpsilon);
-            float refLumaMean = max(reference.MeanLuma, kMirrorStatEpsilon);
             float evLow = -kMirrorBracketEv;
             float evHigh = kMirrorBracketEv;
             for (int i = 0; i < kMirrorBisectionIterations; i++)
             {
                 float evMid = (evLow + evHigh) * 0.5f;
                 float predicted = NamerStylePostMath.Luma709(NamerStylePostMath.TonemapLdr(srcRawMean * exp2(evMid)));
-                if (predicted < refLumaMean)
+                if (predicted < targetLumaMean)
                 {
                     evLow = evMid;
                 }

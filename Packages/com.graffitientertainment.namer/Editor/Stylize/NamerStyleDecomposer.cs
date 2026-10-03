@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using Unity.Mathematics;
@@ -185,8 +186,8 @@ namespace GraffitiEntertainment.Namer.Editor
         // -------- validation-metric constants (STYL-17) --------
 
         /// <summary>Effective white-balance knob range for the metric's normalization —
-        /// mirrors the fit-side clamp kFittedWhiteBalanceLimit (NamerStylePostFit.cs:204).</summary>
-        private const float kValidationWhiteBalanceRange = 50f;
+        /// mirrors the fit-side clamp kFittedWhiteBalanceLimit (NamerStylePostFit.cs:207).</summary>
+        private const float kValidationWhiteBalanceRange = 100f;
 
         /// <summary>Percent-knob range for the metric's normalization — mirrors
         /// kParamRangeLimit (NamerStylePostFit.cs:203, URP's own ±100 slider range).</summary>
@@ -207,6 +208,21 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>Copy prefix of the STYL-17 "{measure}" fragment (UI-SPEC S17).</summary>
         private const string kValidationMeasurePrefix = "max knob deviation ";
+
+        // -------- decompose progress (shared by the sync bar and the async worker's report seam) --------
+
+        /// <summary>Title of the decompose progress bar — the one home of the string,
+        /// used by the gather loop's interactive bar and the asset editor's async tick.</summary>
+        internal const string kDecomposeProgressTitle = "Decomposing NAMER Style";
+
+        /// <summary>Progress span of pass 1 (downsample + uniform accumulate) on the [0,1] bar.</summary>
+        private const float kPass1ProgressSpan = 0.5f;
+
+        /// <summary>Progress mark reported after classification + the grade fit, before pass 2.</summary>
+        private const float kPass2ProgressStart = 0.6f;
+
+        /// <summary>Progress span of pass 2 (de-grade + palette histogram sweep).</summary>
+        private const float kPass2ProgressSpan = 0.4f;
 
         /// <summary>Knob display names of the validation metric, in fixed evaluation order.</summary>
         private const string kTemperatureKnobName = "Temperature";
@@ -237,7 +253,9 @@ namespace GraffitiEntertainment.Namer.Editor
         /// feeds both the post block and the de-grade either way; null (the default)
         /// is the model-free neutral primary. The result is owned by the caller; the
         /// asset is never written here (the asset editor's RunDecompose owns that
-        /// transaction).
+        /// transaction). Structured for threading (05.3): preflight + main-thread
+        /// gather + the pure compute core; the editor path that must not block the
+        /// loop uses <see cref="DecomposeStyleAsync"/>.
         /// </summary>
         public static NamerStyleDecomposeResult DecomposeStyle(NamerStyleAsset asset, Func<bool> shouldCancel = null,
             NamerStylePostFitParams gradeOverride = null, string gradeOverrideExemplarName = null)
@@ -247,206 +265,21 @@ namespace GraffitiEntertainment.Namer.Editor
                 throw new ArgumentNullException(nameof(asset));
             }
 
-            asset.ClampToCaps();
-
-            // The bare stamp: DecompositionFingerprint is the EXACT ComputeFingerprint
-            // return (the NamerPostLook PostFitFingerprint idiom) — no suffix of any
-            // kind, so writing it to the asset leaves IsDecompositionStale false
-            // immediately after Decompose. PaletteSource drift is detected by the
-            // separate PaletteSourceAtExtract seam, never by this fingerprint.
-            string fingerprint = asset.ComputeFingerprint();
-
-            if (CountPositiveWeightReferences(asset) < NamerEditorConstants.MinReferences)
-            {
-                return new NamerStyleDecomposeResult(cancelled: false, errorTextureName: null, tooFewReferences: true);
-            }
-
-            List<CachedReference> cached = new List<CachedReference>();
             try
             {
-                // ================= PASS 1: read, downsample, cache, uniform accumulate =================
-                // Two-pass necessity (RESEARCH Pattern 2): the percentile cuts and the
-                // grade estimate must exist BEFORE per-pixel weighting — the first pass
-                // accumulates grade stats with a UNIFORM confidence of 1 (whose
-                // Luma/Max3 histograms, binned at the per-reference weight over ALL
-                // texels, are also the percentile-cut source — cuts describe the whole
-                // image, never the confident subset), the second pass re-accumulates
-                // with the classifier's per-texel confidence.
-                NamerStylePostStats uniformStats = new NamerStylePostStats();
-                int referencesToRead = CountPositiveWeightReferences(asset);
-                int processedReferences = 0;
-                for (int i = 0; i < asset.References.Count; i++)
+                NamerStyleDecomposeResult preflight = PreflightAndSnapshot(asset, out string fingerprint, out bool deGradePalette);
+                if (preflight != null)
                 {
-                    Texture2D reference = asset.References[i];
-                    if (reference == null)
-                    {
-                        continue;
-                    }
-
-                    float weight = i < asset.ReferenceWeights.Count
-                        ? asset.ReferenceWeights[i]
-                        : NamerEditorConstants.DefaultReferenceWeight;
-                    if (weight <= 0f)
-                    {
-                        continue;
-                    }
-
-                    // OQ-1/T-05.3-03-03: GetPixels requires Read/Write; pre-check so the
-                    // failure is a named-texture result, never a raw exception.
-                    if (!reference.isReadable)
-                    {
-                        return new NamerStyleDecomposeResult(cancelled: false, errorTextureName: reference.name, tooFewReferences: false);
-                    }
-
-                    Color[] pixels;
-                    try
-                    {
-                        pixels = reference.GetPixels();
-                    }
-                    catch (Exception)
-                    {
-                        return new NamerStyleDecomposeResult(cancelled: false, errorTextureName: reference.name, tooFewReferences: false);
-                    }
-
-                    Color[] grid = DownsampleSrgb(pixels, reference.width, reference.height, out int downWidth, out int downHeight);
-                    pixels = null; // T-05.3-03-02: drop the per-ref raw buffer before the next reference.
-
-                    CachedReference cachedReference = new CachedReference(grid, downWidth, downHeight, weight);
-                    cached.Add(cachedReference);
-
-                    // First-pass grade stats: uniform confidence 1 per texel via the
-                    // per-pixel-weight seam (the overload exists for exactly this shape).
-                    NamerStylePostFit.AccumulateReference(uniformStats, grid, UniformConfidence(grid.Length), weight);
-                    processedReferences++;
-
-                    bool cancelled;
-                    if (shouldCancel != null)
-                    {
-                        // Injectable headless path (tests): no editor UI.
-                        cancelled = shouldCancel();
-                    }
-                    else
-                    {
-                        // Interactive-editor path: visible, cancellable progress.
-                        float progress = (float)processedReferences / referencesToRead;
-                        cancelled = EditorUtility.DisplayCancelableProgressBar(
-                            "Decomposing NAMER Style",
-                            "Reading " + reference.name,
-                            progress);
-                    }
-
-                    if (cancelled)
-                    {
-                        return new NamerStyleDecomposeResult(cancelled: true, errorTextureName: null, tooFewReferences: false);
-                    }
+                    return preflight;
                 }
 
-                // ================= Percentile cuts (once, from the uniform pass-1 histograms) =================
-                float p95Max3Cut = NamerStylePostFit.WeightedPercentile(
-                    uniformStats.Max3SrgbHistogram, (float)uniformStats.TotalWeight, NamerStylePostFit.kDefaultBloomHighlightPercentile);
-                float p5LumaCut = NamerStylePostFit.WeightedPercentile(
-                    uniformStats.LumaHistogram, (float)uniformStats.TotalWeight, kShadowPercentile);
-
-                // ================= Classification + confidence-weighted grade stats =================
-                // Fixed order over the cached grids; the confidence-weighted estimate
-                // REPLACES the uniform pass-1 stats (fixed order keeps determinism).
-                NamerStylePostStats referenceStats = new NamerStylePostStats();
-                for (int r = 0; r < cached.Count; r++)
+                if (!TryGatherReferences(asset, shouldCancel, out GatheredReferences gathered, out NamerStyleDecomposeResult failure))
                 {
-                    CachedReference cachedReference = cached[r];
-                    cachedReference.LumaGrid = ComputeDecodedLumaGrid(cachedReference.Grid);
-                    cachedReference.Confidence = ClassifyGrid(cachedReference, p95Max3Cut, p5LumaCut);
-                    NamerStylePostFit.AccumulateReference(
-                        referenceStats, cachedReference.Grid, cachedReference.Confidence, cachedReference.Weight);
+                    return failure;
                 }
 
-                // ================= GRADE (one estimate feeds post block AND de-grade) =================
-                NamerStylePostFitParams grade;
-                string gradeSourceExemplarName = "";
-                if (gradeOverride == null)
-                {
-                    // D-02 primary: the shipped Fit verbatim over the synthetic neutral
-                    // source — the same code path, only the source-stats constructor is new.
-                    grade = NamerStylePostFit.Fit(
-                        NamerStyleGradeMath.BuildNeutralSourceStats(), referenceStats, fingerprint);
-                }
-                else
-                {
-                    // D-02 complement (engaged only when supplied, never silent): the
-                    // caller's exemplar-render fit, fingerprint recomputed over the
-                    // shared list so staleness reads against the refs actually consumed.
-                    grade = gradeOverride;
-                    grade.Fingerprint = fingerprint;
-                    gradeSourceExemplarName = gradeOverrideExemplarName ?? "";
-                }
-
-                // ================= PASS 2: de-grade + palette histogram + confidence mass =================
-                // Per-channel curves cloned ONCE per decompose (ApplyToPostLook clone
-                // discipline, NamerStylePostFit.cs:443-445); the master curve travels
-                // inside the params argument via MasterKeys.
-                AnimationCurve redCurve = CloneCurveOrNull(grade.RedKeys);
-                AnimationCurve greenCurve = CloneCurveOrNull(grade.GreenKeys);
-                AnimationCurve blueCurve = CloneCurveOrNull(grade.BlueKeys);
-                bool deGradePalette = asset.PaletteSource == NamerEditorConstants.kPaletteSourceDeGraded;
-
-                float[] paletteHistogram = new float[PaletteHistogramBinCount];
-                double confidentMass = 0.0;
-                double contaminatedMass = 0.0;
-                double totalMass = 0.0;
-                for (int r = 0; r < cached.Count; r++)
-                {
-                    CachedReference cachedReference = cached[r];
-                    Color[] gridTexels = cachedReference.Grid;
-                    for (int t = 0; t < gridTexels.Length; t++)
-                    {
-                        Color texel = gridTexels[t];
-                        if (!IsFiniteTexel(texel))
-                        {
-                            continue; // T-05.3-03-01: NaN/Inf texels poison nothing.
-                        }
-
-                        // Mass bookkeeping runs over ALL texels (masked included) —
-                        // the fractions describe the whole image.
-                        totalMass += cachedReference.Weight;
-                        float confidence = cachedReference.Confidence[t];
-                        if (confidence >= kCleanConfidence)
-                        {
-                            confidentMass += cachedReference.Weight;
-                        }
-                        else
-                        {
-                            contaminatedMass += cachedReference.Weight;
-                        }
-
-                        if (confidence <= 0f)
-                        {
-                            continue;
-                        }
-
-                        float3 decoded = new float3(
-                            NamerStyleExtractor.SrgbToLinear(texel.r),
-                            NamerStyleExtractor.SrgbToLinear(texel.g),
-                            NamerStyleExtractor.SrgbToLinear(texel.b));
-                        float3 paletteColor = decoded;
-                        if (deGradePalette)
-                        {
-                            // Transform-then-bin: the de-grade applies per TEXEL before
-                            // binning (never to anchors after k-means). Raw mode skips
-                            // ONLY this call — the confidence mask applies in BOTH modes.
-                            paletteColor = NamerStyleGradeMath.DeGrade(decoded, grade, redCurve, greenCurve, blueCurve);
-                        }
-
-                        paletteHistogram[PaletteBinIndex(paletteColor)] += cachedReference.Weight * confidence;
-                    }
-                }
-
-                // ================= PALETTE (shipped deterministic k-means, reused verbatim) =================
-                NamerStyleAnchor[] anchors = NamerStyleExtractor.BuildAnchors(paletteHistogram);
-
-                float confidentFraction = totalMass > 0.0 ? (float)(confidentMass / totalMass) : 0f;
-                float contaminatedFraction = totalMass > 0.0 ? (float)(contaminatedMass / totalMass) : 0f;
-                return new NamerStyleDecomposeResult(
-                    grade, anchors, confidentFraction, contaminatedFraction, fingerprint, gradeSourceExemplarName);
+                return ComputeDecomposition(gathered, fingerprint, deGradePalette,
+                    gradeOverride, gradeOverrideExemplarName, shouldCancel, null);
             }
             finally
             {
@@ -455,6 +288,363 @@ namespace GraffitiEntertainment.Namer.Editor
                     // Only the interactive path ever showed a bar.
                     EditorUtility.ClearProgressBar();
                 }
+            }
+        }
+
+        /// <summary>
+        /// Editor-responsive variant of <see cref="DecomposeStyle"/> (05.3 threading):
+        /// the preflight and the per-reference <c>GetPixels</c> reads run on the
+        /// calling (main) thread, then the pure-C# compute core — downsample, pass-1
+        /// accumulate, percentile cuts, classification, the grade fit, the
+        /// de-grade/palette sweep, and k-means — runs on a worker via
+        /// <see cref="Task.Run(Action)"/>, so the editor loop stays responsive.
+        /// <paramref name="shouldCancel"/> and <paramref name="reportProgress"/> are
+        /// invoked ON THE WORKER and must be thread-safe (no editor UI — the asset
+        /// editor drives its progress bar from an <c>EditorApplication.update</c> tick
+        /// fed by <paramref name="reportProgress"/>). The await resumes on the
+        /// caller's synchronization context (Unity's main thread in the editor), so
+        /// the caller's apply transaction is main-thread exactly as with the
+        /// synchronous path. Results are element-wise identical to
+        /// <see cref="DecomposeStyle"/> on the same asset state.
+        /// </summary>
+        public static async Task<NamerStyleDecomposeResult> DecomposeStyleAsync(
+            NamerStyleAsset asset, Func<bool> shouldCancel = null,
+            NamerStylePostFitParams gradeOverride = null, string gradeOverrideExemplarName = null,
+            Action<float, string> reportProgress = null)
+        {
+            if (asset == null)
+            {
+                throw new ArgumentNullException(nameof(asset));
+            }
+
+            NamerStyleDecomposeResult preflight = PreflightAndSnapshot(asset, out string fingerprint, out bool deGradePalette);
+            if (preflight != null)
+            {
+                return preflight;
+            }
+
+            if (!TryGatherReferences(asset, shouldCancel, out GatheredReferences gathered, out NamerStyleDecomposeResult failure))
+            {
+                return failure;
+            }
+
+            return await Task.Run(() => ComputeDecomposition(
+                gathered, fingerprint, deGradePalette, gradeOverride, gradeOverrideExemplarName,
+                shouldCancel, reportProgress));
+        }
+
+        /// <summary>
+        /// Shared preflight of both entry points: the cap clamp, the bare fingerprint
+        /// stamp, the palette-source snapshot, and the minimum-reference gate.
+        /// Returns the too-few-references failure result, or null when gathering may
+        /// proceed.
+        /// </summary>
+        private static NamerStyleDecomposeResult PreflightAndSnapshot(NamerStyleAsset asset,
+            out string fingerprint, out bool deGradePalette)
+        {
+            asset.ClampToCaps();
+
+            // The bare stamp: DecompositionFingerprint is the EXACT ComputeFingerprint
+            // return (the NamerPostLook PostFitFingerprint idiom) — no suffix of any
+            // kind, so writing it to the asset leaves IsDecompositionStale false
+            // immediately after Decompose. PaletteSource drift is detected by the
+            // separate PaletteSourceAtExtract seam, never by this fingerprint.
+            fingerprint = asset.ComputeFingerprint();
+
+            // Snapshot before any await: the compute core never touches the asset
+            // object, so a palette-source toggle flipped mid-run cannot tear one
+            // decomposition across two sources.
+            deGradePalette = asset.PaletteSource == NamerEditorConstants.kPaletteSourceDeGraded;
+
+            if (CountPositiveWeightReferences(asset) < NamerEditorConstants.MinReferences)
+            {
+                return new NamerStyleDecomposeResult(cancelled: false, errorTextureName: null, tooFewReferences: true);
+            }
+
+            return null;
+        }
+
+        /// <summary>Aligned parallel-array snapshot of the positive-weight references'
+        /// raw pixels, gathered on the main thread for the pure compute core.</summary>
+        internal struct GatheredReferences
+        {
+            /// <summary>Raw full-resolution sRGB pixels per reference (GetPixels output, one buffer per reference).</summary>
+            public Color[][] Pixels;
+
+            /// <summary>Source width per reference.</summary>
+            public int[] Widths;
+
+            /// <summary>Source height per reference.</summary>
+            public int[] Heights;
+
+            /// <summary>Positive reference weight per reference.</summary>
+            public float[] Weights;
+        }
+
+        /// <summary>
+        /// Reads every positive-weight reference's pixels on the CALLING thread
+        /// (<c>GetPixels</c> is main-thread-only) into the aligned arrays of
+        /// <see cref="GatheredReferences"/>. Weight-0 slots are skipped entirely — a
+        /// zero weight adds exactly zero mass AND zero influence on the percentile
+        /// cuts (the A4 discipline). Returns false with the failure result set for
+        /// the first unreadable texture or a cancel; true on success.
+        /// </summary>
+        private static bool TryGatherReferences(NamerStyleAsset asset, Func<bool> shouldCancel,
+            out GatheredReferences gathered, out NamerStyleDecomposeResult failure)
+        {
+            gathered = default;
+            failure = null;
+            List<Color[]> pixelBuffers = new List<Color[]>();
+            List<int> widths = new List<int>();
+            List<int> heights = new List<int>();
+            List<float> weights = new List<float>();
+            int referencesToRead = CountPositiveWeightReferences(asset);
+            int processedReferences = 0;
+            for (int i = 0; i < asset.References.Count; i++)
+            {
+                Texture2D reference = asset.References[i];
+                if (reference == null)
+                {
+                    continue;
+                }
+
+                float weight = i < asset.ReferenceWeights.Count
+                    ? asset.ReferenceWeights[i]
+                    : NamerEditorConstants.DefaultReferenceWeight;
+                if (weight <= 0f)
+                {
+                    continue;
+                }
+
+                // OQ-1/T-05.3-03-03: GetPixels requires Read/Write; pre-check so the
+                // failure is a named-texture result, never a raw exception.
+                if (!reference.isReadable)
+                {
+                    failure = new NamerStyleDecomposeResult(cancelled: false, errorTextureName: reference.name, tooFewReferences: false);
+                    return false;
+                }
+
+                Color[] pixels;
+                try
+                {
+                    pixels = reference.GetPixels();
+                }
+                catch (Exception)
+                {
+                    failure = new NamerStyleDecomposeResult(cancelled: false, errorTextureName: reference.name, tooFewReferences: false);
+                    return false;
+                }
+
+                pixelBuffers.Add(pixels);
+                widths.Add(reference.width);
+                heights.Add(reference.height);
+                weights.Add(weight);
+                processedReferences++;
+
+                bool cancelled;
+                if (shouldCancel != null)
+                {
+                    // Injectable headless path (tests / the async worker's owner): no editor UI.
+                    cancelled = shouldCancel();
+                }
+                else
+                {
+                    // Interactive-editor path: visible, cancellable progress.
+                    float progress = (float)processedReferences / referencesToRead;
+                    cancelled = EditorUtility.DisplayCancelableProgressBar(
+                        kDecomposeProgressTitle,
+                        "Reading " + reference.name,
+                        progress);
+                }
+
+                if (cancelled)
+                {
+                    failure = new NamerStyleDecomposeResult(cancelled: true, errorTextureName: null, tooFewReferences: false);
+                    return false;
+                }
+            }
+
+            gathered = new GatheredReferences
+            {
+                Pixels = pixelBuffers.ToArray(),
+                Widths = widths.ToArray(),
+                Heights = heights.ToArray(),
+                Weights = weights.ToArray(),
+            };
+            return true;
+        }
+
+        /// <summary>
+        /// The pure compute core shared by both entry points (05.3 threading): every
+        /// stage after the raw-pixel gather — downsample + pass-1 uniform accumulate,
+        /// percentile cuts, classification + confidence-weighted stats, the grade,
+        /// the de-grade/palette sweep, and k-means — over plain managed arrays with
+        /// NO engine-object or editor-UI access, safe to run on a worker thread.
+        /// <paramref name="shouldCancel"/> (delegate path only) and
+        /// <paramref name="reportProgress"/> are invoked from this thread.
+        /// Determinism contract unchanged: single-threaded fixed-order accumulation.
+        /// </summary>
+        internal static NamerStyleDecomposeResult ComputeDecomposition(
+            GatheredReferences gathered, string fingerprint, bool deGradePalette,
+            NamerStylePostFitParams gradeOverride, string gradeOverrideExemplarName,
+            Func<bool> shouldCancel, Action<float, string> reportProgress)
+        {
+            // ================= PASS 1: downsample, cache, uniform accumulate =================
+            // Two-pass necessity (RESEARCH Pattern 2): the percentile cuts and the
+            // grade estimate must exist BEFORE per-pixel weighting — the first pass
+            // accumulates grade stats with a UNIFORM confidence of 1 (whose
+            // Luma/Max3 histograms, binned at the per-reference weight over ALL
+            // texels, are also the percentile-cut source — cuts describe the whole
+            // image, never the confident subset), the second pass re-accumulates
+            // with the classifier's per-texel confidence.
+            NamerStylePostStats uniformStats = new NamerStylePostStats();
+            List<CachedReference> cached = new List<CachedReference>();
+            for (int r = 0; r < gathered.Pixels.Length; r++)
+            {
+                Color[] grid = DownsampleSrgb(gathered.Pixels[r], gathered.Widths[r], gathered.Heights[r], out int downWidth, out int downHeight);
+
+                CachedReference cachedReference = new CachedReference(grid, downWidth, downHeight, gathered.Weights[r]);
+                cached.Add(cachedReference);
+
+                // First-pass grade stats: uniform confidence 1 per texel via the
+                // per-pixel-weight seam (the overload exists for exactly this shape).
+                NamerStylePostFit.AccumulateReference(uniformStats, grid, UniformConfidence(grid.Length), gathered.Weights[r]);
+
+                ReportProgress(reportProgress,
+                    kPass1ProgressSpan * (r + 1) / gathered.Pixels.Length,
+                    "Processing reference " + (r + 1) + "/" + gathered.Pixels.Length);
+
+                if (shouldCancel != null && shouldCancel())
+                {
+                    return new NamerStyleDecomposeResult(cancelled: true, errorTextureName: null, tooFewReferences: false);
+                }
+            }
+
+            // ================= Percentile cuts (once, from the uniform pass-1 histograms) =================
+            float p95Max3Cut = NamerStylePostFit.WeightedPercentile(
+                uniformStats.Max3SrgbHistogram, (float)uniformStats.TotalWeight, NamerStylePostFit.kDefaultBloomHighlightPercentile);
+            float p5LumaCut = NamerStylePostFit.WeightedPercentile(
+                uniformStats.LumaHistogram, (float)uniformStats.TotalWeight, kShadowPercentile);
+
+            // ================= Classification + confidence-weighted grade stats =================
+            // Fixed order over the cached grids; the confidence-weighted estimate
+            // REPLACES the uniform pass-1 stats (fixed order keeps determinism).
+            NamerStylePostStats referenceStats = new NamerStylePostStats();
+            for (int r = 0; r < cached.Count; r++)
+            {
+                CachedReference cachedReference = cached[r];
+                cachedReference.LumaGrid = ComputeDecodedLumaGrid(cachedReference.Grid);
+                cachedReference.Confidence = ClassifyGrid(cachedReference, p95Max3Cut, p5LumaCut);
+                NamerStylePostFit.AccumulateReference(
+                    referenceStats, cachedReference.Grid, cachedReference.Confidence, cachedReference.Weight);
+            }
+
+            // ================= GRADE (one estimate feeds post block AND de-grade) =================
+            NamerStylePostFitParams grade;
+            string gradeSourceExemplarName = "";
+            if (gradeOverride == null)
+            {
+                // D-02 primary: the shipped Fit verbatim over the synthetic neutral
+                // source — the same code path, only the source-stats constructor is new.
+                grade = NamerStylePostFit.Fit(
+                    NamerStyleGradeMath.BuildNeutralSourceStats(), referenceStats, fingerprint);
+            }
+            else
+            {
+                // D-02 complement (engaged only when supplied, never silent): the
+                // caller's exemplar-render fit, fingerprint recomputed over the
+                // shared list so staleness reads against the refs actually consumed.
+                grade = gradeOverride;
+                grade.Fingerprint = fingerprint;
+                gradeSourceExemplarName = gradeOverrideExemplarName ?? "";
+            }
+
+            // ================= PASS 2: de-grade + palette histogram + confidence mass =================
+            // Per-channel curves cloned ONCE per decompose (ApplyToPostLook clone
+            // discipline, NamerStylePostFit.cs:443-445); the master curve travels
+            // inside the params argument via MasterKeys.
+            ReportProgress(reportProgress, kPass2ProgressStart, "Classifying + fitting grade");
+            AnimationCurve redCurve = CloneCurveOrNull(grade.RedKeys);
+            AnimationCurve greenCurve = CloneCurveOrNull(grade.GreenKeys);
+            AnimationCurve blueCurve = CloneCurveOrNull(grade.BlueKeys);
+
+            float[] paletteHistogram = new float[PaletteHistogramBinCount];
+            double confidentMass = 0.0;
+            double contaminatedMass = 0.0;
+            double totalMass = 0.0;
+            for (int r = 0; r < cached.Count; r++)
+            {
+                if (shouldCancel != null && shouldCancel())
+                {
+                    return new NamerStyleDecomposeResult(cancelled: true, errorTextureName: null, tooFewReferences: false);
+                }
+
+                ReportProgress(reportProgress,
+                    kPass2ProgressStart + kPass2ProgressSpan * (r + 1) / cached.Count,
+                    "Decomposing reference " + (r + 1) + "/" + cached.Count);
+
+                CachedReference cachedReference = cached[r];
+                Color[] gridTexels = cachedReference.Grid;
+                for (int t = 0; t < gridTexels.Length; t++)
+                {
+                    Color texel = gridTexels[t];
+                    if (!IsFiniteTexel(texel))
+                    {
+                        continue; // T-05.3-03-01: NaN/Inf texels poison nothing.
+                    }
+
+                    // Mass bookkeeping runs over ALL texels (masked included) —
+                    // the fractions describe the whole image.
+                    totalMass += cachedReference.Weight;
+                    float confidence = cachedReference.Confidence[t];
+                    if (confidence >= kCleanConfidence)
+                    {
+                        confidentMass += cachedReference.Weight;
+                    }
+                    else
+                    {
+                        contaminatedMass += cachedReference.Weight;
+                    }
+
+                    if (confidence <= 0f)
+                    {
+                        continue;
+                    }
+
+                    float3 decoded = new float3(
+                        NamerStyleExtractor.SrgbToLinear(texel.r),
+                        NamerStyleExtractor.SrgbToLinear(texel.g),
+                        NamerStyleExtractor.SrgbToLinear(texel.b));
+                    float3 paletteColor = decoded;
+                    if (deGradePalette)
+                    {
+                        // Transform-then-bin: the de-grade applies per TEXEL before
+                        // binning (never to anchors after k-means). Raw mode skips
+                        // ONLY this call — the confidence mask applies in BOTH modes.
+                        paletteColor = NamerStyleGradeMath.DeGrade(decoded, grade, redCurve, greenCurve, blueCurve);
+                    }
+
+                    paletteHistogram[PaletteBinIndex(paletteColor)] += cachedReference.Weight * confidence;
+                }
+            }
+
+            // ================= PALETTE (shipped deterministic k-means, reused verbatim) =================
+            NamerStyleAnchor[] anchors = NamerStyleExtractor.BuildAnchors(paletteHistogram);
+
+            float confidentFraction = totalMass > 0.0 ? (float)(confidentMass / totalMass) : 0f;
+            float contaminatedFraction = totalMass > 0.0 ? (float)(contaminatedMass / totalMass) : 0f;
+            return new NamerStyleDecomposeResult(
+                grade, anchors, confidentFraction, contaminatedFraction, fingerprint, gradeSourceExemplarName);
+        }
+
+        /// <summary>Null-tolerant progress seam: the sync path passes null, the async
+        /// worker owner passes a thread-safe writer (volatile fields on the asset
+        /// editor).</summary>
+        private static void ReportProgress(Action<float, string> reportProgress, float fraction, string phase)
+        {
+            if (reportProgress != null)
+            {
+                reportProgress(fraction, phase);
             }
         }
 

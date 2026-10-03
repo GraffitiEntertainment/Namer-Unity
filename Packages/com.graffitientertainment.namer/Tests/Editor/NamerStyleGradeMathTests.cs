@@ -207,12 +207,12 @@ namespace GraffitiEntertainment.Namer.Tests
         public void ForwardGrade_AndDeGrade_ClampOutOfCapParamsToEffectiveKnobs()
         {
             NamerStylePostFitParams overCap = MakeParams(200f, -200f, 40f, 300f, -300f);
-            NamerStylePostFitParams capped = MakeParams(50f, -50f, 10f, 100f, -100f);
+            NamerStylePostFitParams capped = MakeParams(100f, -100f, 10f, 100f, -100f);
             float3 x = new float3(0.18f, 0.45f, 0.7f);
 
             float3 forwardOver = NamerStyleGradeMath.ForwardGrade(x, overCap, null, null, null);
             float3 forwardCapped = NamerStyleGradeMath.ForwardGrade(x, capped, null, null, null);
-            Assert.AreEqual(forwardCapped.x, forwardOver.x, "ForwardGrade must clamp T/Tint to +/-50, EV to +/-10, percent knobs to +/-100 (r)");
+            Assert.AreEqual(forwardCapped.x, forwardOver.x, "ForwardGrade must clamp T/Tint to +/-100, EV to +/-10, percent knobs to +/-100 (r)");
             Assert.AreEqual(forwardCapped.y, forwardOver.y, "clamp-effective equality (g)");
             Assert.AreEqual(forwardCapped.z, forwardOver.z, "clamp-effective equality (b)");
 

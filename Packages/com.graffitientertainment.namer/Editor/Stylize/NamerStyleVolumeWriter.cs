@@ -224,7 +224,9 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>
         /// The shared verified-write body (05.3-02 extraction — the ONE home of the
         /// Volume component wiring; both public Write overloads delegate here):
-        /// a FRESH VolumeProfile per write, the Tonemapping(ACES)/White
+        /// an instance-preserving VolumeProfile (created on the first write,
+        /// purged and refilled IN PLACE afterwards so live scene/panel references
+        /// survive every rewrite), the Tonemapping(ACES)/White
         /// Balance/Color Adjustments/Bloom/Color Curves overrides from the Post*
         /// values, sub-asset parenting, SaveAssetIfDirty (never SaveAssets),
         /// persistence verification, the NamerGenerated stamp, and finally the
@@ -247,11 +249,33 @@ namespace GraffitiEntertainment.Namer.Editor
             AnimationCurve blueCurve,
             Action stampWriteFingerprint)
         {
-            // Pitfall 10 (carried over): a FRESH profile instance every write — never
-            // Add into a loaded stale profile (that both orphans old TextureCurve
-            // sub-assets and throws "component already exists" on re-fit).
-            VolumeProfile volume = ScriptableObject.CreateInstance<VolumeProfile>();
-            volume.name = Path.GetFileNameWithoutExtension(path);
+            // Pitfall 10 (carried over), instance-preserving form: CreateAsset over
+            // an existing path DESTROYS the previous profile instance, which nulls
+            // every live reference to it (an open scene's sharedProfile binding, a
+            // panel's object field) on the next save. Load-or-create instead: when
+            // the profile already exists, purge every sub-asset — adding into stale
+            // components both orphans old TextureCurve sub-assets and throws
+            // "component already exists" on re-fit — and keep the INSTANCE alive so
+            // external references survive the rewrite.
+            VolumeProfile volume = AssetDatabase.LoadAssetAtPath<VolumeProfile>(path);
+            bool isNewVolume = volume == null;
+            if (isNewVolume)
+            {
+                volume = ScriptableObject.CreateInstance<VolumeProfile>();
+                volume.name = Path.GetFileNameWithoutExtension(path);
+            }
+            else
+            {
+                foreach (UnityEngine.Object subAsset in AssetDatabase.LoadAllAssetsAtPath(path))
+                {
+                    if (!(subAsset is VolumeProfile))
+                    {
+                        UnityEngine.Object.DestroyImmediate(subAsset, true);
+                    }
+                }
+
+                volume.components.Clear();
+            }
 
             Tonemapping tonemapping = volume.Add<Tonemapping>();
             tonemapping.mode.overrideState = true;
@@ -289,7 +313,10 @@ namespace GraffitiEntertainment.Namer.Editor
             curves.blue.overrideState = true;
             curves.blue.value = BuildTextureCurve(blueCurve);
 
-            AssetDatabase.CreateAsset(volume, path);
+            if (isNewVolume)
+            {
+                AssetDatabase.CreateAsset(volume, path);
+            }
             // Pitfall 1 (carried over): every component must be parented to the asset
             // file or it dangles and loads back null.
             AssetDatabase.AddObjectToAsset(tonemapping, volume);

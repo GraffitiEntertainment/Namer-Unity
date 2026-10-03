@@ -1,5 +1,6 @@
 using GraffitiEntertainment.Namer.Core;
 using System;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -99,6 +100,97 @@ namespace GraffitiEntertainment.Namer.Editor
         /// </summary>
         public NamerComputeResult Process(NamerMaterialInspection inspection, NamerProjectionContext projection = null, NamerStyleStylization stylization = null)
         {
+            // Completed-task contract (05.3 threading): the core's ONLY awaits are on
+            // the two injected delegates below (AO bake, projection run), and this
+            // wrapper injects already-completed tasks (Task.FromResult around the
+            // blocking BakeAndUpload; Run + Task.CompletedTask). An async method that
+            // awaits only completed tasks never yields and never posts a continuation
+            // to Unity's synchronization context, so the returned task is complete
+            // when the core returns and GetResult below cannot deadlock. DO NOT add
+            // any other await to ProcessCoreAsync — that breaks this guarantee.
+            return ProcessCoreAsync(
+                    inspection, projection, stylization,
+                    (insp, w, h) => Task.FromResult(EnsureAoPipeline().BakeAndUpload(insp, w, h)),
+                    (ctx, sourceBase, projectedOut) =>
+                    {
+                        ctx.Run(sourceBase, projectedOut);
+                        return Task.CompletedTask;
+                    })
+                .GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Awaitable mirror of <see cref="Process"/> (05.3 threading): the identical
+        /// three-stage flow with the AO bake (<see cref="NamerAOPipeline.BakeAndUploadAsync"/>,
+        /// BVH + Burst slab loop on a worker thread) and the projection callback
+        /// (<see cref="NamerProjectionContext.RunAsync"/>, readback + fit + residual
+        /// released to the editor loop) awaitable instead of blocking. Continuations
+        /// resume on the main thread (Unity's synchronization context), so every GPU
+        /// dispatch, upload, and pool operation between awaits stays main-thread.
+        /// Results are identical to <see cref="Process"/> on the same inputs.
+        ///
+        /// When a projection is supplied it MUST carry
+        /// <see cref="NamerProjectionContext.RunAsync"/> (build it with the async
+        /// projection factory) — a sync-only context is refused with
+        /// <see cref="InvalidOperationException"/> rather than silently skipping the
+        /// projection. A user-cancelled AO bake (surfaced through
+        /// <paramref name="shouldCancel"/>) also throws
+        /// <see cref="InvalidOperationException"/> so the caller records the cancel
+        /// instead of falling through to the white fill; <paramref name="reportProgress"/>
+        /// forwards the bake's per-slab progress.
+        /// </summary>
+        public Task<NamerComputeResult> ProcessAsync(
+            NamerMaterialInspection inspection,
+            NamerProjectionContext projection = null,
+            NamerStyleStylization stylization = null,
+            Func<bool> shouldCancel = null,
+            Action<float, string> reportProgress = null)
+        {
+            return ProcessCoreAsync(
+                inspection, projection, stylization,
+                async (insp, w, h) =>
+                {
+                    RenderTexture ao = await EnsureAoPipeline().BakeAndUploadAsync(insp, w, h, shouldCancel, reportProgress);
+                    if (ao == null && shouldCancel != null && shouldCancel())
+                    {
+                        // Cancelled bake — BakeAndUploadAsync returns null exactly like
+                        // "no bake source"; distinguish so a cancel never falls through
+                        // to the white-fill path and writes un-AO'd assets.
+                        throw new InvalidOperationException("NAMER processing cancelled during the AO bake.");
+                    }
+
+                    return ao;
+                },
+                (ctx, sourceBase, projectedOut) =>
+                {
+                    if (ctx.RunAsync == null)
+                    {
+                        throw new InvalidOperationException("Async processing requires a projection context with RunAsync (built by the async projection factory).");
+                    }
+
+                    return ctx.RunAsync(sourceBase, projectedOut);
+                });
+        }
+
+        /// <summary>
+        /// The single processing pipeline implementation shared by
+        /// <see cref="Process"/> and <see cref="ProcessAsync"/>.
+        /// <paramref name="bakeAoAsync"/> and <paramref name="runProjectionAsync"/> are
+        /// the ONLY await seams: the sync entry point injects already-completed tasks
+        /// (so the whole core runs inline and its returned task is complete — see the
+        /// wrapper's completed-task contract), the awaitable entry point injects
+        /// <see cref="NamerAOPipeline.BakeAndUploadAsync"/> and
+        /// <see cref="NamerProjectionContext.RunAsync"/>. Everything else in this
+        /// method is synchronous main-thread work (leases, uploads, dispatches,
+        /// releases).
+        /// </summary>
+        private async Task<NamerComputeResult> ProcessCoreAsync(
+            NamerMaterialInspection inspection,
+            NamerProjectionContext projection,
+            NamerStyleStylization stylization,
+            Func<NamerMaterialInspection, int, int, Task<RenderTexture>> bakeAoAsync,
+            Func<NamerProjectionContext, RenderTexture, RenderTexture, Task> runProjectionAsync)
+        {
             if (inspection == null)
             {
                 throw new ArgumentNullException(nameof(inspection));
@@ -180,10 +272,10 @@ namespace GraffitiEntertainment.Namer.Editor
                     // D-07 gate, clauses 2-3: AO stage on and no authored map -> the
                     // GEOMETRY BAKE is the synthetic source (the albedo-conflated
                     // luminance extraction is retired from the automatic path).
-                    // BakeAndUpload reuses the cache or bakes fresh on demand; it
+                    // The bake seam reuses the cache or bakes fresh on demand; it
                     // returns null when no bake mesh is primed (decomposition off),
                     // leaving aoIn null for the white fill below.
-                    aoIn = EnsureAoPipeline().BakeAndUpload(inspection, w, h);
+                    aoIn = await bakeAoAsync(inspection, w, h);
                     usesBakedAo = aoIn != null;
                 }
 
@@ -230,7 +322,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 if (projection != null)
                 {
                     projectedOut = _pool.Lease(intermediate);
-                    projection.Run(styledBase, projectedOut);
+                    await runProjectionAsync(projection, styledBase, projectedOut);
                 }
 
                 if (projection != null && removedDetail && shouldExtract)
@@ -360,6 +452,39 @@ namespace GraffitiEntertainment.Namer.Editor
         public static AsyncGPUReadbackRequest RequestReadback(RenderTexture source, int mip = 0, TextureFormat format = TextureFormat.RGBA32)
         {
             return AsyncGPUReadback.Request(source, mip, format);
+        }
+
+        /// <summary>
+        /// Awaitable GPU -> CPU readback (05.3 threading): issues the same request as
+        /// <see cref="RequestReadback"/> with <c>forcePlayerLoopUpdate</c> (the known-good
+        /// edit-mode pump), then completes the returned task from an
+        /// <see cref="EditorApplication.update"/> tick once the request lands. The awaiting
+        /// caller's continuation resumes on the main thread through Unity's
+        /// synchronization context, so the editor keeps pumping instead of blocking in
+        /// <c>WaitForCompletion</c>. Check <c>hasError</c> on the returned request exactly
+        /// as the blocking path does — and do so INSIDE the await continuation: Unity 6
+        /// edit mode disposes a fulfilled request on the next editor update, and a
+        /// disposed request reports <c>hasError</c> (confirmed 2026-10-02, probe r17).
+        /// Reading the request a frame later sees the disposed state, not a failed
+        /// readback.
+        /// </summary>
+        public static Task<AsyncGPUReadbackRequest> RequestReadbackAsync(RenderTexture source, int mip = 0, TextureFormat format = TextureFormat.RGBA32)
+        {
+            AsyncGPUReadbackRequest request = AsyncGPUReadback.Request(source, mip, format);
+            request.forcePlayerLoopUpdate = true;
+
+            var completion = new TaskCompletionSource<AsyncGPUReadbackRequest>();
+            void Pump()
+            {
+                if (request.done)
+                {
+                    EditorApplication.update -= Pump;
+                    completion.SetResult(request);
+                }
+            }
+
+            EditorApplication.update += Pump;
+            return completion.Task;
         }
 
         public void Dispose()
@@ -701,5 +826,17 @@ namespace GraffitiEntertainment.Namer.Editor
         /// residual-ON dividend); <c>projectedOut</c> is the caller-owned write-back target.
         /// </summary>
         public Action<RenderTexture, RenderTexture> Run;
+
+        /// <summary>
+        /// Awaitable mirror of <see cref="Run"/> (05.3 threading) used by
+        /// <see cref="NamerComputePipeline.ProcessAsync"/>: the same readback → fit →
+        /// residual sequence with the GPU readback and the Burst fit released to the
+        /// editor loop. Continuations resume on the main thread, so all GPU and
+        /// AssetDatabase work in the callback stays main-thread. A context built for the
+        /// synchronous <see cref="NamerComputePipeline.Process"/> leaves this null;
+        /// <see cref="NamerComputePipeline.ProcessAsync"/> refuses such a context rather
+        /// than silently skipping the projection.
+        /// </summary>
+        public Func<RenderTexture, RenderTexture, Task> RunAsync;
     }
 }

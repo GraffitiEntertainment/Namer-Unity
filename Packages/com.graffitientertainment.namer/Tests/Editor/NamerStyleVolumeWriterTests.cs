@@ -146,6 +146,10 @@ namespace GraffitiEntertainment.Namer.Tests
                 // with the opt-in OFF (regeneration is promised unconditionally).
                 VolumeProfile rewritten = NamerStyleVolumeWriter.Write(look, settings);
                 Assert.IsNotNull(rewritten, "re-write with the opt-in off regenerates the asset's companion Volume");
+                Assert.AreEqual(written.GetInstanceID(), rewritten.GetInstanceID(),
+                    "a re-write must keep the same NATIVE VolumeProfile instance — CreateAsset over an existing path destroys the previous instance, nulling every live scene/panel reference to it on the next save (managed wrapper identity is not guaranteed, instance ID is)");
+                Assert.AreEqual(5, written.components.Count,
+                    "the reference held from the FIRST write must stay alive and refilled, not destroyed");
                 Assert.AreEqual(5, rewritten.components.Count);
                 Assert.IsTrue(rewritten.TryGet(out Tonemapping tonemapping),
                     "the re-written Volume loads a full fresh component set from disk");

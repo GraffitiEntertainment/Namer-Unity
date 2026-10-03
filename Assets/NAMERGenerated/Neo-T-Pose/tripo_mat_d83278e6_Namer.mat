@@ -54,15 +54,15 @@ Material:
     - _DbgEnableResidual: 1
     - _DbgEnableRoughness: 1
     - _DbgEnableVertexColor: 1
-    - _DbgRoughnessNeutral: 0.5
+    - _DbgRoughnessNeutral: 1
     - _DstBlend: 0
     - _DstBlendAlpha: 0
     - _EMISSION: 0
     - _OcclusionStrength: 1
-    - _PostContrastZ: 1
-    - _PostEnable: 0
-    - _PostExposureEv: 0
-    - _PostSaturationS: 1
+    - _PostContrastZ: 0.629
+    - _PostEnable: 1
+    - _PostExposureEv: 1.95
+    - _PostSaturationS: 1.197
     - _SrcBlend: 1
     - _SrcBlendAlpha: 1
     - _Surface: 0
@@ -70,6 +70,6 @@ Material:
     m_Colors:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 0}
-    - _PostLmsCoeffs: {r: 1, g: 1, b: 1, a: 1}
+    - _PostLmsCoeffs: {r: 0.9409687, g: 1.004111, b: 1.4696347, a: 0}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

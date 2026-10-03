@@ -85,11 +85,10 @@ namespace GraffitiEntertainment.Namer.Editor
         // -------- effective-cap mirrors (STYL-14: invert what the render applies) --------
 
         /// <summary>Effective white-balance knob cap — mirrors the FIT-side clamp
-        /// NamerStylePostFit.cs:204 kFittedWhiteBalanceLimit applied at :326-327
-        /// (the shipped fit's Post* block never exceeds ±50, so the render's effective
-        /// knobs never do either; asset-side ±100 hand-edits are ClampToCaps territory,
-        /// not the fitted path this twin inverts).</summary>
-        private const float kEffectiveWhiteBalanceLimit = 50f;
+        /// NamerStylePostFit.cs:207 kFittedWhiteBalanceLimit applied at :394-395
+        /// (the fit now clamps at URP's full ±100, so the render's effective knobs
+        /// span the same range; asset-side ClampToCaps allows ±100 identically).</summary>
+        private const float kEffectiveWhiteBalanceLimit = 100f;
 
         /// <summary>Effective post-exposure cap — mirrors NamerStylePostFit.cs:205
         /// kMaxFittedPostExposureEv applied at :363 (plan 02 pins

@@ -28,19 +28,19 @@ MonoBehaviour:
   - 1
   - 1
   - 1
-  PostTemperature: -2.9296577
-  PostTint: 3.4
-  PostExposureEv: -0.74
-  PostContrast: -26.5
-  PostSaturation: 52.1
-  PostBloomThreshold: 0.84175086
-  PostBloomIntensity: 1
+  PostTemperature: -27.2
+  PostTint: 8.5
+  PostExposureEv: 1.95
+  PostContrast: -37.1
+  PostSaturation: 19.7
+  PostBloomThreshold: 0.63
+  PostBloomIntensity: 1.7
   PostMasterCurve:
     serializedVersion: 2
     m_Curve:
     - serializedVersion: 3
       time: 0
-      value: 0.0390625
+      value: 0.00390625
       inSlope: 0
       outSlope: 0
       tangentMode: 0
@@ -49,7 +49,7 @@ MonoBehaviour:
       outWeight: 0
     - serializedVersion: 3
       time: 0.125
-      value: 0.35227734
+      value: 0.32971627
       inSlope: 0
       outSlope: 0
       tangentMode: 0
@@ -58,7 +58,7 @@ MonoBehaviour:
       outWeight: 0
     - serializedVersion: 3
       time: 0.25
-      value: 0.43193498
+      value: 0.4306414
       inSlope: 0
       outSlope: 0
       tangentMode: 0
@@ -67,7 +67,7 @@ MonoBehaviour:
       outWeight: 0
     - serializedVersion: 3
       time: 0.375
-      value: 0.47972256
+      value: 0.46069255
       inSlope: 0
       outSlope: 0
       tangentMode: 0
@@ -76,7 +76,7 @@ MonoBehaviour:
       outWeight: 0
     - serializedVersion: 3
       time: 0.5
-      value: 0.5353853
+      value: 0.5302285
       inSlope: 0
       outSlope: 0
       tangentMode: 0
@@ -85,7 +85,7 @@ MonoBehaviour:
       outWeight: 0
     - serializedVersion: 3
       time: 0.625
-      value: 0.734375
+      value: 0.8302285
       inSlope: 0
       outSlope: 0
       tangentMode: 0
@@ -94,7 +94,7 @@ MonoBehaviour:
       outWeight: 0
     - serializedVersion: 3
       time: 0.75
-      value: 0.734375
+      value: 1
       inSlope: 0
       outSlope: 0
       tangentMode: 0
@@ -103,7 +103,7 @@ MonoBehaviour:
       outWeight: 0
     - serializedVersion: 3
       time: 0.875
-      value: 0.734375
+      value: 1
       inSlope: 0
       outSlope: 0
       tangentMode: 0
@@ -112,7 +112,7 @@ MonoBehaviour:
       outWeight: 0
     - serializedVersion: 3
       time: 1
-      value: 0.734375
+      value: 1
       inSlope: 0
       outSlope: 0
       tangentMode: 0
@@ -384,49 +384,49 @@ MonoBehaviour:
     m_PostInfinity: 2
     m_RotationOrder: 4
   PostFitFingerprint: cb7711058ace241a481492c25747b865:1|0492cd9c8c2a0405b925cfcca9a3f0bd:1|898962e0d17cd4dcdb337b4dde5960e2:1|b051c1947e65c416aa3d3bcb39bda6c7:1|3db77557480954bf398ad14b794fa7f4:1|9bdd0557ff21a4795a6697d5a5a469b6:1|07bbdd779c57d437289f475d4cea20b7:1
-  PostFitExemplarName: 
-  VolumeWriteFingerprint: -2.9296577|3.4|0|-26.5|52.1|0.84175086|1|0,0.0390625;0.125,0.352277339;0.25,0.431934983;0.375,0.479722559;0.5,0.5353853;0.625,0.734375;0.75,0.734375;0.875,0.734375;1,0.734375|0,0;0.125,0.125;0.25,0.25;0.375,0.375;0.5,0.5;0.625,0.625;0.75,0.75;0.875,0.875;1,1|0,0;0.125,0.125;0.25,0.25;0.375,0.375;0.5,0.5;0.625,0.625;0.75,0.75;0.875,0.875;1,1|0,0;0.125,0.125;0.25,0.25;0.375,0.375;0.5,0.5;0.625,0.625;0.75,0.75;0.875,0.875;1,1
+  PostFitExemplarName: Neo-T-Pose
+  VolumeWriteFingerprint: -27.2|8.5|1.95|-37.1|19.7|0.63|1.7|0,0.00390625;0.125,0.329716265;0.25,0.4306414;0.375,0.460692555;0.5,0.5302285;0.625,0.8302285;0.75,1;0.875,1;1,1|0,0;0.125,0.125;0.25,0.25;0.375,0.375;0.5,0.5;0.625,0.625;0.75,0.75;0.875,0.875;1,1|0,0;0.125,0.125;0.25,0.25;0.375,0.375;0.5,0.5;0.625,0.625;0.75,0.75;0.875,0.875;1,1|0,0;0.125,0.125;0.25,0.25;0.375,0.375;0.5,0.5;0.625,0.625;0.75,0.75;0.875,0.875;1,1
   PaletteAnchors:
-  - LinearColor: {r: 0.45156208, g: 0.09944858, b: 0.084884234, a: 1}
-    Hue: 0.006619954
-    Saturation: 0.8120209
-    Luma: 0.17325635
-    Weight: 6610.75
-  - LinearColor: {r: 0.06103078, g: 0.08356098, b: 0.18443614, a: 1}
-    Hue: 0.6362382
-    Saturation: 0.66909534
-    Luma: 0.08605424
-    Weight: 12022.75
-  - LinearColor: {r: 0.913396, g: 0.26010987, b: 0.14107485, a: 1}
-    Hue: 0.02568772
-    Saturation: 0.8455491
-    Luma: 0.39040416
-    Weight: 7554.5
-  - LinearColor: {r: 0.09850648, g: 0.16665865, b: 0.42030665, a: 1}
-    Hue: 0.6313693
-    Saturation: 0.76563185
-    Luma: 0.17048289
-    Weight: 4553
-  - LinearColor: {r: 0.07730556, g: 0.8299367, b: 0.060036123, a: 1}
-    Hue: 0.32959488
-    Saturation: 0.9276618
-    Luma: 0.6143405
-    Weight: 1401.5
-  - LinearColor: {r: 0.15883695, g: 0.58863395, b: 0.929516, a: 1}
-    Hue: 0.57371897
-    Saturation: 0.82911867
-    Luma: 0.5218708
-    Weight: 1890.5
-  - LinearColor: {r: 0.03961226, g: 0.03665182, b: 0.037832074, a: 1}
-    Hue: 0.9335542
-    Saturation: 0.07473544
-    Luma: 0.037366424
-    Weight: 58157.5
-  - LinearColor: {r: 0.9642599, g: 0.94034165, b: 0.9634196, a: 1}
-    Hue: 0.8391887
-    Saturation: 0.024804797
-    Luma: 0.9470929
-    Weight: 5578.25
+  - LinearColor: {r: 0.10561595, g: 0.042599924, b: 0.03125, a: 1}
+    Hue: 0.025437098
+    Saturation: 0.70411664
+    Luma: 0.055177666
+    Weight: 5904.5
+  - LinearColor: {r: 0.2597905, g: 0.04526922, b: 0.03125, a: 1}
+    Hue: 0.010223731
+    Saturation: 0.8797108
+    Luma: 0.08986426
+    Weight: 5514.75
+  - LinearColor: {r: 0.667963, g: 0.12638311, b: 0.03125, a: 1}
+    Hue: 0.024902143
+    Saturation: 0.95321596
+    Luma: 0.23465438
+    Weight: 3423
+  - LinearColor: {r: 0.9396815, g: 0.203792, b: 0.03125, a: 1}
+    Hue: 0.031655665
+    Saturation: 0.96674407
+    Luma: 0.34778458
+    Weight: 5475.75
+  - LinearColor: {r: 0.14641728, g: 0.2210858, b: 0.03125, a: 1}
+    Hue: 0.23222202
+    Saturation: 0.8586522
+    Luma: 0.19150513
+    Weight: 2234.25
+  - LinearColor: {r: 0.042097647, g: 0.11631348, b: 0.032398246, a: 1}
+    Hue: 0.31406906
+    Saturation: 0.7214575
+    Luma: 0.09447651
+    Weight: 6695
+  - LinearColor: {r: 0.03125, g: 0.03125, b: 0.031947568, a: 1}
+    Hue: 0.6666667
+    Saturation: 0.021834778
+    Luma: 0.031300366
+    Weight: 62359.5
+  - LinearColor: {r: 0.38631684, g: 0.069818035, b: 0.03125, a: 1}
+    Hue: 0.01810365
+    Saturation: 0.91910785
+    Luma: 0.13432106
+    Weight: 6162
   Stats:
     AnchorCount: 0
     HueFamilyCount: 0
@@ -444,17 +444,17 @@ MonoBehaviour:
   ReferenceFingerprint: 
   PaletteSourceAtExtract: 0
   PaletteSource: 0
-  StyleStrength: 0.5
+  StyleStrength: 0.406
   Smoothing: 0
   CavityFloor: 0
   NormalDetailReduction: 0
   RoughnessSimplify: 0
   HueMode: 0
   DecompositionFingerprint: cb7711058ace241a481492c25747b865:1|0492cd9c8c2a0405b925cfcca9a3f0bd:1|898962e0d17cd4dcdb337b4dde5960e2:1|b051c1947e65c416aa3d3bcb39bda6c7:1|3db77557480954bf398ad14b794fa7f4:1|9bdd0557ff21a4795a6697d5a5a469b6:1|07bbdd779c57d437289f475d4cea20b7:1
-  GradeSourceExemplarName: 
+  GradeSourceExemplarName: Neo-T-Pose
   ConfidentAlbedoFraction: 0.83573693
   ContaminatedFraction: 0.16426304
-  ValidationResult: "Validation: visible residual mismatch (max knob deviation 100%
+  ValidationResult: "Validation: visible residual mismatch (max knob deviation 62%
     (Temperature)) \u2014 the parametric post look does not fully reproduce the reference
     grade. This is the unlock evidence for the 3D-LUT fallback (locked by the 5.1
     decision); nothing changes on this asset until that decision is revisited."

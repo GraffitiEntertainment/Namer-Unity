@@ -1,9 +1,12 @@
 using System;
+using System.Collections;
+using System.Threading.Tasks;
 using GraffitiEntertainment.Namer.Editor;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using Unity.Mathematics;
+using UnityEngine.TestTools;
 
 namespace GraffitiEntertainment.Namer.Tests
 {
@@ -158,6 +161,96 @@ namespace GraffitiEntertainment.Namer.Tests
                 asset.DecompositionFingerprint = first.DecompositionFingerprint;
                 Assert.IsFalse(asset.IsDecompositionStale,
                     "writing the returned fingerprint must clear decomposition staleness");
+            }
+            finally
+            {
+                DestroyAssetAndTextures(asset);
+            }
+        }
+
+        // ================= threading (05.3: gather on main, compute on worker) =================
+
+        [UnityTest]
+        public IEnumerator DecomposeStyleAsync_MatchesSyncDecompose_ElementWise()
+        {
+            NamerStyleAsset asset = CreateDecomposableAsset("AsyncEquivalence", BuildSmallKnobParams(), withMasterCurve: true);
+            try
+            {
+                // De-graded + master curve: the worker path exercises curve cloning
+                // and AnimationCurve evaluation off the main thread (the de-grade
+                // sweep), not just the curve-free histogram loops.
+                asset.PaletteSource = NamerEditorConstants.kPaletteSourceDeGraded;
+                NamerStyleDecomposeResult sync = NamerStyleDecomposer.DecomposeStyle(asset, shouldCancel: NeverCancel);
+                Task<NamerStyleDecomposeResult> asyncTask =
+                    NamerStyleDecomposer.DecomposeStyleAsync(asset, shouldCancel: NeverCancel);
+                while (!asyncTask.IsCompleted)
+                {
+                    // Pump the editor loop so the await's continuation resumes on the
+                    // main-thread context (the editor caller's own shape) — a
+                    // blocking GetResult() here would deadlock that continuation.
+                    yield return null;
+                }
+
+                NamerStyleDecomposeResult asyncResult = asyncTask.Result;
+                Assert.IsNotNull(sync.PaletteAnchors, "the sync baseline must decompose successfully");
+                Assert.IsFalse(asyncResult.Cancelled, "a never-cancel delegate must complete the async decompose");
+                Assert.IsFalse(asyncResult.TooFewReferences);
+                Assert.IsNull(asyncResult.ErrorTextureName);
+
+                Assert.AreEqual(sync.PaletteAnchors.Length, asyncResult.PaletteAnchors.Length,
+                    "the split compute core must produce the same anchor count as sync");
+                for (int i = 0; i < sync.PaletteAnchors.Length; i++)
+                {
+                    Assert.AreEqual(sync.PaletteAnchors[i].LinearColor, asyncResult.PaletteAnchors[i].LinearColor,
+                        "anchor colors must be element-wise identical sync vs async");
+                    Assert.AreEqual(sync.PaletteAnchors[i].Hue, asyncResult.PaletteAnchors[i].Hue);
+                    Assert.AreEqual(sync.PaletteAnchors[i].Saturation, asyncResult.PaletteAnchors[i].Saturation);
+                    Assert.AreEqual(sync.PaletteAnchors[i].Luma, asyncResult.PaletteAnchors[i].Luma);
+                    Assert.AreEqual(sync.PaletteAnchors[i].Weight, asyncResult.PaletteAnchors[i].Weight);
+                }
+
+                Assert.AreEqual(sync.Grade.Temperature, asyncResult.Grade.Temperature,
+                    "grade knobs must be exactly equal sync vs async (same fixed-order core)");
+                Assert.AreEqual(sync.Grade.Tint, asyncResult.Grade.Tint);
+                Assert.AreEqual(sync.Grade.PostExposureEv, asyncResult.Grade.PostExposureEv);
+                Assert.AreEqual(sync.Grade.Contrast, asyncResult.Grade.Contrast);
+                Assert.AreEqual(sync.Grade.Saturation, asyncResult.Grade.Saturation);
+                Assert.AreEqual(sync.ConfidentAlbedoFraction, asyncResult.ConfidentAlbedoFraction);
+                Assert.AreEqual(sync.ContaminatedFraction, asyncResult.ContaminatedFraction);
+                Assert.AreEqual(sync.DecompositionFingerprint, asyncResult.DecompositionFingerprint);
+            }
+            finally
+            {
+                DestroyAssetAndTextures(asset);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator DecomposeStyleAsync_CancelDuringCompute_ReturnsCancelledWithNoPartialResult()
+        {
+            NamerStyleAsset asset = CreateDecomposableAsset("AsyncCancelDuringCompute", BuildSmallKnobParams());
+            try
+            {
+                // Poll budget: gather consumes one poll per reference, pass-1 one
+                // more per reference — true only from the FIRST PASS-2 poll, so the
+                // cancel demonstrably fires inside the worker compute core, after
+                // the gather completed.
+                int pollsBeforeCancel = NamerStyleDecomposer.CountPositiveWeightReferences(asset) * 2;
+                int polls = 0;
+                Task<NamerStyleDecomposeResult> asyncTask = NamerStyleDecomposer.DecomposeStyleAsync(
+                    asset,
+                    shouldCancel: () => polls++ >= pollsBeforeCancel);
+                while (!asyncTask.IsCompleted)
+                {
+                    yield return null;
+                }
+
+                NamerStyleDecomposeResult result = asyncTask.Result;
+                Assert.IsTrue(result.Cancelled,
+                    "a cancel latched after gather + pass-1 polls must return the cancelled result from the compute core");
+                Assert.IsNull(result.Grade, "no partial result escapes a compute-phase cancel");
+                Assert.IsNull(result.PaletteAnchors);
+                Assert.AreEqual(-1f, result.ConfidentAlbedoFraction);
             }
             finally
             {
@@ -549,10 +642,10 @@ namespace GraffitiEntertainment.Namer.Tests
         [Test]
         public void Validation_BoundaryAndMasterCurveCases_PinThresholdAndKnobNaming()
         {
-            NamerStylePostFitParams justInside = new NamerStylePostFitParams { Temperature = 4f };
+            NamerStylePostFitParams justInside = new NamerStylePostFitParams { Temperature = 8f };
             NamerStyleValidationMeasure inside = NamerStyleDecomposer.ComputeValidationMeasure(justInside);
             Assert.AreEqual(0.08f, inside.Measure, 1e-6f,
-                "temperature 4 of its ±50 range normalizes to 0.08");
+                "temperature 8 of its ±100 range normalizes to 0.08");
             Assert.Less(inside.Measure, NamerEditorConstants.kValidationMismatchThreshold,
                 "0.08 hugging the boundary from below stays within tolerance");
 

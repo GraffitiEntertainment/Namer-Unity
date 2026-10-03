@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
@@ -39,6 +40,9 @@ namespace GraffitiEntertainment.Namer.Editor
         private const float LowPassSigmaDivisor = 3.0f;
         private const float MinBlurSigma = 1e-3f;
         private const int kSeamDilatePx = 16;
+
+        /// <summary>Readback failure message shared by the blocking and awaitable readback paths.</summary>
+        private const string kReadbackFailedMessage = "NAMER AO bake readback failed.";
 
         private readonly ComputeTexturePool _pool = new ComputeTexturePool();
         private readonly ComputeShader _compute;
@@ -250,17 +254,117 @@ namespace GraffitiEntertainment.Namer.Editor
                 return null;
             }
 
+            Texture2D lowResTex = BakeResultToTexture(baked, bakeRes);
+            baked.Ao.Dispose();
+
+            RenderTexture result = JumpFloodDilate(lowResTex, w, h);
+
+            // Cache the RAW dilated bake (pre-tweak) so slider changes re-shape the
+            // same bake without re-running the raycast (D-07 cache stays keyed by
+            // mesh/occluder/resolution only).
+            StoreBake(key, ReadBackToTexture(result, w, h));
+
+            // Apply the source-agnostic tweak stage (strength -> contrast -> blur) on
+            // top of the raw dilated bake (D-11). Both helpers consume their input
+            // (release it back to the pool) only when they produce a new target.
+            RenderTexture tweakedResult = ApplyStrengthContrastDirect(result, inspection, w, h);
+            return ApplyUserBlur(tweakedResult, inspection, w, h);
+        }
+
+        /// <summary>
+        /// Awaitable mirror of <see cref="BakeAndUpload"/> (05.3 threading): the
+        /// cache-hit path, the cancelled-bake gate, the JFA dilation
+        /// (<see cref="JumpFloodDilate"/>), and the tweak tail are identical —
+        /// lockstep with <see cref="BakeAndUpload"/>; any change to that flow is
+        /// made in both. The differences: the geometry bake runs through
+        /// <see cref="NamerAOBaker.BakeAsync"/> (the raycast slabs leave the main
+        /// thread so the editor loop keeps pumping) and the cache readback awaits
+        /// <see cref="ReadBackToTextureAsync"/> instead of blocking in
+        /// <see cref="AsyncGPUReadbackRequest.WaitForCompletion"/>. Continuations
+        /// resume on the main thread (Unity's synchronization context), so the GPU
+        /// dispatches after each await stay main-thread. Shows no progress bar —
+        /// the caller paints through <paramref name="reportProgress"/>, forwarded
+        /// to the baker's per-slab callback.
+        /// </summary>
+        public async Task<RenderTexture> BakeAndUploadAsync(NamerMaterialInspection inspection, int w, int h, Func<bool> shouldCancel = null, Action<float, string> reportProgress = null)
+        {
+            if (inspection == null || inspection.BakeSourceMesh == null)
+            {
+                return null;
+            }
+
+            Mesh low = inspection.BakeSourceMesh;
+            Mesh occluder = ResolveOccluder(low, inspection.OccluderMesh);
+            (int low, int occ, int w, int h) key = MakeKey(low, occluder, w, h);
+
+            if (_bakeCache.TryGetValue(key, out Texture2D cached))
+            {
+                RenderTexture cachedRt = _pool.Lease(NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm));
+                NamerComputePipeline.Upload(cached, cachedRt, null);
+                RenderTexture tweaked = ApplyStrengthContrastDirect(cachedRt, inspection, w, h);
+                return ApplyUserBlur(tweaked, inspection, w, h);
+            }
+
+            int bakeRes = Mathf.Min(Mathf.Min(w, h), NamerAOBaker.kBakeResolutionCap);
+            NamerAOBakeResult baked = await NamerAOBaker.BakeAsync(
+                low,
+                occluder,
+                bakeRes,
+                NamerAOBaker.kCageOffset,
+                NamerAOBaker.kMaxDistanceFactor,
+                NamerAOBaker.kRayCount,
+                shouldCancel,
+                reportProgress);
+
+            if (baked.Cancelled)
+            {
+                // A cancelled bake must never be cached: return null so the caller does not
+                // StoreBake and the D-07 gate packs the white fill for that run (a later
+                // recompute re-attempts the bake).
+                if (baked.Ao.IsCreated)
+                {
+                    baked.Ao.Dispose();
+                }
+
+                return null;
+            }
+
+            Texture2D lowResTex = BakeResultToTexture(baked, bakeRes);
+            baked.Ao.Dispose();
+
+            RenderTexture result = JumpFloodDilate(lowResTex, w, h);
+
+            // Cache the RAW dilated bake (pre-tweak) so slider changes re-shape the
+            // same bake without re-running the raycast (D-07 cache stays keyed by
+            // mesh/occluder/resolution only).
+            StoreBake(key, await ReadBackToTextureAsync(result, w, h));
+
+            // Apply the source-agnostic tweak stage (strength -> contrast -> blur) on
+            // top of the raw dilated bake (D-11). Both helpers consume their input
+            // (release it back to the pool) only when they produce a new target.
+            RenderTexture tweakedResult = ApplyStrengthContrastDirect(result, inspection, w, h);
+            return ApplyUserBlur(tweakedResult, inspection, w, h);
+        }
+
+        /// <summary>
+        /// Bilinear upsample + jump-flood seam dilation of a fresh low-res bake to
+        /// the full processing resolution (D-05), shared by
+        /// <see cref="BakeAndUpload"/> and <see cref="BakeAndUploadAsync"/> so the
+        /// JFA chain lives once: leases the seed and two ping-pong targets, runs
+        /// init + the halving-step pass chain, releases every lease except the
+        /// winning ping-pong buffer, and destroys
+        /// <paramref name="lowResTex"/>. Returns the raw dilated bake
+        /// (pool-leased; the caller feeds it to the D-07 cache readback and the
+        /// D-11 tweak tail, and releases it via <see cref="ReleaseAo"/>).
+        /// </summary>
+        private RenderTexture JumpFloodDilate(Texture2D lowResTex, int w, int h)
+        {
             RenderTexture seed = null;
             RenderTexture jfaA = null;
             RenderTexture jfaB = null;
             RenderTexture result = null;
-            Texture2D lowResTex = null;
-
             try
             {
-                lowResTex = BakeResultToTexture(baked, bakeRes);
-                baked.Ao.Dispose();
-
                 seed = _pool.Lease(NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm));
                 jfaA = _pool.Lease(NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm));
                 jfaB = _pool.Lease(NewDescriptor(w, h, GraphicsFormat.R8G8B8A8_UNorm));
@@ -296,25 +400,10 @@ namespace GraffitiEntertainment.Namer.Editor
                 }
 
                 result = src;
-
-                // Cache the RAW dilated bake (pre-tweak) so slider changes re-shape the
-                // same bake without re-running the raycast (D-07 cache stays keyed by
-                // mesh/occluder/resolution only).
-                StoreBake(key, ReadBackToTexture(result, w, h));
-
-                // Apply the source-agnostic tweak stage (strength -> contrast -> blur) on
-                // top of the raw dilated bake (D-11). Both helpers consume their input
-                // (release it back to the pool) only when they produce a new target.
-                RenderTexture tweaked = ApplyStrengthContrastDirect(result, inspection, w, h);
-                return ApplyUserBlur(tweaked, inspection, w, h);
             }
             finally
             {
-                if (lowResTex != null)
-                {
-                    UnityEngine.Object.DestroyImmediate(lowResTex);
-                }
-
+                UnityEngine.Object.DestroyImmediate(lowResTex);
                 _pool.Release(seed);
                 if (jfaA != null && jfaA != result)
                 {
@@ -326,6 +415,8 @@ namespace GraffitiEntertainment.Namer.Editor
                     _pool.Release(jfaB);
                 }
             }
+
+            return result;
         }
 
         /// <summary>
@@ -533,7 +624,43 @@ namespace GraffitiEntertainment.Namer.Editor
             request.WaitForCompletion();
             if (request.hasError)
             {
-                throw new InvalidOperationException("NAMER AO bake readback failed.");
+                throw new InvalidOperationException(kReadbackFailedMessage);
+            }
+
+            NativeArray<Color32> data = request.GetData<Color32>();
+            try
+            {
+                Texture2D tex = new Texture2D(w, h, TextureFormat.RGBA32, false, true)
+                {
+                    hideFlags = HideFlags.HideAndDontSave,
+                };
+                tex.LoadRawTextureData(data);
+                tex.Apply(false, false);
+                return tex;
+            }
+            finally
+            {
+                data.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Awaitable mirror of <see cref="ReadBackToTexture"/> (05.3 threading):
+        /// the same request, format, error contract, and Texture2D construction,
+        /// but through <see cref="NamerComputePipeline.RequestReadbackAsync"/> so
+        /// the editor loop pumps instead of blocking in
+        /// <see cref="AsyncGPUReadbackRequest.WaitForCompletion"/>. The
+        /// continuation resumes on the main thread, so the Texture2D construction
+        /// and <see cref="Texture2D.LoadRawTextureData"/> stay main-thread exactly
+        /// as in the blocking path.
+        /// </summary>
+        private static async Task<Texture2D> ReadBackToTextureAsync(RenderTexture rt, int w, int h)
+        {
+            AsyncGPUReadbackRequest request =
+                await NamerComputePipeline.RequestReadbackAsync(rt, 0, TextureFormat.RGBA32);
+            if (request.hasError)
+            {
+                throw new InvalidOperationException(kReadbackFailedMessage);
             }
 
             NativeArray<Color32> data = request.GetData<Color32>();

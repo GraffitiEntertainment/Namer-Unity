@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using GraffitiEntertainment.Namer.Core;
 using Unity.Collections;
 using UnityEditor;
@@ -127,6 +128,9 @@ namespace GraffitiEntertainment.Namer.Editor
         private const float kOpaqueAlphaThreshold = 0.999f;
         private const float kMinCoverageFraction = 1e-6f;
 
+        /// <summary>Stats-readback failure message shared by the blocking and awaitable readback paths.</summary>
+        private const string kStatsReadbackFailedMessage = "NAMER decomp stats readback failed.";
+
         /// <summary>D-17 halving ladder (0 = Auto maps to the adaptive search).</summary>
         public static readonly int[] ResolutionLadder = { 2048, 1024, 512, 256, 128 };
 
@@ -196,6 +200,73 @@ namespace GraffitiEntertainment.Namer.Editor
             RenderTexture projectedOut = null,
             NamerResidualMode mode = NamerResidualMode.Gate,
             float coverageTarget = NamerEditorConstants.DefaultCoverageTarget)
+        {
+            // Completed-task contract (05.3 threading): the core's ONLY awaits are on
+            // the injected reduceStats delegate, and this wrapper injects
+            // already-completed tasks (Task.FromResult around the blocking
+            // ReduceToStats). An async method that awaits only completed tasks never
+            // yields and never posts a continuation to Unity's synchronization
+            // context, so the returned task is complete when the core returns and
+            // GetResult below cannot deadlock. DO NOT add any other await to
+            // GenerateResidualCoreAsync — that breaks this guarantee.
+            return GenerateResidualCoreAsync(
+                    split, quantizedColors, baseLinear, w, h, errorThreshold, manualResolution,
+                    projectedOut, mode, coverageTarget,
+                    (src, srcW, srcH, avgA, avgB) => Task.FromResult(ReduceToStats(src, srcW, srcH, avgA, avgB)))
+                .GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Awaitable mirror of <see cref="GenerateResidual"/> (05.3 threading): the
+        /// identical pipeline — same validation, UV-bounds rejection, dispatches,
+        /// gate semantics, buffer lifetimes, and stats — with the stats readbacks
+        /// released to the editor loop (<see cref="ReduceToStatsAsync"/>) instead of
+        /// blocking in <see cref="AsyncGPUReadbackRequest.WaitForCompletion"/>.
+        /// Continuations resume on the main thread (Unity's synchronization
+        /// context), so every GPU dispatch between awaits stays main-thread. Results
+        /// are element-wise identical to <see cref="GenerateResidual"/> on the same
+        /// inputs (the only difference is when the readback waits run).
+        /// </summary>
+        public Task<NamerDecompOutput> GenerateResidualAsync(
+            NamerSplitResult split,
+            Color32[] quantizedColors,
+            RenderTexture baseLinear,
+            int w,
+            int h,
+            float errorThreshold,
+            int manualResolution,
+            RenderTexture projectedOut = null,
+            NamerResidualMode mode = NamerResidualMode.Gate,
+            float coverageTarget = NamerEditorConstants.DefaultCoverageTarget)
+        {
+            return GenerateResidualCoreAsync(
+                split, quantizedColors, baseLinear, w, h, errorThreshold, manualResolution,
+                projectedOut, mode, coverageTarget, ReduceToStatsAsync);
+        }
+
+        /// <summary>
+        /// The single residual pipeline implementation shared by
+        /// <see cref="GenerateResidual"/> and <see cref="GenerateResidualAsync"/>.
+        /// <paramref name="reduceStatsAsync"/> is the ONLY await seam: the sync entry
+        /// point injects already-completed tasks (so the whole core runs inline and
+        /// its returned task is complete — see the wrapper's completed-task
+        /// contract), the awaitable entry point injects
+        /// <see cref="ReduceToStatsAsync"/>. Everything else in this method is
+        /// synchronous main-thread work (buffer leases, compute dispatches, CPU
+        /// decision loops).
+        /// </summary>
+        private async Task<NamerDecompOutput> GenerateResidualCoreAsync(
+            NamerSplitResult split,
+            Color32[] quantizedColors,
+            RenderTexture baseLinear,
+            int w,
+            int h,
+            float errorThreshold,
+            int manualResolution,
+            RenderTexture projectedOut,
+            NamerResidualMode mode,
+            float coverageTarget,
+            Func<RenderTexture, int, int, RenderTexture, RenderTexture, Task<ReduceStats>> reduceStatsAsync)
         {
             if (split == null)
             {
@@ -328,7 +399,7 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 // 2. Fit-only error (residual == identity) + base opacity for the D-13 gate.
                 RunErrorHeatmap(vcInterp, fullResidual, baseLinear, heatmap, errorStat, coverageStat, 1f, w, h);
-                ReduceStats fitStats = ReduceToStats(errorStat, w, h, avgA, avgB);
+                ReduceStats fitStats = await reduceStatsAsync(errorStat, w, h, avgA, avgB);
 
                 // CR-03 coverage guard: zero rasterizer coverage means the fit was never
                 // validated against any texel. Without this guard the D-13 gate would read
@@ -371,7 +442,7 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 if (drop)
                 {
-                    ReduceStats coverage = ReduceToStats(coverageStat, w, h, avgA, avgB);
+                    ReduceStats coverage = await reduceStatsAsync(coverageStat, w, h, avgA, avgB);
                     return new NamerDecompOutput(null,
                         BuildStats(fitStats, coverage, required: false, chosenResolution: 0, fitOnlyMaxError: fitStats.MaxError), this);
                 }
@@ -414,8 +485,8 @@ namespace GraffitiEntertainment.Namer.Editor
 
                 // 5. Adaptive downward-halving search (D-16) with the manual ladder override
                 //    (D-17), gated by the percentile coverage target (04.3 D-01).
-                int chosenResolution = ChooseResolution(fullResidual, vcInterp, baseLinear, heatmap, errorStat, coverageStat,
-                    w, h, errorThreshold, coverageTarget, manualResolution, avgA, avgB);
+                int chosenResolution = await ChooseResolution(fullResidual, vcInterp, baseLinear, heatmap, errorStat, coverageStat,
+                    w, h, errorThreshold, coverageTarget, manualResolution, avgA, avgB, reduceStatsAsync);
 
                 // 6. Produce the final residual at the chosen resolution (not upsampled back).
                 //    The chosen resolution is the LONG edge; the short edge preserves the
@@ -447,8 +518,8 @@ namespace GraffitiEntertainment.Namer.Editor
                 try
                 {
                     RunErrorHeatmap(vcInterp, eval, baseLinear, heatmap, errorStat, coverageStat, 0f, w, h);
-                    ReduceStats errorStats = ReduceToStats(errorStat, w, h, avgA, avgB);
-                    ReduceStats covStats = ReduceToStats(coverageStat, w, h, avgA, avgB);
+                    ReduceStats errorStats = await reduceStatsAsync(errorStat, w, h, avgA, avgB);
+                    ReduceStats covStats = await reduceStatsAsync(coverageStat, w, h, avgA, avgB);
                     return new NamerDecompOutput(returnedResidual,
                         BuildStats(errorStats, covStats, required: true, chosenResolution, fitOnlyMaxError: fitStats.MaxError), this);
                 }
@@ -481,7 +552,7 @@ namespace GraffitiEntertainment.Namer.Editor
             _pool.Dispose();
         }
 
-        private int ChooseResolution(
+        private async Task<int> ChooseResolution(
             RenderTexture fullResidual,
             RenderTexture vcInterp,
             RenderTexture baseLinear,
@@ -494,7 +565,8 @@ namespace GraffitiEntertainment.Namer.Editor
             float coverageTarget,
             int manualResolution,
             RenderTexture avgA,
-            RenderTexture avgB)
+            RenderTexture avgB,
+            Func<RenderTexture, int, int, RenderTexture, RenderTexture, Task<ReduceStats>> reduceStatsAsync)
         {
             // Clamp once up front so a programmatic out-of-range target degrades
             // deterministically instead of throwing (T-04.3-01). A 0 / negative target
@@ -533,7 +605,7 @@ namespace GraffitiEntertainment.Namer.Editor
                     continue;
                 }
 
-                float evalCoverage = EvaluateResolution(fullResidual, vcInterp, baseLinear, heatmap, errorStat, coverageStat, w, h, r, avgA, avgB);
+                float evalCoverage = await EvaluateResolution(fullResidual, vcInterp, baseLinear, heatmap, errorStat, coverageStat, w, h, r, avgA, avgB, reduceStatsAsync);
                 if (evalCoverage < target)
                 {
                     break;
@@ -554,7 +626,7 @@ namespace GraffitiEntertainment.Namer.Editor
         /// honest <see cref="NamerDecompErrorStats.MaxError"/> readout comes from the
         /// final BuildStats at the chosen resolution.
         /// </summary>
-        private float EvaluateResolution(
+        private async Task<float> EvaluateResolution(
             RenderTexture fullResidual,
             RenderTexture vcInterp,
             RenderTexture baseLinear,
@@ -565,7 +637,8 @@ namespace GraffitiEntertainment.Namer.Editor
             int h,
             int resolution,
             RenderTexture avgA,
-            RenderTexture avgB)
+            RenderTexture avgB,
+            Func<RenderTexture, int, int, RenderTexture, RenderTexture, Task<ReduceStats>> reduceStatsAsync)
         {
             ResolveAspectSize(resolution, w, h, out int cw, out int ch);
             // Rung candidate via the same quotient-of-sums operator the final production
@@ -577,8 +650,8 @@ namespace GraffitiEntertainment.Namer.Editor
             try
             {
                 RunErrorHeatmap(vcInterp, up, baseLinear, heatmap, errorStat, coverageStat, 0f, w, h);
-                ReduceStats stats = ReduceToStats(errorStat, w, h, avgA, avgB);
-                ReduceStats covStats = ReduceToStats(coverageStat, w, h, avgA, avgB);
+                ReduceStats stats = await reduceStatsAsync(errorStat, w, h, avgA, avgB);
+                ReduceStats covStats = await reduceStatsAsync(coverageStat, w, h, avgA, avgB);
 
                 // Same covered-texel normalization as BuildStats: uncovered texels write
                 // 0 into _CoverageStat.r, so the raw reduce yields within-count / ALL
@@ -622,6 +695,30 @@ namespace GraffitiEntertainment.Namer.Editor
 
         private ReduceStats ReduceToStats(RenderTexture src, int srcW, int srcH, RenderTexture avgA, RenderTexture avgB)
         {
+            RunReduceChain(src, srcW, srcH, avgA, avgB, out RenderTexture finalTex, out int finalW, out int finalH);
+            return ReadBackStats(finalTex, finalW, finalH);
+        }
+
+        /// <summary>
+        /// Awaitable mirror of <see cref="ReduceToStats"/> (05.3 threading): the same
+        /// dispatch chain, then <see cref="ReadBackStatsAsync"/> instead of blocking in
+        /// <see cref="AsyncGPUReadbackRequest.WaitForCompletion"/> — the editor loop
+        /// pumps while the request lands. The dispatches themselves stay on the
+        /// calling (main) thread; only the readback wait is released.
+        /// </summary>
+        private async Task<ReduceStats> ReduceToStatsAsync(RenderTexture src, int srcW, int srcH, RenderTexture avgA, RenderTexture avgB)
+        {
+            RunReduceChain(src, srcW, srcH, avgA, avgB, out RenderTexture finalTex, out int finalW, out int finalH);
+            return await ReadBackStatsAsync(finalTex, finalW, finalH);
+        }
+
+        /// <summary>
+        /// The CSReduce dispatch chain shared by <see cref="ReduceToStats"/> and
+        /// <see cref="ReduceToStatsAsync"/>: ping-pong downsampling to a single texel,
+        /// leaving the winning target and its valid dims for the readback.
+        /// </summary>
+        private void RunReduceChain(RenderTexture src, int srcW, int srcH, RenderTexture avgA, RenderTexture avgB, out RenderTexture finalTex, out int finalW, out int finalH)
+        {
             RenderTexture current = src;
             int curW = srcW;
             int curH = srcH;
@@ -654,32 +751,58 @@ namespace GraffitiEntertainment.Namer.Editor
                 span *= ReduceDownsampleFactor;
             }
 
-            return ReadBackStats(current, curW, curH);
+            finalTex = current;
+            finalW = curW;
+            finalH = curH;
         }
 
         private static ReduceStats ReadBackStats(RenderTexture src, int validW, int validH)
         {
-            // WR-01: the reduce chain carries coverage as a FLOAT fraction (the ping-pong
-            // targets are R16G16B16A16_SFloat and CSReduce averages .b in float), so the
-            // readback must be float too. An RGBA32 readback quantizes the fraction to
-            // 1/255 steps (round(f*255)/255), which turned the kMinCoverageFraction = 1e-6
-            // zero-coverage guard into a ~0.2% coverage cutoff that refused small-but-
-            // legitimate UV footprints. RGBAFloat is exact for both callers: float chains
-            // keep full precision, and the UNorm8 coverageStat chain's 0/1 flags are exactly
-            // representable. forcePlayerLoopUpdate pumps the request in edit mode where
-            // there is no player loop driving async GPU reads (IN-02).
+            // WR-01 + IN-02 notes live on the shared request policy in
+            // ReadBackStatsAsync's doc; this blocking twin differs only in the wait.
             AsyncGPUReadbackRequest request = AsyncGPUReadback.Request(src, 0, TextureFormat.RGBAFloat);
             request.forcePlayerLoopUpdate = true;
             request.WaitForCompletion();
+            return FinishReadBackStats(request, validW, validH);
+        }
+
+        /// <summary>
+        /// Awaitable mirror of <see cref="ReadBackStats"/> (05.3 threading), differing
+        /// only in the wait: the request rides
+        /// <see cref="NamerComputePipeline.RequestReadbackAsync"/> so the editor loop
+        /// pumps instead of blocking, then the SAME accumulation runs on the
+        /// main-thread continuation. Request policy (WR-01): the reduce chain carries
+        /// coverage as a FLOAT fraction (the ping-pong targets are R16G16B16A16_SFloat
+        /// and CSReduce averages .b in float), so the readback must be RGBAFloat — an
+        /// RGBA32 readback quantizes the fraction to 1/255 steps
+        /// (round(f*255)/255), which turned the kMinCoverageFraction = 1e-6
+        /// zero-coverage guard into a ~0.2% coverage cutoff that refused small-but-
+        /// legitimate UV footprints. forcePlayerLoopUpdate pumps the request in edit
+        /// mode where there is no player loop driving async GPU reads (IN-02).
+        /// </summary>
+        private static async Task<ReduceStats> ReadBackStatsAsync(RenderTexture src, int validW, int validH)
+        {
+            AsyncGPUReadbackRequest request =
+                await NamerComputePipeline.RequestReadbackAsync(src, 0, TextureFormat.RGBAFloat);
+            return FinishReadBackStats(request, validW, validH);
+        }
+
+        /// <summary>
+        /// The shared post-request stat accumulation: the valid-region loop over the
+        /// RGBAFloat data building the <see cref="ReduceStats"/> (mean/max error,
+        /// coverage fraction, min alpha).
+        /// </summary>
+        private static ReduceStats FinishReadBackStats(AsyncGPUReadbackRequest request, int validW, int validH)
+        {
             if (request.hasError)
             {
-                throw new InvalidOperationException("NAMER decomp stats readback failed.");
+                throw new InvalidOperationException(kStatsReadbackFailedMessage);
             }
 
             NativeArray<Color> data = request.GetData<Color>();
             try
             {
-                int rowStride = src.width;
+                int rowStride = request.width;
                 float meanErr = 0f;
                 float maxErr = 0f;
                 float coverage = 0f;

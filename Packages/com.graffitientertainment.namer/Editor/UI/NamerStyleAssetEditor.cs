@@ -32,9 +32,15 @@ namespace GraffitiEntertainment.Namer.Editor
         private NamerStyleAsset asset;
         private bool advancedFoldout;
         private bool isDecomposing;
+        private volatile bool decomposeCancelRequested;
+        private volatile float decomposeProgress;
+        private volatile string decomposePhase;
         private string decomposeError;
         private string volumeError;
         private bool isValidating;
+        private volatile bool validateCancelRequested;
+        private volatile float validateProgress;
+        private volatile string validatePhase;
         private string validationError;
 
         /// <summary>Reference-slot thumbnail size in pixels (material-inspector row style; A2 donor).</summary>
@@ -42,6 +48,19 @@ namespace GraffitiEntertainment.Namer.Editor
 
         /// <summary>Cavity Floor slider maximum (UI-SPEC P9 range 0-0.5).</summary>
         private const float kCavityFloorMax = 0.5f;
+
+        /// <summary>
+        /// Fraction of the Decompose progress bar owned by the exemplar refinement
+        /// probe (05.3 threading): the probe reports 0 → this span, the decomposition
+        /// itself this span → 1.
+        /// </summary>
+        private const float kProbeProgressSpan = 0.15f;
+
+        /// <summary>
+        /// Validate Look progress-bar title (05.3 threading; the Decompose tick's
+        /// title pattern, re-homed for S17).
+        /// </summary>
+        internal const string kValidateProgressTitle = "Validating NAMER Style";
 
         /// <summary>Hue Mode popup options (UI-SPEC P13; index into the asset's HueMode).</summary>
         private static readonly string[] HueModeOptions = { "Preserve", "Replace" };
@@ -348,32 +367,54 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// S7 click: the full decomposition transaction. (a) exemplar refinement
-        /// probe — when a Processor window with a loadable source is open, run the
+        /// S7 click: the full decomposition transaction, threaded (05.3) so the
+        /// editor loop stays responsive. (a) exemplar refinement probe via the
+        /// awaitable <see cref="NamerEditorWindow.RunStylePostFitAsync"/> seam —
+        /// when a Processor window with a loadable source is open, run the
         /// stylized-render fit and pass its params as the grade override (the D-02
-        /// complement; a failure here is NOT a decomposition failure — the probe
-        /// is skipped, never a gate); (b) <see cref="NamerStyleDecomposer.DecomposeStyle"/>
-        /// with the override; (c) preflight the Volume write gate BEFORE any
-        /// mutation; (d) apply the grade to the post block, rebuild the palette
-        /// anchors, and stamp the decomposition state (one Undo group, one
-        /// SetDirty); (e) regenerate the companion Volume and ping it. The
-        /// finally block always lowers the busy flag and raises
-        /// <see cref="NamerStyleAsset.Changed"/> — the Processor preview picks up
-        /// the new palette/post state debounced.
+        /// complement; a failure here is NOT a decomposition failure — the probe is
+        /// skipped, never a gate); the probe owns the first kProbeProgressSpan of
+        /// the bar, the decomposition the rest; (b)
+        /// <see cref="NamerStyleDecomposer.DecomposeStyleAsync"/> — the main-thread
+        /// pixel gather, then the pure compute core on a worker thread while an
+        /// <see cref="EditorApplication.update"/> tick renders the cancellable
+        /// progress bar from volatile fields the worker's progress callback
+        /// writes; (c) preflight the Volume write gate BEFORE any mutation; (d)
+        /// apply the grade to the post block, rebuild the palette anchors, and
+        /// stamp the decomposition state (one Undo group, one SetDirty); (e)
+        /// regenerate the companion Volume and ping it. Steps (c)-(e) run on the
+        /// main thread after the await resumes (Unity's synchronization context).
+        /// The finally block always detaches the tick, clears the bar, lowers the
+        /// busy flag, and raises <see cref="NamerStyleAsset.Changed"/> — the
+        /// Processor preview picks up the new palette/post state debounced.
         /// </summary>
-        private void RunDecompose()
+        private async void RunDecompose()
         {
             decomposeError = null;
             isDecomposing = true;
+            decomposeCancelRequested = false;
+            decomposeProgress = 0f;
+            decomposePhase = NamerEditorConstants.StyleAssetDecomposeBusyLabel;
+            EditorApplication.update += OnDecomposeTick;
             try
             {
                 // (a) Exemplar refinement probe — quality boost only, never a gate.
+                // Awaitable seam (05.3 threading): the probe's gather, render, and
+                // fit release the main thread between stages instead of beachballing
+                // the editor before the decomposition's own await.
                 NamerStylePostFitParams gradeOverride = null;
                 string gradeOverrideExemplarName = null;
                 NamerEditorWindow exemplarWindow = NamerPostLookEditor.ResolveExemplarWindow();
                 if (exemplarWindow != null)
                 {
-                    NamerStylePostFitRunResult refinement = exemplarWindow.RunStylePostFit(asset);
+                    NamerStylePostFitRunResult refinement = await exemplarWindow.RunStylePostFitAsync(
+                        asset,
+                        () => decomposeCancelRequested,
+                        (fraction, phase) =>
+                        {
+                            decomposeProgress = fraction * kProbeProgressSpan;
+                            decomposePhase = phase;
+                        });
                     if (!refinement.Cancelled
                         && string.IsNullOrEmpty(refinement.ErrorTextureName)
                         && !refinement.NotExtracted)
@@ -383,9 +424,19 @@ namespace GraffitiEntertainment.Namer.Editor
                     }
                 }
 
-                // (b) The decomposition itself.
-                NamerStyleDecomposeResult result = NamerStyleDecomposer.DecomposeStyle(
-                    asset, null, gradeOverride, gradeOverrideExemplarName);
+                // (b) The decomposition itself — gather on this thread, compute on
+                // a worker; cancel and progress flow through the volatile fields
+                // the update tick reads (rescaled onto the span the probe leaves).
+                NamerStyleDecomposeResult result = await NamerStyleDecomposer.DecomposeStyleAsync(
+                    asset,
+                    () => decomposeCancelRequested,
+                    gradeOverride,
+                    gradeOverrideExemplarName,
+                    (fraction, phase) =>
+                    {
+                        decomposeProgress = kProbeProgressSpan + (1f - kProbeProgressSpan) * fraction;
+                        decomposePhase = phase;
+                    });
                 if (result.Cancelled)
                 {
                     return;
@@ -460,9 +511,38 @@ namespace GraffitiEntertainment.Namer.Editor
             }
             finally
             {
+                EditorApplication.update -= OnDecomposeTick;
+                EditorUtility.ClearProgressBar();
                 isDecomposing = false;
                 NamerStyleAsset.RaiseChanged(asset);
             }
+        }
+
+        /// <summary>
+        /// The decompose progress-bar tick (05.3 threading): main-thread paint of
+        /// the worker-written volatile progress fields. The bar doubles as the
+        /// cancel surface — a user Cancel press latches
+        /// <see cref="decomposeCancelRequested"/> for the worker's
+        /// <c>shouldCancel</c> delegate. Self-detaches when this inspector is
+        /// destroyed mid-decompose (the async continuation still completes its
+        /// own finally detach, which is a safe no-op).
+        /// </summary>
+        private void OnDecomposeTick()
+        {
+            if (this == null)
+            {
+                EditorApplication.update -= OnDecomposeTick;
+                EditorUtility.ClearProgressBar();
+                return;
+            }
+
+            if (EditorUtility.DisplayCancelableProgressBar(
+                    NamerStyleDecomposer.kDecomposeProgressTitle, decomposePhase, decomposeProgress))
+            {
+                decomposeCancelRequested = true;
+            }
+
+            Repaint();
         }
 
         /// <summary>
@@ -960,19 +1040,30 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>
         /// S17 click: render the exemplar window's stylized decomposition of its
         /// loaded source, re-fit the reference grade against it, and store the
-        /// verdict. Within tolerance → the miniLabel result line; visible
-        /// residual → the mismatch Warning (the STYL-17 LUT-unlock evidence).
-        /// The run's fingerprint stamps the state the verdict was earned
-        /// against. Failure buckets: cancelled → silent; unreadable reference
-        /// or no stylized output → the failed wrapper with the bucket detail;
-        /// anything else → the wrapper with the exception message. NO
+        /// verdict — threaded (05.3) through the awaitable
+        /// <see cref="NamerEditorWindow.RunStylePostFitAsync"/> seam so the editor
+        /// loop keeps pumping (an <see cref="EditorApplication.update"/> tick paints
+        /// the cancellable progress bar from the volatile fields the fit's
+        /// progress callback writes). Within tolerance → the miniLabel result
+        /// line; visible residual → the mismatch Warning (the STYL-17 LUT-unlock
+        /// evidence). The run's fingerprint stamps the state the verdict was
+        /// earned against. Failure buckets: cancelled → silent; unreadable
+        /// reference or no stylized output → the failed wrapper with the bucket
+        /// detail; anything else → the wrapper with the exception message. NO
         /// <see cref="NamerStyleAsset.RaiseChanged"/> — evidence only, the
-        /// preview never recomputes for a validation.
+        /// preview never recomputes for a validation. The writes (Undo group,
+        /// verdict fields, SetDirty) happen on the main thread after the await
+        /// resumes; the finally block always detaches the tick, clears the bar,
+        /// and lowers the busy flag.
         /// </summary>
-        private void RunValidate(NamerEditorWindow exemplarWindow)
+        private async void RunValidate(NamerEditorWindow exemplarWindow)
         {
             validationError = null;
             isValidating = true;
+            validateCancelRequested = false;
+            validateProgress = 0f;
+            validatePhase = NamerEditorConstants.StyleAssetValidateBusyLabel;
+            EditorApplication.update += OnValidateTick;
             try
             {
                 // The window closed between the state read and the click —
@@ -982,7 +1073,14 @@ namespace GraffitiEntertainment.Namer.Editor
                     return;
                 }
 
-                NamerStylePostFitRunResult result = exemplarWindow.RunStylePostFit(asset);
+                NamerStylePostFitRunResult result = await exemplarWindow.RunStylePostFitAsync(
+                    asset,
+                    () => validateCancelRequested,
+                    (fraction, phase) =>
+                    {
+                        validateProgress = fraction;
+                        validatePhase = phase;
+                    });
                 if (result.Cancelled)
                 {
                     return;
@@ -1026,8 +1124,38 @@ namespace GraffitiEntertainment.Namer.Editor
             }
             finally
             {
+                EditorApplication.update -= OnValidateTick;
+                EditorUtility.ClearProgressBar();
                 isValidating = false;
             }
+        }
+
+        /// <summary>
+        /// The Validate Look progress-bar tick (05.3 threading): main-thread paint
+        /// of the fit seam's volatile progress fields — the OnDecomposeTick pattern
+        /// kept separate rather than abstracted (the two runs own different titles,
+        /// cancel fields, and busy flags). The bar doubles as the cancel surface —
+        /// a user Cancel press latches <see cref="validateCancelRequested"/> for the
+        /// fit's shouldCancel delegate. Self-detaches when this inspector is
+        /// destroyed mid-validation (the async continuation still completes its own
+        /// finally detach, which is a safe no-op).
+        /// </summary>
+        private void OnValidateTick()
+        {
+            if (this == null)
+            {
+                EditorApplication.update -= OnValidateTick;
+                EditorUtility.ClearProgressBar();
+                return;
+            }
+
+            if (EditorUtility.DisplayCancelableProgressBar(
+                    kValidateProgressTitle, validatePhase, validateProgress))
+            {
+                validateCancelRequested = true;
+            }
+
+            Repaint();
         }
 
         /// <summary>

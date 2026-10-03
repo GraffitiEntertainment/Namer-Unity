@@ -204,7 +204,7 @@ namespace GraffitiEntertainment.Namer.Editor
         private const float kStatEpsilon = 1e-6f;                // denominator floor for means/chroma/LMS gains
         private const float kChromaNoiseFloor = 1e-3f;           // deadband for chroma differences (5x the ACES gray-spread noise)
         private const float kParamRangeLimit = 100f;             // URP percent-knob clamp and percent scale
-        private const float kFittedWhiteBalanceLimit = 50f;      // hue-preserving clamp on the FITTED white-balance knobs, chosen at 50 (strong warm/cool while keeping the von Kries hue rotation bounded); the solve still searches [-100, 100]; URP's own slider range is ±100 (260927-jkb widen from 15)
+        private const float kFittedWhiteBalanceLimit = 100f;     // clamp on the FITTED white-balance knobs at URP's full ±100 slider range — a genuinely warm source (measured 05.3: Neo's stylized base, M/S ≈ 10.9 vs 1.83 neutral) demands an unclamped (−100, +68) correction, and the old ±50 hue-preservation bound silently railed it; the solve searches the same [-100, 100] so the clamp is now a no-op safety (260927-jkb lineage: 15 -> 50 -> 100)
         private const float kMaxFittedPostExposureEv = 10f;      // EV clamp; plan 02 pins MaxFittedPostExposureEv to this value
         private const int kExposureBisectionIterations = 48;     // 260927-jkb: fixed count keeps the determinism contract (fixed iteration order and counts); float32 brackets collapse to adjacent floats well before 48, so the result is the fully converged float — identical run to run
         private const float kWhiteBalanceRange = 100f;           // temperature/tint search bounds [-100, 100]
@@ -215,6 +215,19 @@ namespace GraffitiEntertainment.Namer.Editor
         private const float kGoldenSectionConjugate = 0.6180339887f; // (sqrt(5) - 1) / 2
         private const float kCubeRootExponent = 1f / 3f;         // geometric-mean normalization
         private const float kBinCenterOffset = 0.5f;             // occupied-bin center = (i + 0.5) / bins
+        /// <summary>Internal (05.3 green-washout fix): the saturated-top entry value of the
+        /// master-curve clip guard — a key whose specification value reaches this may
+        /// rise at most <see cref="kMasterClipGuardMaxRise"/> above its guarded predecessor,
+        /// so a bright-heavy reference cannot step a populated mid band straight onto 1.0
+        /// (measured on the live Neo fit: 32% of green-dominant texels clipped at >= 0.999).
+        /// Keys below the entry keep the exact specification.</summary>
+        internal const float kMasterClipGuardEntry = 0.95f;
+        /// <summary>Internal (05.3 green-washout fix): CLAHE-style clip limit on the master
+        /// curve's per-segment climb into the saturated top — max key rise across one
+        /// 1/8 grid segment (slope <= 2.4), limiting the rate without capping the range.</summary>
+        internal const float kMasterClipGuardMaxRise = 0.30f;
+        private const int kLumaInverseIterations = 48;           // fixed-count bisection for InverseLumaOfScalar (determinism contract; exposure-solve precedent — float brackets collapse well before 48)
+        private const float kLumaInverseRawMax = 64f;            // raw-scalar bracket top for InverseLumaOfScalar: the ACES chain saturates to 1.0 near raw ~26 (NamerStylePostMathTests), so every post-tonemap luma in [0, 1] has an in-bracket crossing
 
         /// <summary>
         /// Accumulate source statistics from HDR linear pixels. Each pixel is mapped
@@ -330,11 +343,22 @@ namespace GraffitiEntertainment.Namer.Editor
         /// deterministic dual-start (0-seed + grid-seed) alternating-axis
         /// golden-section solve over temperature/tint,
         /// (2) post-exposure via a fixed-iteration bisection of the pre-tonemap exposure
-        /// model against the reference mean luma (EV is applied before the ACES tonemap
-        /// in the shader chain — NamerPostPreview.hlsl / URP postExposure equivalent),
-        /// (3) contrast as the LogC p90-p10 spread ratio, (4) saturation as the mean-chroma ratio,
-        /// (5) master curve via histogram specification (R/G/B stay identity
-        /// diagonals), (6) bloom threshold as the p95 of the raw sRGB Max3 histogram.
+        /// model against the reference mean luma, re-solved once against that mean
+        /// divided by the fitted white balance's scalar luma effect (the runtime WB
+        /// multiplies LMS by raw, un-normalized gains between the tonemap and
+        /// contrast — first-order luma at the fitted-knob rail; EV is applied before
+        /// the ACES tonemap in the shader chain — NamerPostPreview.hlsl / URP
+        /// postExposure equivalent),
+        /// (3) contrast as the LogC p90-p10 spread ratio of the EV- and
+        /// white-balance-scaled source histogram, (4) saturation as the mean-chroma
+        /// ratio,
+        /// (5) master curve via histogram specification of the
+        /// EV+WB+contrast-transformed source CDF (R/G/B stay identity diagonals) —
+        /// steps 2/3/5 are SEQUENTIAL over
+        /// the runtime chain (EV -> tonemap -> WB -> contrast -> curves) so each knob corrects
+        /// only what the previous ones left, instead of every knob carrying the full
+        /// correction of its statistic while the runtime composes them in series,
+        /// (6) bloom threshold as the p95 of the raw sRGB Max3 histogram.
         /// Every parameter is clamped to its named cap (threat T-05.1-01-01).
         /// Throws <see cref="InvalidOperationException"/> when the reference
         /// distribution carries no weight (WR-01, 05.1 review: every slot cleared after
@@ -399,30 +423,67 @@ namespace GraffitiEntertainment.Namer.Editor
             // lands exactly on the endpoint after float collapse (rail semantics).
             float3 srcRawMean = max(ToFloat3(source.RawMeanLinear), kStatEpsilon);
             float refLumaMean = max(reference.MeanLuma, kStatEpsilon);
-            float evLow = -kMaxFittedPostExposureEv;
-            float evHigh = kMaxFittedPostExposureEv;
-            for (int i = 0; i < kExposureBisectionIterations; i++)
+
+            // The bisection body as a local function so the white-balance correction
+            // pass below re-runs the IDENTICAL fixed-count solve against an adjusted
+            // target (same bracket, sign rule, and float ops — rail semantics intact).
+            float SolveExposureForMeanLuma(float targetLumaMean)
             {
-                float evMid = (evLow + evHigh) * 0.5f;
-                float predicted = NamerStylePostMath.Luma709(NamerStylePostMath.TonemapLdr(srcRawMean * exp2(evMid)));
-                if (predicted < refLumaMean)
+                float evLow = -kMaxFittedPostExposureEv;
+                float evHigh = kMaxFittedPostExposureEv;
+                for (int i = 0; i < kExposureBisectionIterations; i++)
                 {
-                    evLow = evMid;
+                    float evMid = (evLow + evHigh) * 0.5f;
+                    float predicted = NamerStylePostMath.Luma709(NamerStylePostMath.TonemapLdr(srcRawMean * exp2(evMid)));
+                    if (predicted < targetLumaMean)
+                    {
+                        evLow = evMid;
+                    }
+                    else
+                    {
+                        evHigh = evMid;
+                    }
                 }
-                else
-                {
-                    evHigh = evMid;
-                }
+
+                return clamp((evLow + evHigh) * 0.5f, -kMaxFittedPostExposureEv, kMaxFittedPostExposureEv);
             }
 
-            fitted.PostExposureEv = clamp((evLow + evHigh) * 0.5f, -kMaxFittedPostExposureEv, kMaxFittedPostExposureEv);
+            fitted.PostExposureEv = SolveExposureForMeanLuma(refLumaMean);
 
-            // (3) Contrast: LogC of the p10/p90 percentile spreads (source percentiles
-            // post-tonemap linear, reference percentiles sRGB-decoded linear).
+            // White-balance luma coupling (05.3 volume-washout follow-up, the
+            // WB-at-the-rail defect): the runtime applies the fitted WB between the
+            // tonemap and the contrast with RAW (un-normalized)
+            // ColorBalanceToLMSCoeffs gains, so at the ±kFittedWhiteBalanceLimit
+            // rail its luma shift is first-order — the unit-geometric-mean
+            // normalization in step (1) bounds the SOLVE's target, not what the
+            // runtime multiplies. Model the shift as a scalar gain evaluated on the
+            // tonemapped raw mean (this step's own mean-evaluation convention) and
+            // re-run the same fixed-count bisection against the reference mean
+            // divided by it: one deterministic correction pass, because the scale's
+            // own dependence on EV is second-order and left uniterated.
+            float3 tonemappedMeanColor = NamerStylePostMath.TonemapLdr(srcRawMean * exp2(fitted.PostExposureEv));
+            float whiteBalanceLumaScale = WhiteBalanceLumaScale(fitted.Temperature, fitted.Tint, tonemappedMeanColor);
+            fitted.PostExposureEv = SolveExposureForMeanLuma(max(refLumaMean / whiteBalanceLumaScale, kStatEpsilon));
+
+            // (3) Contrast — SEQUENTIAL over the runtime chain (05.3 volume-washout
+            // fix): URP composes EV -> ACES tonemap -> LUT (WB -> contrast -> ... ->
+            // curves), so this solve measures the source p10/p90 spread AFTER the
+            // fitted EV and the fitted WB's scalar luma scale, not on the raw
+            // post-tonemap histogram. The retired
+            // independent solves each carried the FULL correction of their statistic
+            // (EV the mean, contrast the spread, the master curve the whole CDF —
+            // which subsumes both) while the runtime composes the knobs in series,
+            // so the mean and spread were corrected two to three times over — the
+            // muddy, washed-out generated volume. The WB enters as its mean-color
+            // scalar luma scale (WhiteBalanceLumaScale in step 2): its chroma
+            // distribution around that scalar stays unmodeled, a second-order
+            // residual on top of the first-order rail correction the scalar carries.
             float srcTotal = (float)source.TotalWeight;
             float refTotal = (float)reference.TotalWeight;
-            float srcP10 = WeightedPercentile(source.LumaHistogram, srcTotal, kPercentile10);
-            float srcP90 = WeightedPercentile(source.LumaHistogram, srcTotal, kPercentile90);
+            float[] evTransformed = TransformHistogramThroughExposure(source.LumaHistogram, fitted.PostExposureEv);
+            float[] wbTransformed = TransformHistogramThroughLumaScale(evTransformed, whiteBalanceLumaScale);
+            float srcP10 = WeightedPercentile(wbTransformed, srcTotal, kPercentile10);
+            float srcP90 = WeightedPercentile(wbTransformed, srcTotal, kPercentile90);
             float refP10 = WeightedPercentile(reference.LumaHistogram, refTotal, kPercentile10);
             float refP90 = WeightedPercentile(reference.LumaHistogram, refTotal, kPercentile90);
             float srcSpread = NamerStylePostMath.LinearToLogC(srcP90) - NamerStylePostMath.LinearToLogC(srcP10);
@@ -460,12 +521,21 @@ namespace GraffitiEntertainment.Namer.Editor
 
             fitted.Saturation = clamp(saturationValue, 0f, kParamRangeLimit);
 
-            // (5) Curves: master-only histogram specification y = Fref^-1(Fsrc(x)) on
-            // the uniform key grid; R/G/B stay identity diagonals (per-channel
+            // (5) Curves — residual owner of the chain: master-only histogram
+            // specification y = Fref^-1(Fchain(x)) on the uniform key grid, where
+            // Fchain is the source luma CDF AFTER the fitted EV, white balance and
+            // contrast (the stages URP applies ahead of the curves). The curve therefore carries
+            // only the shape the earlier knobs did not correct — specifying from the
+            // untransformed source made it re-correct mean and spread, stacking the
+            // overcorrection. R/G/B stay identity diagonals (per-channel
             // specification fought the master map and shifted hue). The masterValues
             // composition parameter of FitCurveValues/MasterInverse stays in place —
-            // the master path passes null; no refactor.
-            float[] masterValues = FitCurveValues(source.LumaHistogram, srcTotal, reference.LumaHistogram, refTotal, null);
+            // the master path passes null; no refactor. The master values then pass
+            // through the clip guard (see ApplyMasterClipGuard) so a bright-heavy
+            // reference cannot step a populated band onto the saturated top.
+            float[] chainTransformed = TransformHistogramThroughContrast(wbTransformed, fitted.Contrast);
+            float[] masterValues = FitCurveValues(chainTransformed, srcTotal, reference.LumaHistogram, refTotal, null);
+            ApplyMasterClipGuard(masterValues);
             fitted.MasterKeys = BuildKeys(masterValues);
             fitted.RedKeys = BuildIdentityKeys();
             fitted.GreenKeys = BuildIdentityKeys();
@@ -502,6 +572,168 @@ namespace GraffitiEntertainment.Namer.Editor
             look.PostBlueCurve = new AnimationCurve(fit.BlueKeys);
             look.PostFitFingerprint = fit.Fingerprint;
             look.PostFitExemplarName = exemplarName;
+        }
+
+        /// <summary>
+        /// Scalar luma through the EV + ACES-tonemap stage of the runtime chain: a
+        /// gray raw-linear scalar x maps to Luma709(TonemapLdr(x)). Monotone
+        /// nondecreasing on x &gt;= 0 (the ACES curve is monotone and the terminal
+        /// saturate clamps at 1).
+        /// Internal (05.3 volume-washout fix): the fit's sequential-composition
+        /// tests model the same chain through this home rather than a mirror
+        /// (WeightedPercentile internal-widening precedent).
+        /// </summary>
+        internal static float LumaOfScalar(float x)
+        {
+            return NamerStylePostMath.Luma709(NamerStylePostMath.TonemapLdr(new float3(x, x, x)));
+        }
+
+        /// <summary>
+        /// Inverse of <see cref="LumaOfScalar"/> by fixed-count bisection over
+        /// [0, <see cref="kLumaInverseRawMax"/>] (float brackets collapse well before
+        /// 48 iterations — the exposure solve's determinism precedent). A post-tonemap
+        /// luma at the chain's saturate ceiling resolves to the first crossing,
+        /// matching saturate semantics.
+        /// Internal: shared with the fit's composition tests (see LumaOfScalar).
+        /// </summary>
+        internal static float InverseLumaOfScalar(float y)
+        {
+            float lo = 0f;
+            float hi = kLumaInverseRawMax;
+            for (int i = 0; i < kLumaInverseIterations; i++)
+            {
+                float mid = (lo + hi) * 0.5f;
+                if (LumaOfScalar(mid) < y)
+                {
+                    lo = mid;
+                }
+                else
+                {
+                    hi = mid;
+                }
+            }
+
+            return (lo + hi) * 0.5f;
+        }
+
+        /// <summary>
+        /// Rebin a post-tonemap luma histogram through the fitted post-exposure: each
+        /// occupied bin center is inverted to its raw scalar, scaled by exp2(ev) and
+        /// pushed back through the tonemap — the runtime applies EV BEFORE the ACES
+        /// tonemap. Mass-preserving; bin-center resolution matches
+        /// <see cref="WeightedPercentile"/>'s occupied-bin-center convention.
+        /// Internal: shared with the fit's composition tests (see LumaOfScalar).
+        /// </summary>
+        internal static float[] TransformHistogramThroughExposure(float[] histogram, float ev)
+        {
+            float[] result = new float[histogram.Length];
+            float gain = exp2(ev);
+            for (int i = 0; i < histogram.Length; i++)
+            {
+                float mass = histogram[i];
+                if (mass <= 0f)
+                {
+                    continue;
+                }
+
+                float mapped = LumaOfScalar(InverseLumaOfScalar((i + kBinCenterOffset) / kPostHistogramBins) * gain);
+                result[BinIndexOf(mapped)] += mass;
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// URP's LDR contrast operator on one luma value: LogC spread around the
+        /// ACEScc mid-gray pivot scaled by z = 1 + contrast/100 — verbatim
+        /// LutBuilderLdr.shader's contrast stage ((colorLog - ACEScc_MIDGRAY) * z +
+        /// ACEScc_MIDGRAY in LogC; _HueSatCon.z = contrast/100 + 1 in
+        /// ColorGradingLutPass). saturate mirrors the LUT's clamps (the stage feeds
+        /// max(0, ...) downstream and the LUT saturates at its end; LogCToLinear
+        /// undershoots 0 near black).
+        /// Internal: shared with the fit's composition tests (see LumaOfScalar).
+        /// </summary>
+        internal static float ApplyLdrContrast(float luma, float contrast)
+        {
+            float scale = 1f + contrast / kParamRangeLimit;
+            float logC = NamerStylePostMath.LinearToLogC(luma);
+            return saturate(NamerStylePostMath.LogCToLinear(
+                (logC - NamerStylePostMath.kAcesCcMidGray) * scale + NamerStylePostMath.kAcesCcMidGray));
+        }
+
+        /// <summary>
+        /// Rebin a luma histogram through <see cref="ApplyLdrContrast"/> (the LUT's
+        /// contrast stage). Mass-preserving; bin-center resolution.
+        /// Internal: shared with the fit's composition tests (see LumaOfScalar).
+        /// </summary>
+        internal static float[] TransformHistogramThroughContrast(float[] histogram, float contrast)
+        {
+            float[] result = new float[histogram.Length];
+            for (int i = 0; i < histogram.Length; i++)
+            {
+                float mass = histogram[i];
+                if (mass <= 0f)
+                {
+                    continue;
+                }
+
+                float mapped = ApplyLdrContrast((i + kBinCenterOffset) / kPostHistogramBins, contrast);
+                result[BinIndexOf(mapped)] += mass;
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Scalar luma scale the fitted white balance applies to a tonemapped LDR
+        /// color: the runtime LUT stage multiplies LMS by the RAW (un-normalized)
+        /// ColorUtils.ColorBalanceToLMSCoeffs gains between the tonemap and the
+        /// contrast (LutBuilderLdr.shader's "White balance in LMS space" block — no
+        /// saturate on that path), and those gains are only unit-geometric-mean in
+        /// the SOLVE's normalized target space, so at the fitted-knob rail the luma
+        /// shift is first-order (05.3 volume-washout follow-up: the EV/contrast/curve
+        /// solves must divide it out). Evaluated on the mean color as a scalar — the
+        /// EV solve's mean-evaluation convention; a near-black mean has no defined
+        /// ratio and reads as neutral.
+        /// Internal: shared with the fit's composition tests (see LumaOfScalar).
+        /// </summary>
+        internal static float WhiteBalanceLumaScale(float temperature, float tint, float3 ldrMeanColor)
+        {
+            Vector3 coeffs = ColorUtils.ColorBalanceToLMSCoeffs(temperature, tint);
+            float3 balanced = NamerStylePostMath.LmsToLinear(
+                NamerStylePostMath.LinearToLms(ldrMeanColor) * new float3(coeffs.x, coeffs.y, coeffs.z));
+            float meanLuma = NamerStylePostMath.Luma709(ldrMeanColor);
+            if (meanLuma <= kStatEpsilon)
+            {
+                return 1f;
+            }
+
+            return NamerStylePostMath.Luma709(balanced) / meanLuma;
+        }
+
+        /// <summary>
+        /// Rebin a luma histogram through the white balance's scalar luma scale
+        /// (<see cref="WhiteBalanceLumaScale"/>) — the runtime stage between the
+        /// tonemap and the contrast. Mass-preserving; bin-center resolution with the
+        /// LDR ceiling saturate.
+        /// Internal: shared with the fit's composition tests (see LumaOfScalar).
+        /// </summary>
+        internal static float[] TransformHistogramThroughLumaScale(float[] histogram, float lumaScale)
+        {
+            float[] result = new float[histogram.Length];
+            for (int i = 0; i < histogram.Length; i++)
+            {
+                float mass = histogram[i];
+                if (mass <= 0f)
+                {
+                    continue;
+                }
+
+                float mapped = saturate((i + kBinCenterOffset) / kPostHistogramBins * lumaScale);
+                result[BinIndexOf(mapped)] += mass;
+            }
+
+            return result;
         }
 
         /// <summary>
@@ -646,6 +878,32 @@ namespace GraffitiEntertainment.Namer.Editor
             }
 
             return values;
+        }
+
+        /// <summary>
+        /// CLAHE-style clip limit on the master curve's climb into the saturated top
+        /// (05.3 green-washout fix): a key whose specification value reaches
+        /// <see cref="kMasterClipGuardEntry"/> is capped at its guarded predecessor
+        /// plus <see cref="kMasterClipGuardMaxRise"/>. A bright-heavy reference
+        /// otherwise lets the specification step a populated mid band straight onto
+        /// 1.0 — on the live Neo fit the (0.5, 0.534)/(0.625, 1.0) key pair (slope
+        /// 3.73) clipped 32% of green-dominant texels at >= 0.999 and destroyed
+        /// their chroma. Keys below the entry keep the exact specification
+        /// (mid-range composed-chain fixtures are untouched), monotonicity holds
+        /// (FitCurveValues' running max means the cap never drops a key below its
+        /// predecessor), and the top reach is preserved (the cap limits climb rate,
+        /// not range). Mutates the array in place — FitCurveValues allocates it per
+        /// fit.
+        /// </summary>
+        private static void ApplyMasterClipGuard(float[] values)
+        {
+            for (int i = 1; i < values.Length; i++)
+            {
+                if (values[i] >= kMasterClipGuardEntry)
+                {
+                    values[i] = min(values[i], values[i - 1] + kMasterClipGuardMaxRise);
+                }
+            }
         }
 
         /// <summary>

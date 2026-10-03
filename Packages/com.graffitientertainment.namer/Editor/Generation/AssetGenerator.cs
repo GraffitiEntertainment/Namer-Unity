@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text;
+using System.Threading.Tasks;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
@@ -39,6 +40,67 @@ namespace GraffitiEntertainment.Namer.Editor
             NamerProcessorSettings settings,
             string destinationFolder,
             NamerDecompData decomp = null)
+        {
+            // Completed-task contract (05.3 threading): the core's ONLY awaits are on
+            // the two injected readback delegates below, and this wrapper injects
+            // already-completed tasks (Task.FromResult around the blocking
+            // ReadBackPairSync / ReadBackResidual). An async method that awaits only
+            // completed tasks never yields and never posts a continuation to Unity's
+            // synchronization context, so the returned task is complete when the core
+            // returns and GetResult below cannot deadlock. DO NOT add any other await
+            // to GenerateCoreAsync — that breaks this guarantee.
+            return GenerateCoreAsync(
+                    result, inspection, settings, destinationFolder, decomp,
+                    ReadBackPairSync,
+                    residual => Task.FromResult(ReadBackResidual(residual)))
+                .GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Awaitable mirror of <see cref="Generate"/> (05.3 threading): identical
+        /// validation, preflight, path composition, write order, and "no files were
+        /// written" readback contract, with the three GPU readbacks released to the
+        /// editor loop (the surface + encoded-base RGBA32 pair issued together then
+        /// awaited together, then the RGBAHalf residual) instead of blocking in
+        /// <see cref="AsyncGPUReadbackRequest.WaitForCompletion"/>. Continuations
+        /// resume on the main thread (Unity's synchronization context), so the
+        /// sRGB-encode blit, the PNG/EXR encodes, and every disk write and import
+        /// stay main-thread. Results are identical to <see cref="Generate"/> on the
+        /// same inputs (the only difference is when the readback waits run).
+        /// </summary>
+        public Task<NamerGeneratedAsset> GenerateAsync(
+            NamerComputeResult result,
+            NamerMaterialInspection inspection,
+            NamerProcessorSettings settings,
+            string destinationFolder,
+            NamerDecompData decomp = null)
+        {
+            return GenerateCoreAsync(
+                result, inspection, settings, destinationFolder, decomp,
+                ReadBackPairAsync,
+                ReadBackResidualAsync);
+        }
+
+        /// <summary>
+        /// The single generation implementation shared by <see cref="Generate"/> and
+        /// <see cref="GenerateAsync"/>. <paramref name="readBackPairAsync"/> and
+        /// <paramref name="readBackResidualAsync"/> are the ONLY await seams: the
+        /// sync entry point injects already-completed tasks (so the whole core runs
+        /// inline and its returned task is complete — see the wrapper's
+        /// completed-task contract), the awaitable entry point injects
+        /// <see cref="ReadBackPairAsync"/> and <see cref="ReadBackResidualAsync"/>.
+        /// Everything else in this method is synchronous main-thread work (path
+        /// composition, preflight, the sRGB-encode blit, Texture2D construction,
+        /// encodes, disk writes, imports).
+        /// </summary>
+        private async Task<NamerGeneratedAsset> GenerateCoreAsync(
+            NamerComputeResult result,
+            NamerMaterialInspection inspection,
+            NamerProcessorSettings settings,
+            string destinationFolder,
+            NamerDecompData decomp,
+            Func<RenderTexture, RenderTexture, Task<(AsyncGPUReadbackRequest surface, AsyncGPUReadbackRequest encodedBase)>> readBackPairAsync,
+            Func<RenderTexture, Task<Texture2D>> readBackResidualAsync)
         {
             if (result == null)
             {
@@ -116,18 +178,11 @@ namespace GraffitiEntertainment.Namer.Editor
             rawCopy.DisableKeyword(NamerComputePipeline.ReencodeSrgbKeyword);
 
             // D-08: read back via the pipeline's AsyncGPUReadback contract. Both RTs are
-            // RGBA32-quantized on readback; forcePlayerLoopUpdate pumps the request even
-            // in edit mode where there is no player loop driving async GPU reads.
-            AsyncGPUReadbackRequest surfaceRequest =
-                NamerComputePipeline.RequestReadback(result.PackedSurface, 0, TextureFormat.RGBA32);
-            AsyncGPUReadbackRequest baseRequest =
-                NamerComputePipeline.RequestReadback(baseEncodeRt, 0, TextureFormat.RGBA32);
-
-            surfaceRequest.forcePlayerLoopUpdate = true;
-            baseRequest.forcePlayerLoopUpdate = true;
-
-            surfaceRequest.WaitForCompletion();
-            baseRequest.WaitForCompletion();
+            // RGBA32-quantized on readback; the seam issues the pair together, then
+            // waits — forcePlayerLoopUpdate pumps the requests even in edit mode where
+            // there is no player loop driving async GPU reads.
+            (AsyncGPUReadbackRequest surfaceRequest, AsyncGPUReadbackRequest baseRequest) =
+                await readBackPairAsync(result.PackedSurface, baseEncodeRt);
 
             if (surfaceRequest.hasError || baseRequest.hasError)
             {
@@ -171,7 +226,7 @@ namespace GraffitiEntertainment.Namer.Editor
             {
                 if (writeResidual)
                 {
-                    residualTex = ReadBackResidual(decomp.Residual);
+                    residualTex = await readBackResidualAsync(decomp.Residual);
                 }
 
                 WriteSurfaceTexture(surfaceTex, surfacePath, settings.OverwriteGenerated);
@@ -541,20 +596,87 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
+        /// Blocking surface + encoded-base readback pair injected by
+        /// <see cref="Generate"/> (completed-task contract): both RGBA32 requests are
+        /// issued, then both awaited via
+        /// <see cref="AsyncGPUReadbackRequest.WaitForCompletion"/> — the original
+        /// synchronous generation behavior, preserved exactly.
+        /// </summary>
+        private static Task<(AsyncGPUReadbackRequest surface, AsyncGPUReadbackRequest encodedBase)> ReadBackPairSync(
+            RenderTexture surface,
+            RenderTexture encodedBase)
+        {
+            AsyncGPUReadbackRequest surfaceRequest =
+                NamerComputePipeline.RequestReadback(surface, 0, TextureFormat.RGBA32);
+            AsyncGPUReadbackRequest baseRequest =
+                NamerComputePipeline.RequestReadback(encodedBase, 0, TextureFormat.RGBA32);
+
+            surfaceRequest.forcePlayerLoopUpdate = true;
+            baseRequest.forcePlayerLoopUpdate = true;
+
+            surfaceRequest.WaitForCompletion();
+            baseRequest.WaitForCompletion();
+
+            return Task.FromResult((surfaceRequest, baseRequest));
+        }
+
+        /// <summary>
+        /// Awaitable surface + encoded-base readback pair injected by
+        /// <see cref="GenerateAsync"/>: both RGBA32 requests are issued together,
+        /// then awaited together (the same GPU-side pairing as
+        /// <see cref="ReadBackPairSync"/>) via
+        /// <see cref="NamerComputePipeline.RequestReadbackAsync"/>.
+        /// </summary>
+        private static async Task<(AsyncGPUReadbackRequest surface, AsyncGPUReadbackRequest encodedBase)> ReadBackPairAsync(
+            RenderTexture surface,
+            RenderTexture encodedBase)
+        {
+            Task<AsyncGPUReadbackRequest> surfaceTask =
+                NamerComputePipeline.RequestReadbackAsync(surface, 0, TextureFormat.RGBA32);
+            Task<AsyncGPUReadbackRequest> baseTask =
+                NamerComputePipeline.RequestReadbackAsync(encodedBase, 0, TextureFormat.RGBA32);
+
+            return (await surfaceTask, await baseTask);
+        }
+
+        /// <summary>
         /// Reads the pool-leased residual render target back as RGBAHalf and returns a
         /// readable RGBAHalf <see cref="Texture2D"/> so <c>ImageConversion.EncodeToEXR</c>
         /// emits a 16-bit-half EXR (D-02 — the residual is never PNG).
         /// </summary>
         private static Texture2D ReadBackResidual(RenderTexture residual)
         {
-            int w = residual.width;
-            int h = residual.height;
-
             AsyncGPUReadbackRequest request =
                 NamerComputePipeline.RequestReadback(residual, 0, TextureFormat.RGBAHalf);
             request.forcePlayerLoopUpdate = true;
             request.WaitForCompletion();
 
+            return FinishReadBackResidual(request, residual.width, residual.height);
+        }
+
+        /// <summary>
+        /// Awaitable mirror of <see cref="ReadBackResidual"/> injected by
+        /// <see cref="GenerateAsync"/>: the same RGBAHalf request released to the
+        /// editor loop via <see cref="NamerComputePipeline.RequestReadbackAsync"/>
+        /// instead of blocking in
+        /// <see cref="AsyncGPUReadbackRequest.WaitForCompletion"/>.
+        /// </summary>
+        private static async Task<Texture2D> ReadBackResidualAsync(RenderTexture residual)
+        {
+            AsyncGPUReadbackRequest request =
+                await NamerComputePipeline.RequestReadbackAsync(residual, 0, TextureFormat.RGBAHalf);
+
+            return FinishReadBackResidual(request, residual.width, residual.height);
+        }
+
+        /// <summary>
+        /// Shared tail of <see cref="ReadBackResidual"/> and
+        /// <see cref="ReadBackResidualAsync"/>: error gate + raw RGBAHalf load into a
+        /// linear readable texture. Throws on a failed readback so the WR-04 / T-03-02
+        /// "no files were written" contract holds on both paths.
+        /// </summary>
+        private static Texture2D FinishReadBackResidual(AsyncGPUReadbackRequest request, int w, int h)
+        {
             if (request.hasError)
             {
                 throw new InvalidOperationException(
@@ -713,6 +835,26 @@ namespace GraffitiEntertainment.Namer.Editor
                 // stringTagMap by CreateAsset itself, so no SaveAssets is needed (which would
                 // re-serialize other dirty assets and break source immutability).
                 material.SetOverrideTag(NamerEditorConstants.SourceTag, sourceIdentity);
+            }
+
+            Material existing = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
+            if (existing != null)
+            {
+                // Idempotent reprocess (D-04, material side): CreateAsset over an
+                // existing path replaces — i.e. DESTROYS — the asset instance, so any
+                // live scene or panel reference to the previous generated material
+                // serializes as null on the next save. CopySerialized replaces every
+                // serialized field — keywords, tags, textures — onto the EXISTING
+                // instance instead, keeping those references alive (the material
+                // analogue of WriteMeshAsset's in-place overwrite).
+                EditorUtility.CopySerialized(material, existing);
+                UnityEngine.Object.DestroyImmediate(material);
+                EditorUtility.SetDirty(existing);
+                // WR-04: persist ONLY this material — never force-commit unrelated
+                // in-progress user work.
+                AssetDatabase.SaveAssetIfDirty(existing);
+                Stamp(existing);
+                return;
             }
 
             AssetDatabase.CreateAsset(material, materialPath);

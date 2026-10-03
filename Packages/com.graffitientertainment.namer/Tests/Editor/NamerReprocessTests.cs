@@ -149,6 +149,11 @@ namespace GraffitiEntertainment.Namer.Tests
                 string firstBasePath = first.GeneratedAssets[0].BaseTexturePath;
                 string firstSurfacePath = first.GeneratedAssets[0].SurfaceTexturePath;
 
+                // Instance-survival regression: hold the first run's material
+                // instance the way a panel object field or an open scene would.
+                Material firstMaterial = AssetDatabase.LoadAssetAtPath<Material>(firstMaterialPath);
+                Assert.IsNotNull(firstMaterial);
+
                 NamerProcessResult second = NamerProcessor.Process(gameObject, settings);
                 Assert.IsNull(second.Error, "second Process should succeed: " + second.Error);
                 Assert.AreEqual(1, second.GeneratedAssets.Count, "second run must generate one material set");
@@ -162,6 +167,12 @@ namespace GraffitiEntertainment.Namer.Tests
 
                 Assert.IsFalse(second.GeneratedAssets[0].MaterialPath.Contains("_Namer_Namer"),
                     "re-process must not stack the generated suffix onto itself");
+
+                Assert.IsTrue(firstMaterial != null,
+                    "the material instance held from the FIRST run must survive the rewrite — CreateAsset over an existing path destroys it, nulling every live panel/scene reference on the next save");
+                Material reloadedMaterial = AssetDatabase.LoadAssetAtPath<Material>(firstMaterialPath);
+                Assert.AreEqual(firstMaterial.GetInstanceID(), reloadedMaterial.GetInstanceID(),
+                    "the rewrite must keep the same NATIVE material instance (in-place CopySerialized), not destroy-and-recreate it — managed wrapper identity is not guaranteed, instance ID is");
 
                 Material generated = AssetDatabase.LoadAssetAtPath<Material>(firstMaterialPath);
                 Assert.IsNotNull(generated, "the regenerated material must load at its path");

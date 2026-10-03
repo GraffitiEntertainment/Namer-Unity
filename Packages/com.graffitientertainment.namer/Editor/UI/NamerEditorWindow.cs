@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.Text;
+using System.Threading.Tasks;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
@@ -183,6 +184,13 @@ namespace GraffitiEntertainment.Namer.Editor
         /// <summary>Fit Look progress-bar stage count (05.1 plan 03): references, stylized preview, fit.</summary>
         private const int kPostFitStageCount = 3;
 
+        /// <summary>
+        /// Stylized-preview readback format (05.3 threading): RGBAFloat pairs with
+        /// <c>GetData&lt;Color&gt;</c> and AccumulateSource's HDR-linear input domain — the
+        /// one home for that decision, shared by the blocking and awaitable readback paths.
+        /// </summary>
+        private const TextureFormat kStylizedReadbackFormat = TextureFormat.RGBAFloat;
+
         private NamerProcessorSettings _settings;
         private NamerPreviewRenderer _preview;
         private NamerComputePipeline _pipeline;
@@ -289,6 +297,17 @@ namespace GraffitiEntertainment.Namer.Editor
             GetWindow<NamerEditorWindow>("NAMER Processor");
         }
 
+        /// <summary>Cancellable-progress title for the threaded menu Process flow (05.3 threading).</summary>
+        private const string kProcessProgressTitle = "Processing with NAMER";
+
+        // Static volatile progress state for the menu Process flow (05.3 threading):
+        // the async run writes, the editor tick reads. bool/float/string are legal
+        // volatile types.
+        private static volatile bool _isProcessing;
+        private static volatile bool _processCancelRequested;
+        private static volatile float _processProgress;
+        private static volatile string _processPhase;
+
         [MenuItem("Assets/Process with NAMER")]
         private static void ProcessSelectedAsset()
         {
@@ -301,10 +320,60 @@ namespace GraffitiEntertainment.Namer.Editor
             ProcessSelection(Selection.activeGameObject != null ? Selection.activeGameObject : Selection.activeObject);
         }
 
-        private static void ProcessSelection(UnityEngine.Object selection)
+        /// <summary>
+        /// Threaded "Process with NAMER" entry (05.3 threading): the same
+        /// <see cref="NamerProcessor.ProcessAsync"/> orchestration as the sync menu
+        /// path, with the AO bake, fit, residual, and generation readbacks released
+        /// to the editor loop (no beachball) under a cancellable progress bar driven
+        /// by <see cref="OnProcessTick"/>. Re-entry guarded: a second invocation
+        /// while a run is live is refused with a warning.
+        /// </summary>
+        private static async void ProcessSelection(UnityEngine.Object selection)
         {
-            NamerProcessResult result = NamerProcessor.Process(selection, new NamerProcessorSettings());
-            LogResult(result);
+            if (_isProcessing)
+            {
+                Debug.LogWarning("[NAMER] A Process with NAMER run is already in progress.");
+                return;
+            }
+
+            _isProcessing = true;
+            _processCancelRequested = false;
+            _processProgress = 0f;
+            _processPhase = string.Empty;
+            EditorApplication.update += OnProcessTick;
+            try
+            {
+                NamerProcessResult result = await NamerProcessor.ProcessAsync(
+                    selection,
+                    new NamerProcessorSettings(),
+                    () => _processCancelRequested,
+                    (fraction, phase) =>
+                    {
+                        _processProgress = fraction;
+                        _processPhase = phase;
+                    });
+                LogResult(result);
+            }
+            finally
+            {
+                EditorApplication.update -= OnProcessTick;
+                EditorUtility.ClearProgressBar();
+                _isProcessing = false;
+            }
+        }
+
+        /// <summary>
+        /// Editor tick for the threaded menu Process flow (05.3 threading): paints
+        /// the cancellable progress bar and latches a user cancel (polled by the
+        /// processor between materials and by the pipeline mid-material). The async
+        /// run's finally always detaches this tick and clears the bar.
+        /// </summary>
+        private static void OnProcessTick()
+        {
+            if (EditorUtility.DisplayCancelableProgressBar(kProcessProgressTitle, _processPhase ?? string.Empty, _processProgress))
+            {
+                _processCancelRequested = true;
+            }
         }
 
         private static void LogResult(NamerProcessResult result)
@@ -2582,48 +2651,30 @@ namespace GraffitiEntertainment.Namer.Editor
             string exemplarName = _selection.name;
             try
             {
-                // Stage 1 — read the references (extractor discipline: one at a time,
-                // isReadable pre-check so the failure is a named-texture result, buffer
-                // dropped before the next reference).
-                NamerStylePostStats referenceStats = new NamerStylePostStats();
-                for (int i = 0; i < asset.References.Count; i++)
-                {
-                    Texture2D reference = asset.References[i];
-                    if (reference == null)
-                    {
-                        continue;
-                    }
-
-                    float weight = i < asset.ReferenceWeights.Count
-                        ? asset.ReferenceWeights[i]
-                        : NamerEditorConstants.DefaultReferenceWeight;
-
-                    if (!reference.isReadable)
-                    {
-                        return new NamerStylePostFitRunResult(cancelled: false, errorTextureName: reference.name, notExtracted: false);
-                    }
-
-                    Color[] pixels;
-                    try
-                    {
-                        pixels = reference.GetPixels();
-                    }
-                    catch (Exception)
-                    {
-                        return new NamerStylePostFitRunResult(cancelled: false, errorTextureName: reference.name, notExtracted: false);
-                    }
-
-                    NamerStylePostFit.AccumulateReference(referenceStats, pixels, weight);
-                    pixels = null; // T-05-02 extractor precedent: drop the buffer before the next ref.
-
-                    if (EditorUtility.DisplayCancelableProgressBar(
+                // Stage 1 — gather the reference pixels (extractor read discipline:
+                // isReadable pre-check so the failure is a named-texture result), then
+                // accumulate inline. The interactive bar doubles as the cancel surface,
+                // exactly as before the gather/accumulate split (05.3 threading).
+                if (!TryGatherPostFitReferences(
+                        asset,
+                        out Color[][] referencePixels,
+                        out float[] referenceWeights,
+                        out int referenceCount,
+                        out NamerStylePostFitRunResult gatherFailure,
+                        (name, done, total) => EditorUtility.DisplayCancelableProgressBar(
                             "Fitting NAMER Post Look",
-                            "Reading references (" + reference.name + ")",
-                            FitStageProgress(0, (float)(i + 1) / asset.References.Count)))
-                    {
-                        return new NamerStylePostFitRunResult(cancelled: true, errorTextureName: null, notExtracted: false);
-                    }
+                            "Reading references (" + name + ")",
+                            FitStageProgress(0, (float)done / total))))
+                {
+                    return gatherFailure;
                 }
+
+                NamerStylePostStats referenceStats = new NamerStylePostStats();
+                for (int i = 0; i < referenceCount; i++)
+                {
+                    NamerStylePostFit.AccumulateReference(referenceStats, referencePixels[i], referenceWeights[i]);
+                }
+                referencePixels = null; // T-05-02 extractor precedent: drop the buffers before the render stage.
 
                 // Stage 2 — forced-stylized recompute + sync readback. The flag is
                 // ALWAYS reset in the finally; the side effect is honest (the preview
@@ -2668,7 +2719,7 @@ namespace GraffitiEntertainment.Namer.Editor
                 // (the AO un-multiply divide can exceed 1) and the decomp/roughness
                 // float-RT readback convention.
                 AsyncGPUReadbackRequest request =
-                    NamerComputePipeline.RequestReadback(stylizedBase, 0, TextureFormat.RGBAFloat);
+                    NamerComputePipeline.RequestReadback(stylizedBase, 0, kStylizedReadbackFormat);
                 request.forcePlayerLoopUpdate = true;
                 request.WaitForCompletion();
                 if (request.hasError)
@@ -2696,6 +2747,206 @@ namespace GraffitiEntertainment.Namer.Editor
             finally
             {
                 EditorUtility.ClearProgressBar();
+            }
+        }
+
+        /// <summary>
+        /// Awaitable mirror of <see cref="RunStylePostFit"/> (05.3 threading): the same
+        /// three stages with the main thread released between them instead of blocked.
+        /// Stage 1 gathers reference pixels on the main thread (Unity texture reads) and
+        /// accumulates them on a worker; stage 2 runs the forced stylized recompute on
+        /// the main thread (GPU dispatch) and awaits the readback — the editor loop pumps
+        /// instead of sitting in <see cref="AsyncGPUReadbackRequest.WaitForCompletion"/>;
+        /// stage 3 fits on a worker. Continuations resume on the main thread through
+        /// Unity's synchronization context, so the Unity API calls between awaits stay
+        /// main-thread. Shows NO progress bar itself — the caller paints through
+        /// <paramref name="reportProgress"/> and cancels through
+        /// <paramref name="shouldCancel"/> (the Decompose/Validate update ticks). Failure
+        /// buckets are identical to the blocking path.
+        /// </summary>
+        internal async Task<NamerStylePostFitRunResult> RunStylePostFitAsync(
+            NamerStyleAsset asset,
+            Func<bool> shouldCancel = null,
+            Action<float, string> reportProgress = null)
+        {
+            if (asset == null)
+            {
+                return new NamerStylePostFitRunResult(cancelled: false, errorTextureName: null, notExtracted: true);
+            }
+
+            if (!HasLoadableSource || !HasStylizedOutput(_settings))
+            {
+                return new NamerStylePostFitRunResult(cancelled: false, errorTextureName: null, notExtracted: true);
+            }
+
+            // Extract's first-line precedent (T-05-03): sanitize a hand-edited asset
+            // before any weight or reference is read.
+            asset.ClampToCaps();
+
+            string exemplarName = _selection.name;
+
+            // Stage 1 — gather on the main thread, accumulate on a worker.
+            if (!TryGatherPostFitReferences(
+                    asset,
+                    out Color[][] referencePixels,
+                    out float[] referenceWeights,
+                    out int referenceCount,
+                    out NamerStylePostFitRunResult gatherFailure,
+                    (name, done, total) =>
+                    {
+                        ReportPostFitProgress(reportProgress, 0, (float)done / total, "Reading references (" + name + ")");
+                        return shouldCancel != null && shouldCancel();
+                    }))
+            {
+                return gatherFailure;
+            }
+
+            Color[][] pixels = referencePixels;
+            float[] weights = referenceWeights;
+            int count = referenceCount;
+            NamerStylePostStats referenceStats = await Task.Run(() =>
+            {
+                NamerStylePostStats stats = new NamerStylePostStats();
+                for (int i = 0; i < count; i++)
+                {
+                    NamerStylePostFit.AccumulateReference(stats, pixels[i], weights[i]);
+                }
+
+                return stats;
+            });
+            // The gathered buffers die with this method's scope once the worker is done
+            // (T-05-02 precedent: nothing holds them into the render stage).
+
+            // Stage 2 — forced-stylized recompute + awaitable readback. The flag is
+            // ALWAYS reset in the finally; the side effect is honest (the preview pane
+            // keeps showing the stylized result that was just fitted).
+            ReportPostFitProgress(reportProgress, 1, 0f, "Rendering stylized preview");
+            if (shouldCancel != null && shouldCancel())
+            {
+                return new NamerStylePostFitRunResult(cancelled: true, errorTextureName: null, notExtracted: false);
+            }
+
+            _forceStylizeForFit = true;
+            try
+            {
+                RecomputePreview();
+            }
+            finally
+            {
+                _forceStylizeForFit = false;
+            }
+
+            RenderTexture stylizedBase = (RenderTexture)ResolveStylizePreviewBase(_liveResult);
+            if (stylizedBase == null)
+            {
+                throw new InvalidOperationException(
+                    "the stylized preview of '" + exemplarName + "' produced no result; no fit was written");
+            }
+
+            AsyncGPUReadbackRequest request =
+                await NamerComputePipeline.RequestReadbackAsync(stylizedBase, 0, kStylizedReadbackFormat);
+            if (request.hasError)
+            {
+                throw new InvalidOperationException(
+                    "GPU readback of the stylized preview of '" + exemplarName + "' failed; no fit was written");
+            }
+
+            Color[] readbackColors = request.GetData<Color>().ToArray();
+
+            // Stage 3 — deterministic fit on a worker.
+            ReportPostFitProgress(reportProgress, 2, 0f, "Fitting parameters");
+            if (shouldCancel != null && shouldCancel())
+            {
+                return new NamerStylePostFitRunResult(cancelled: true, errorTextureName: null, notExtracted: false);
+            }
+
+            string fingerprint = asset.ComputeFingerprint();
+            NamerStylePostFitParams fitted = await Task.Run(() =>
+                NamerStylePostFit.Fit(
+                    NamerStylePostFit.AccumulateSource(readbackColors), referenceStats, fingerprint));
+            return new NamerStylePostFitRunResult(fitted, exemplarName);
+        }
+
+        /// <summary>
+        /// Stage-1 gather for the post-fit seam (05.3 threading): reads every non-null
+        /// reference's pixels on the calling (main) thread with the extractor read
+        /// discipline (isReadable pre-check so a failure is a named-texture result),
+        /// producing compacted slot-order buffers plus their weights — valid for the
+        /// first <paramref name="gatheredCount"/> entries (null slots are skipped exactly
+        /// as the pre-split loop skipped them). <paramref name="progressCancel"/> receives
+        /// (name, doneSlots, totalSlots) after each successful read; returning true aborts
+        /// with the cancelled bucket. Returns false with <paramref name="failure"/> set for
+        /// an unreadable texture, a failed read, or a cancel; true means the buffers are
+        /// valid. Shared by the blocking <see cref="RunStylePostFit"/> and the awaitable
+        /// <see cref="RunStylePostFitAsync"/> so the reference-read contract lives once.
+        /// </summary>
+        private static bool TryGatherPostFitReferences(
+            NamerStyleAsset asset,
+            out Color[][] pixels,
+            out float[] weights,
+            out int gatheredCount,
+            out NamerStylePostFitRunResult failure,
+            Func<string, int, int, bool> progressCancel = null)
+        {
+            int slotCount = asset.References.Count;
+            pixels = new Color[slotCount][];
+            weights = new float[slotCount];
+            gatheredCount = 0;
+            failure = null;
+
+            for (int i = 0; i < slotCount; i++)
+            {
+                Texture2D reference = asset.References[i];
+                if (reference == null)
+                {
+                    continue;
+                }
+
+                float weight = i < asset.ReferenceWeights.Count
+                    ? asset.ReferenceWeights[i]
+                    : NamerEditorConstants.DefaultReferenceWeight;
+
+                if (!reference.isReadable)
+                {
+                    failure = new NamerStylePostFitRunResult(cancelled: false, errorTextureName: reference.name, notExtracted: false);
+                    return false;
+                }
+
+                Color[] read;
+                try
+                {
+                    read = reference.GetPixels();
+                }
+                catch (Exception)
+                {
+                    failure = new NamerStylePostFitRunResult(cancelled: false, errorTextureName: reference.name, notExtracted: false);
+                    return false;
+                }
+
+                pixels[gatheredCount] = read;
+                weights[gatheredCount] = weight;
+                gatheredCount++;
+
+                if (progressCancel != null && progressCancel(reference.name, i + 1, slotCount))
+                {
+                    failure = new NamerStylePostFitRunResult(cancelled: true, errorTextureName: null, notExtracted: false);
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Null-safe progress forwarder for <see cref="RunStylePostFitAsync"/>: maps a
+        /// (stage, fraction) pair through <see cref="FitStageProgress"/> onto the caller's
+        /// report callback (05.3 threading — the caller paints the bar).
+        /// </summary>
+        private static void ReportPostFitProgress(Action<float, string> reportProgress, int stageIndex, float fraction, string phase)
+        {
+            if (reportProgress != null)
+            {
+                reportProgress(FitStageProgress(stageIndex, fraction), phase);
             }
         }
 
@@ -3070,7 +3321,14 @@ namespace GraffitiEntertainment.Namer.Editor
             }
         }
 
-        private void RunProcess()
+        /// <summary>
+        /// Threaded in-window Process entry (05.3 threading): the same orchestration
+        /// as the menu path, awaited so the editor loop keeps pumping under the
+        /// disabled "Processing…" button (no beachball). The <c>_busy</c> guard set
+        /// before the await keeps the button disabled for the whole run; the status
+        /// plumbing, warning logs, and preview refresh are unchanged.
+        /// </summary>
+        private async void RunProcess()
         {
             if (_busy)
             {
@@ -3084,7 +3342,7 @@ namespace GraffitiEntertainment.Namer.Editor
 
             try
             {
-                NamerProcessResult result = NamerProcessor.Process(_selection, _settings);
+                NamerProcessResult result = await NamerProcessor.ProcessAsync(_selection, _settings);
 
                 foreach (string warning in result.Warnings)
                 {

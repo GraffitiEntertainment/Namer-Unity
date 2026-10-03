@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
@@ -40,6 +41,61 @@ namespace GraffitiEntertainment.Namer.Editor
         /// written paths, warnings, and any blocking error rather than throwing.
         /// </summary>
         public static NamerProcessResult Process(UnityEngine.Object selection, NamerProcessorSettings settings)
+        {
+            // Completed-task contract (05.3 threading): the core's ONLY awaits are on
+            // the seams injected by CreateSyncSeams (already-completed tasks around
+            // the blocking calls), so the core never yields, never posts a
+            // continuation to Unity's synchronization context, and the task below is
+            // complete when it returns — GetResult cannot deadlock. DO NOT add any
+            // other await to ProcessCoreAsync — that breaks this guarantee.
+            return ProcessCoreAsync(selection, settings, null, null, CreateSyncSeams())
+                .GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Awaitable mirror of <see cref="Process"/> (05.3 threading): the identical
+        /// validate -&gt; inspect -&gt; process -&gt; generate orchestration with the AO bake
+        /// (Burst worker thread), the projection readback/fit/residual, the
+        /// legacy-branch readbacks, and the generation readbacks released to the
+        /// editor loop instead of blocking it. Continuations resume on the main
+        /// thread (Unity's synchronization context), so every GPU dispatch and
+        /// AssetDatabase call stays main-thread; results are identical to
+        /// <see cref="Process"/> on the same inputs. A user cancel surfaces as a
+        /// warning (cancelled between materials — completed materials keep their
+        /// assets) or as <see cref="NamerProcessResult.Error"/> (cancelled
+        /// mid-material, thrown by the pipeline as
+        /// <see cref="InvalidOperationException"/> and caught here) — never as
+        /// partially-written assets. <paramref name="reportProgress"/> receives the
+        /// overall fraction and phase message for a cancellable progress bar.
+        /// </summary>
+        public static Task<NamerProcessResult> ProcessAsync(
+            UnityEngine.Object selection,
+            NamerProcessorSettings settings,
+            Func<bool> shouldCancel = null,
+            Action<float, string> reportProgress = null)
+        {
+            return ProcessCoreAsync(selection, settings, shouldCancel, reportProgress, CreateAsyncSeams(shouldCancel, reportProgress));
+        }
+
+        /// <summary>
+        /// The single processing implementation shared by <see cref="Process"/> and
+        /// <see cref="ProcessAsync"/>. <paramref name="seams"/> carries the ONLY await
+        /// points (see <see cref="ProcessSeams"/>): the sync entry point injects
+        /// already-completed tasks so the whole core runs inline (the wrapper's
+        /// completed-task contract), the awaitable entry point injects the awaitable
+        /// mirrors. Everything else is synchronous main-thread orchestration
+        /// (inspect, preflight, mesh resolution, stylization plumbing, warnings,
+        /// binding, disposal). <paramref name="shouldCancel"/> is polled between
+        /// materials — a cancel stops the batch gracefully (warning + break);
+        /// <paramref name="reportProgress"/> receives the per-material fraction and
+        /// the pipeline's phase messages.
+        /// </summary>
+        private static async Task<NamerProcessResult> ProcessCoreAsync(
+            UnityEngine.Object selection,
+            NamerProcessorSettings settings,
+            Func<bool> shouldCancel,
+            Action<float, string> reportProgress,
+            ProcessSeams seams)
         {
             var result = new NamerProcessResult();
 
@@ -150,8 +206,29 @@ namespace GraffitiEntertainment.Namer.Editor
                     ? MeshVertexSplitter.Split(decomposeSourceMesh)
                     : null;
 
+                int totalMaterials = model.Materials.Count;
+                int materialIndex = 0;
                 foreach (NamerMaterialInspection inspection in model.Materials)
                 {
+                    // 05.3 threading: cancel BETWEEN materials is a graceful stop, not
+                    // an error — completed materials keep their generated assets and
+                    // the caller sees exactly where the run stopped. Mid-material
+                    // cancels surface as pipeline InvalidOperationExceptions instead.
+                    if (shouldCancel != null && shouldCancel())
+                    {
+                        result.Warnings.Add("Cancelled after " + result.MaterialCount
+                            + " material(s); remaining materials were not processed.");
+                        break;
+                    }
+
+                    if (reportProgress != null)
+                    {
+                        reportProgress(
+                            (float)materialIndex / totalMaterials,
+                            "Processing material '" + (inspection.Material != null ? inspection.Material.name : "(null)")
+                                + "' (" + (materialIndex + 1) + "/" + totalMaterials + ")...");
+                    }
+
                     // 2026-09-21 contract: the AO stage checkbox gates SYNTHESIS only
                     // (bake vs white fill, in the D-07 gate) — never the authored-map
                     // transfer — so the un-multiply strength passes through unchanged:
@@ -203,7 +280,7 @@ namespace GraffitiEntertainment.Namer.Editor
                         decompPipeline = new NamerDecompPipeline();
                         if (projectionPath)
                         {
-                            projection = CreateProjectionContext(
+                            projection = seams.CreateProjection(
                                 fitSplit, decompPipeline, baseW, baseH,
                                 settings.ErrorThreshold, settings.ResidualResolution, settings.WriteResidual,
                                 settings.CoverageTarget);
@@ -228,7 +305,14 @@ namespace GraffitiEntertainment.Namer.Editor
 
                     try
                     {
-                    NamerComputeResult computeResult = pipeline.Process(inspection, projection, stylization);
+                    // 05.3 threading: the pipeline reports its internal (bake) fraction;
+                    // compose it into the overall per-material fraction so the bar stays
+                    // monotone across materials.
+                    Action<float, string> materialProgress = reportProgress != null
+                        ? (fraction, phase) => reportProgress((materialIndex + fraction) / totalMaterials, phase)
+                        : null;
+                    NamerComputeResult computeResult = await seams.RunCompute(
+                        pipeline, inspection, projection, stylization, materialProgress);
                     try
                     {
                         NamerDecompData decomp = null;
@@ -286,17 +370,16 @@ namespace GraffitiEntertainment.Namer.Editor
                                     {
                                         // Legacy SobelEdge branch: readback -> fit ->
                                         // GenerateResidual, mode from settings.WriteResidual.
-                                        baseTexels = ReadBackBase(computeResult.NormalizedBaseColor);
+                                        baseTexels = await seams.ReadBase(computeResult.NormalizedBaseColor);
                                         NamerSplitResult split = fitSplit;
-                                        fit = VertexColorFitter.Fit(split, baseTexels, computeResult.Width, computeResult.Height);
+                                        fit = await seams.Fit(split, baseTexels, computeResult.Width, computeResult.Height);
                                         Color32[] colors = fit.ToColor32Array();
-                                        decompOutput = decompPipeline.GenerateResidual(
-                                            split, colors, computeResult.NormalizedBaseColor,
+                                        decompOutput = await seams.GenerateResidual(
+                                            decompPipeline, split, colors, computeResult.NormalizedBaseColor,
                                             computeResult.Width, computeResult.Height,
                                             settings.ErrorThreshold, settings.ResidualResolution,
-                                            projectedOut: null,
-                                            mode: settings.WriteResidual ? NamerResidualMode.AlwaysKeep : NamerResidualMode.NeverKeep,
-                                            coverageTarget: settings.CoverageTarget);
+                                            settings.WriteResidual ? NamerResidualMode.AlwaysKeep : NamerResidualMode.NeverKeep,
+                                            settings.CoverageTarget);
                                         if (decompOutput.Stats.CannotDecompose)
                                         {
                                             // CR-03 fallback: near-zero rasterizer coverage means the
@@ -320,7 +403,7 @@ namespace GraffitiEntertainment.Namer.Editor
                                 }
                             }
 
-                            NamerGeneratedAsset asset = generator.Generate(computeResult, inspection, settings, destinationFolder, decomp);
+                            NamerGeneratedAsset asset = await seams.Generate(generator, computeResult, inspection, settings, destinationFolder, decomp);
                             result.GeneratedAssets.Add(asset);
 
                             // Surface the chosen residual resolution so a residual-resolution
@@ -340,8 +423,8 @@ namespace GraffitiEntertainment.Namer.Editor
                         }
                         finally
                         {
-                            // The residual RT is read back synchronously inside Generate, so
-                            // release it (and the pool) only after Generate returns.
+                            // The residual RT is read back inside Generate/GenerateAsync,
+                            // so release it (and the pool) only after that returns.
                             if (projection != null && projection.Decomp != null)
                             {
                                 projection.Decomp.Dispose();
@@ -380,6 +463,8 @@ namespace GraffitiEntertainment.Namer.Editor
                             decompPipeline.Dispose();
                         }
                     }
+
+                    materialIndex++;
                 }
 
                 // 05.2-03 R8: the Process-time companion-Volume regeneration block is
@@ -411,6 +496,85 @@ namespace GraffitiEntertainment.Namer.Editor
                 + (result.Warnings.Count > 0 ? " (" + result.Warnings.Count + " warning(s))" : string.Empty));
 
             return result;
+        }
+
+        /// <summary>
+        /// The await seams of <see cref="ProcessCoreAsync"/> (05.3 threading): one
+        /// delegate per blocking point, so the single core serves both the
+        /// synchronous <see cref="Process"/> (completed-task contract —
+        /// <see cref="CreateSyncSeams"/> injects already-completed tasks, the core
+        /// never yields, and the wrapper blocks safely) and the awaitable
+        /// <see cref="ProcessAsync"/> (<see cref="CreateAsyncSeams"/> injects the
+        /// awaitable mirrors, releasing the editor loop). Adding a new await to the
+        /// core REQUIRES a matching seam field here plus both factory assignments.
+        /// </summary>
+        private sealed class ProcessSeams
+        {
+            /// <summary>Projection-context factory: wires <c>Run</c> (sync) or <c>RunAsync</c>.</summary>
+            public Func<NamerSplitResult, NamerDecompPipeline, int, int, float, int, bool, float, NamerProjectionContext> CreateProjection;
+
+            /// <summary>Compute entry: <c>Process</c> (sync) or <c>ProcessAsync</c> (awaitable).</summary>
+            public Func<NamerComputePipeline, NamerMaterialInspection, NamerProjectionContext, NamerStyleStylization, Action<float, string>, Task<NamerComputeResult>> RunCompute;
+
+            /// <summary>Linear base-color readback: blocking (sync) or awaitable.</summary>
+            public Func<RenderTexture, Task<NativeArray<Color32>>> ReadBase;
+
+            /// <summary>Vertex-color fit: inline (sync) or Burst worker thread (awaitable).</summary>
+            public Func<NamerSplitResult, NativeArray<Color32>, int, int, Task<VertexColorFitResult>> Fit;
+
+            /// <summary>Legacy-branch residual generation: blocking (sync) or awaitable.</summary>
+            public Func<NamerDecompPipeline, NamerSplitResult, Color32[], RenderTexture, int, int, float, int, NamerResidualMode, float, Task<NamerDecompOutput>> GenerateResidual;
+
+            /// <summary>Asset generation: blocking (sync) or awaitable readbacks.</summary>
+            public Func<AssetGenerator, NamerComputeResult, NamerMaterialInspection, NamerProcessorSettings, string, NamerDecompData, Task<NamerGeneratedAsset>> Generate;
+        }
+
+        /// <summary>
+        /// The synchronous seam set injected by <see cref="Process"/>: every delegate
+        /// runs the original blocking call and wraps it in an already-completed task
+        /// (the completed-task contract), so <see cref="ProcessCoreAsync"/> runs
+        /// inline and its returned task is complete.
+        /// </summary>
+        private static ProcessSeams CreateSyncSeams()
+        {
+            return new ProcessSeams
+            {
+                CreateProjection = CreateProjectionContext,
+                RunCompute = (compute, insp, projection, stylization, _) =>
+                    Task.FromResult(compute.Process(insp, projection, stylization)),
+                ReadBase = source => Task.FromResult(ReadBackBase(source)),
+                Fit = (split, texels, w, h) => Task.FromResult(VertexColorFitter.Fit(split, texels, w, h)),
+                GenerateResidual = (decomp, split, colors, baseLinear, w, h, errorThreshold, manualResolution, mode, coverageTarget) =>
+                    Task.FromResult(decomp.GenerateResidual(
+                        split, colors, baseLinear, w, h, errorThreshold, manualResolution,
+                        projectedOut: null, mode: mode, coverageTarget: coverageTarget)),
+                Generate = (generator, computeResult, insp, settings, destinationFolder, decomp) =>
+                    Task.FromResult(generator.Generate(computeResult, insp, settings, destinationFolder, decomp)),
+            };
+        }
+
+        /// <summary>
+        /// The awaitable seam set injected by <see cref="ProcessAsync"/>: the
+        /// projection fit/residual, the legacy-branch readback/fit, and the
+        /// generation readbacks all release the editor loop, with cancellation and
+        /// progress threaded through to <see cref="NamerComputePipeline.ProcessAsync"/>.
+        /// </summary>
+        private static ProcessSeams CreateAsyncSeams(Func<bool> shouldCancel, Action<float, string> reportProgress)
+        {
+            return new ProcessSeams
+            {
+                CreateProjection = CreateProjectionContextAsync,
+                RunCompute = (compute, insp, projection, stylization, progress) =>
+                    compute.ProcessAsync(insp, projection, stylization, shouldCancel, progress),
+                ReadBase = ReadBackBaseAsync,
+                Fit = FitOnWorkerAsync,
+                GenerateResidual = (decomp, split, colors, baseLinear, w, h, errorThreshold, manualResolution, mode, coverageTarget) =>
+                    decomp.GenerateResidualAsync(
+                        split, colors, baseLinear, w, h, errorThreshold, manualResolution,
+                        projectedOut: null, mode: mode, coverageTarget: coverageTarget),
+                Generate = (generator, computeResult, insp, settings, destinationFolder, decomp) =>
+                    generator.GenerateAsync(computeResult, insp, settings, destinationFolder, decomp),
+            };
         }
 
         /// <summary>
@@ -605,6 +769,9 @@ namespace GraffitiEntertainment.Namer.Editor
             AssetDatabase.CreateFolder(parent, folderName);
         }
 
+        /// <summary>Blocking error message for a failed decomposition base readback.</summary>
+        private const string kDecomposeReadbackFailedMessage = "GPU readback failed while decomposing; no files were written.";
+
         /// <summary>
         /// Reads the linear base-color render target back as RGBA32 texels for the
         /// vertex-color fit. Throws on a failed readback so no files are written on a
@@ -616,12 +783,54 @@ namespace GraffitiEntertainment.Namer.Editor
             request.forcePlayerLoopUpdate = true;
             request.WaitForCompletion();
 
+            return FinishReadBackBase(request);
+        }
+
+        /// <summary>
+        /// Awaitable mirror of <see cref="ReadBackBase"/> (05.3 threading): the same
+        /// RGBA32 request released to the editor loop via
+        /// <see cref="NamerComputePipeline.RequestReadbackAsync"/> instead of blocking
+        /// in <see cref="AsyncGPUReadbackRequest.WaitForCompletion"/>. Unlike the sync
+        /// twin (which consumes the request's buffer view in the same tick), this
+        /// returns a Persistent copy: the view is main-thread/frame scoped, and the
+        /// fit worker (<see cref="FitOnWorkerAsync"/>) schedules jobs with it after
+        /// this continuation resumes on a later tick — racing the main thread's frame
+        /// flush, which invalidated the view mid-fit ("ErrorJob.BaseTexels has been
+        /// deallocated"). The copy is byte-identical, so fit results are unchanged.
+        /// </summary>
+        private static async Task<NativeArray<Color32>> ReadBackBaseAsync(RenderTexture source)
+        {
+            AsyncGPUReadbackRequest request = await NamerComputePipeline.RequestReadbackAsync(source, 0, TextureFormat.RGBA32);
+            NativeArray<Color32> view = FinishReadBackBase(request);
+
+            return new NativeArray<Color32>(view, Allocator.Persistent);
+        }
+
+        /// <summary>
+        /// Shared tail of <see cref="ReadBackBase"/> and <see cref="ReadBackBaseAsync"/>:
+        /// error gate + RGBA32 texel view. Throws on a failed readback so no files are
+        /// written on a GPU error.
+        /// </summary>
+        private static NativeArray<Color32> FinishReadBackBase(AsyncGPUReadbackRequest request)
+        {
             if (request.hasError)
             {
-                throw new InvalidOperationException("GPU readback failed while decomposing; no files were written.");
+                throw new InvalidOperationException(kDecomposeReadbackFailedMessage);
             }
 
             return request.GetData<Color32>();
+        }
+
+        /// <summary>
+        /// Runs the Burst vertex-color fit on a worker thread (05.3 threading): the
+        /// per-triangle least-squares is pure CPU Burst math over the seam-safe split
+        /// and the read-back texels with no main-thread-only API (the fit's jobs
+        /// already read these arrays from job workers synchronously). Shared by the
+        /// async projection callback and the async legacy Sobel branch.
+        /// </summary>
+        private static Task<VertexColorFitResult> FitOnWorkerAsync(NamerSplitResult split, NativeArray<Color32> texels, int w, int h)
+        {
+            return Task.Run(() => VertexColorFitter.Fit(split, texels, w, h));
         }
 
         /// <summary>
@@ -666,6 +875,59 @@ namespace GraffitiEntertainment.Namer.Editor
                     {
                         context.Colors = fit.ToColor32Array();
                         context.Decomp = decomp.GenerateResidual(
+                            split, context.Colors, sourceBase, w, h,
+                            context.ErrorThreshold, context.ManualResolution, projectedOut,
+                            context.WriteResidual ? NamerResidualMode.AlwaysKeep : NamerResidualMode.NeverKeep,
+                            context.CoverageTarget);
+                    }
+                }
+                finally
+                {
+                    texels.Dispose();
+                }
+            };
+
+            return context;
+        }
+
+        /// <summary>
+        /// Awaitable mirror of <see cref="CreateProjectionContext"/> (05.3 threading),
+        /// injected by <see cref="ProcessAsync"/>: builds the SAME context (identical
+        /// fields, mode mapping, and residual semantics) but wires only
+        /// <see cref="NamerProjectionContext.RunAsync"/> — the readback released to
+        /// the editor loop (<see cref="ReadBackBaseAsync"/>), the fit on a Burst
+        /// worker thread (<see cref="FitOnWorkerAsync"/>), and the awaitable residual
+        /// (<see cref="NamerDecompPipeline.GenerateResidualAsync"/>). Continuations
+        /// resume on the main thread; results are identical to the sync callback's.
+        /// </summary>
+        internal static NamerProjectionContext CreateProjectionContextAsync(
+            NamerSplitResult split,
+            NamerDecompPipeline decomp,
+            int w,
+            int h,
+            float errorThreshold,
+            int residualResolution,
+            bool writeResidual,
+            float coverageTarget = NamerEditorConstants.DefaultCoverageTarget)
+        {
+            var context = new NamerProjectionContext
+            {
+                Split = split,
+                ErrorThreshold = errorThreshold,
+                CoverageTarget = coverageTarget,
+                ManualResolution = residualResolution,
+                WriteResidual = writeResidual,
+            };
+
+            context.RunAsync = async (sourceBase, projectedOut) =>
+            {
+                NativeArray<Color32> texels = await ReadBackBaseAsync(sourceBase);
+                try
+                {
+                    using (VertexColorFitResult fit = await FitOnWorkerAsync(split, texels, w, h))
+                    {
+                        context.Colors = fit.ToColor32Array();
+                        context.Decomp = await decomp.GenerateResidualAsync(
                             split, context.Colors, sourceBase, w, h,
                             context.ErrorThreshold, context.ManualResolution, projectedOut,
                             context.WriteResidual ? NamerResidualMode.AlwaysKeep : NamerResidualMode.NeverKeep,

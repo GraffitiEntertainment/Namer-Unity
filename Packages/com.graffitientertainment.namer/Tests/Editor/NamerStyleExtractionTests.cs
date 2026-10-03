@@ -358,6 +358,115 @@ namespace GraffitiEntertainment.Namer.Tests
             }
         }
 
+        [Test]
+        public void BuildAnchors_PopulatedHueRange_IsTiledByGradientAnchors()
+        {
+            // 05.3 palette-gradient spec (option B): a hue range that carries real
+            // reference mass — the live outdoors references hold 21.6% of texels in
+            // greens spanning hue 0.251..0.473 while warm/brown clusters carry more
+            // mass per bin — must be tiled by multiple chromatic anchors, not
+            // starved by top-K-mass init (the nearest-anchor hue-only transfer then
+            // leaves those greens pinned to a single olive anchor). Synthetic 16^3
+            // histogram mirroring that shape: warm family 50% split across five
+            // equally heavy bins, green ramp 35% across ten bins with mid-concentrated
+            // mass (hue ~0.271..0.458, mass-weighted median ~0.354), blue 15%, and
+            // two achromatic grays — so top-K-mass init spends all six chromatic
+            // slots on blue+warm and both achromatic slots on gray, leaving the
+            // green ramp without a single anchor.
+            const int BinCount = 16;
+            const float kWarmBinMass = 1000f;
+            const int kWarmGreenFirst = 5;
+            const int kWarmGreenLast = 9;
+            const float kBlueBinMass = 1500f;
+            const float kGrayHighBinMass = 800f;
+            const float kGrayLowBinMass = 400f;
+            float[] kGreenRampBinMasses =
+            {
+                125f, 188f, 313f, 500f, 625f, 625f, 500f, 313f, 188f, 125f,
+            };
+            const int kGreenRampRed = 4;
+            const int kGreenRampGreen = 12;
+            const int kGreenRampBlueFirst = 1;
+            const float kGreenRangeHueMin = 0.25f;
+            const float kGreenRangeHueMax = 0.47f;
+            const float kRampMedianHue = 0.354f;
+            const int kGreenAnchorMinimum = 2;
+            const float kMedianHueTolerance = 0.05f;
+            const float kEndCoverageTolerance = 0.10f;
+            const float kRampBottomHue = 0.271f;
+            const float kRampTopHue = 0.458f;
+
+            var histogram = new float[BinCount * BinCount * BinCount];
+            for (int g = kWarmGreenFirst; g <= kWarmGreenLast; g++)
+            {
+                histogram[BinIndex(15, g, 0)] += kWarmBinMass;
+            }
+
+            histogram[BinIndex(3, 6, 12)] += kBlueBinMass;
+            histogram[BinIndex(8, 8, 8)] += kGrayHighBinMass;
+            histogram[BinIndex(4, 4, 4)] += kGrayLowBinMass;
+            for (int i = 0; i < kGreenRampBinMasses.Length; i++)
+            {
+                histogram[BinIndex(kGreenRampRed, kGreenRampGreen, kGreenRampBlueFirst + i)] += kGreenRampBinMasses[i];
+            }
+
+            NamerStyleAnchor[] anchors = NamerStyleExtractor.BuildAnchors(histogram);
+            Assert.IsNotNull(anchors);
+            int greenAnchors = 0;
+            foreach (NamerStyleAnchor anchor in anchors)
+            {
+                if (anchor.Saturation >= kChromaticSaturationFloor
+                    && anchor.Hue >= kGreenRangeHueMin
+                    && anchor.Hue <= kGreenRangeHueMax)
+                {
+                    greenAnchors++;
+                }
+            }
+
+            Assert.GreaterOrEqual(greenAnchors, kGreenAnchorMinimum,
+                "a populated hue range carrying 35% of the mass must be tiled by >= 2 chromatic anchors " +
+                "(a gradient), not starved by warm-mass clusters (found " + greenAnchors + ")");
+
+            float medianDistance = CircularHueDistance(NearestAnchorHue(anchors, kRampMedianHue), kRampMedianHue);
+            Assert.LessOrEqual(medianDistance, kMedianHueTolerance,
+                "an anchor must sit at the green mass median (~" + kRampMedianHue + ") so mid-range greens " +
+                "transfer to a genuinely green anchor (nearest-anchor hue distance " + medianDistance.ToString("F3") + ")");
+            float bottomDistance = CircularHueDistance(NearestAnchorHue(anchors, kRampBottomHue), kRampBottomHue);
+            float topDistance = CircularHueDistance(NearestAnchorHue(anchors, kRampTopHue), kRampTopHue);
+            Assert.LessOrEqual(Mathf.Max(bottomDistance, topDistance), kEndCoverageTolerance,
+                "the ramp's hue extremes must each stay within " + kEndCoverageTolerance + " of some anchor " +
+                "(bottom distance " + bottomDistance.ToString("F3") + ", top distance " + topDistance.ToString("F3") + ")");
+        }
+
+        private static int BinIndex(int rBin, int gBin, int bBin)
+        {
+            const int BinsPerChannel = 16;
+            return (rBin * BinsPerChannel + gBin) * BinsPerChannel + bBin;
+        }
+
+        private static float NearestAnchorHue(NamerStyleAnchor[] anchors, float hue)
+        {
+            float nearest = anchors[0].Hue;
+            float nearestDistance = float.MaxValue;
+            foreach (NamerStyleAnchor anchor in anchors)
+            {
+                float distance = CircularHueDistance(anchor.Hue, hue);
+                if (distance < nearestDistance)
+                {
+                    nearestDistance = distance;
+                    nearest = anchor.Hue;
+                }
+            }
+
+            return nearest;
+        }
+
+        private static float CircularHueDistance(float a, float b)
+        {
+            float delta = Mathf.Abs(a - b);
+            return delta <= 0.5f ? delta : 1f - delta;
+        }
+
         private static bool NeverCancel()
         {
             return false;

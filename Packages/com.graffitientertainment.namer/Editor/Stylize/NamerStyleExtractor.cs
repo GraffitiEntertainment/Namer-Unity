@@ -320,12 +320,18 @@ namespace GraffitiEntertainment.Namer.Editor
         }
 
         /// <summary>
-        /// Builds the <see cref="kAnchorCount"/> palette anchors: deterministic top-K
-        /// histogram init (weighted count descending, ties broken by bin index
-        /// ascending — never dictionary-iteration order) with
-        /// <see cref="kAchromaticAnchorSlots"/> slots reserved for achromatic/low-sat
-        /// bins, followed by <see cref="kKMeansIterations"/> fixed Lloyd iterations over
-        /// the bin centers. No random number generation anywhere.
+        /// Builds the <see cref="kAnchorCount"/> palette anchors: deterministic
+        /// hue-quantile init — the occupied chromatic bins are walked in hue order
+        /// (ties by bin index ascending, never dictionary-iteration order) and the
+        /// <see cref="kChromaticAnchorSlots"/> chromatic seeds are placed at
+        /// equal-mass quantile targets along that walk, so the anchors tile the
+        /// populated chromatic hue ranges as a gradient instead of collapsing onto
+        /// the heaviest clusters. Duplicate seed bins deduplicate, remaining
+        /// chromatic slots backfill from the mass-ranked bins, and
+        /// <see cref="kAchromaticAnchorSlots"/> slots stay reserved for
+        /// achromatic/low-sat bins (ranked by mass), followed by
+        /// <see cref="kKMeansIterations"/> fixed Lloyd iterations over the bin
+        /// centers. No random number generation anywhere.
         /// Internal (05.3-03): reused verbatim by <see cref="NamerStyleDecomposer"/>
         /// over the de-graded histogram (D-02/D-04 — one palette-clustering home, so
         /// the decomposer's anchors cannot drift from the extractor's).
@@ -334,6 +340,7 @@ namespace GraffitiEntertainment.Namer.Editor
         {
             List<int> chromaticBins = new List<int>();
             List<int> achromaticBins = new List<int>();
+            float[] chromaticHueDegrees = new float[kHistogramBinCount];
             for (int bin = 0; bin < kHistogramBinCount; bin++)
             {
                 if (histogram[bin] > 0f)
@@ -345,6 +352,7 @@ namespace GraffitiEntertainment.Namer.Editor
                     if (saturation >= kAchromaticSaturationThreshold)
                     {
                         chromaticBins.Add(bin);
+                        chromaticHueDegrees[bin] = hueDegrees;
                     }
                     else
                     {
@@ -357,30 +365,66 @@ namespace GraffitiEntertainment.Namer.Editor
             chromaticBins.Sort(massOrder);
             achromaticBins.Sort(massOrder);
 
-            // Fixed slot layout: chromatic slots first, achromatic slots last; shortfall
-            // in either pool is backfilled from the other pool's ranked leftovers, and
-            // any still-empty slot seeds at neutral gray (weight zero after Lloyd).
-            List<int> initBins = new List<int>(kAnchorCount);
-            int chromaticTake = Math.Min(kChromaticAnchorSlots, chromaticBins.Count);
-            int achromaticTake = Math.Min(kAchromaticAnchorSlots, achromaticBins.Count);
-            for (int i = 0; i < chromaticTake; i++)
+            // Chromatic seeds at equal-mass hue quantiles (05.3 option B): walk the
+            // occupied chromatic bins in hue order and seed each chromatic slot at
+            // the first unseeded bin whose cumulative mass reaches (slot + 0.5) /
+            // slots of the total. A populated hue range carrying moderate mass (the
+            // live references' greens: 21.6% of texels across hue 0.251..0.473)
+            // earns anchors inside the range, where top-K-by-mass init starved it
+            // behind heavier warm clusters and the hue-only palette transfer then
+            // pinned those greens to a single olive anchor. Seeds only ever land on
+            // occupied bins, so even a Lloyd-unclaimed seed reports a populated hue.
+            List<int> hueOrder = new List<int>(chromaticBins);
+            hueOrder.Sort((a, b) =>
             {
-                initBins.Add(chromaticBins[i]);
+                int byHue = chromaticHueDegrees[a].CompareTo(chromaticHueDegrees[b]);
+                return byHue != 0 ? byHue : a.CompareTo(b);
+            });
+            float totalChromaticMass = 0f;
+            for (int i = 0; i < hueOrder.Count; i++)
+            {
+                totalChromaticMass += histogram[hueOrder[i]];
             }
 
+            List<int> initBins = new List<int>(kAnchorCount);
+            for (int slot = 0; slot < kChromaticAnchorSlots && hueOrder.Count > 0; slot++)
+            {
+                float target = (slot + 0.5f) * totalChromaticMass / kChromaticAnchorSlots;
+                float cumulative = 0f;
+                for (int i = 0; i < hueOrder.Count; i++)
+                {
+                    cumulative += histogram[hueOrder[i]];
+                    if (cumulative >= target && !initBins.Contains(hueOrder[i]))
+                    {
+                        initBins.Add(hueOrder[i]);
+                        break;
+                    }
+                }
+            }
+
+            // Achromatic slots stay mass-ranked; any still-empty slot backfills from
+            // the other pool's ranked leftovers (skipping already-seeded bins), and
+            // any remaining slot seeds at neutral gray (weight zero after Lloyd).
+            int achromaticTake = Math.Min(kAchromaticAnchorSlots, achromaticBins.Count);
             for (int i = 0; i < achromaticTake; i++)
             {
                 initBins.Add(achromaticBins[i]);
             }
 
-            for (int i = chromaticTake; i < chromaticBins.Count && initBins.Count < kAnchorCount; i++)
+            for (int i = 0; i < chromaticBins.Count && initBins.Count < kAnchorCount; i++)
             {
-                initBins.Add(chromaticBins[i]);
+                if (!initBins.Contains(chromaticBins[i]))
+                {
+                    initBins.Add(chromaticBins[i]);
+                }
             }
 
-            for (int i = achromaticTake; i < achromaticBins.Count && initBins.Count < kAnchorCount; i++)
+            for (int i = 0; i < achromaticBins.Count && initBins.Count < kAnchorCount; i++)
             {
-                initBins.Add(achromaticBins[i]);
+                if (!initBins.Contains(achromaticBins[i]))
+                {
+                    initBins.Add(achromaticBins[i]);
+                }
             }
 
             Color[] centers = new Color[kAnchorCount];
